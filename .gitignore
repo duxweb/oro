@@ -1,0 +1,57 @@
+# macOS / Windows
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100/
+.Trashes/
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editors / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go
+*.test
+coverage.out
+coverage.*
+*.cover
+*.coverprofile
+*.prof
+*.pprof
+bin/
+tmp/
+.tmp/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Node / Astro docs
+node_modules/
+dist/
+.astro/
+docs/node_modules/
+docs/dist/
+docs/.astro/
+.vercel/
+.netlify/
+
+# Logs / local env
+*.log
+logs/
+.env
+.env.*
+!.env.example
+
+# Local planning / progress notes
+plan/

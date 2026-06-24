@@ -1,0 +1,67 @@
+---
+title: Hooks & Events
+description: Model lifecycle hooks, global event subscriptions, and SQL events.
+---
+
+Hooks are model methods. Events are global subscriptions registered on `DB`.
+
+## Model hooks
+
+```go
+func (p *Product) BeforeCreate(ctx context.Context, h *oro.Hook) error {
+    if p.Code == "" {
+        return errors.New("code is required")
+    }
+    return nil
+}
+
+func (p *Product) AfterCreate(ctx context.Context, h *oro.Hook) error {
+    return nil
+}
+```
+
+Hooks run for model operations such as `db.Use[Product]().Create(...)`. They do not run for `Table` or `Raw` operations.
+
+Common use cases:
+
+- validate model invariants;
+- fill computed fields;
+- normalize values;
+- enqueue side effects after successful writes.
+
+## Skip hooks
+
+```go
+_, err := db.Use[Product]().SkipHooks().Create(ctx, product)
+```
+
+Use this for imports, repair scripts, or trusted internal paths.
+
+## Global events
+
+```go
+db.On(oro.EventAfterCreate, func(ctx context.Context, event oro.Event) error {
+    // publish domain event, invalidate cache, collect audit metadata, etc.
+    return nil
+})
+```
+
+Events are useful when behavior should be attached outside the model package.
+
+## Skip events
+
+```go
+_, err := db.Use[Product]().SkipEvents().Update(ctx, oro.Map{"Price": 120})
+```
+
+## SQL events
+
+SQL events allow logging and observability integrations without binding Oro to a specific logging framework.
+
+```go
+db.On(oro.EventSQL, func(ctx context.Context, event oro.Event) error {
+    return nil
+})
+```
+
+For application logging, prefer the `Logger` interface in config so `slog`, zap, zerolog, or a custom logger can be adapted cleanly.

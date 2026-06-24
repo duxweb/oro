@@ -1,0 +1,59 @@
+---
+title: Hooks 与事件
+description: 模型生命周期 Hook、全局事件订阅和 SQL 事件。
+---
+
+Hook 是模型方法，事件是注册在 `DB` 上的全局订阅。
+
+## 模型 Hook
+
+```go
+func (p *Product) BeforeCreate(ctx context.Context, h *oro.Hook) error {
+    if p.Code == "" {
+        return errors.New("code is required")
+    }
+    return nil
+}
+
+func (p *Product) AfterCreate(ctx context.Context, h *oro.Hook) error {
+    return nil
+}
+```
+
+Hook 只在模型操作中执行，例如 `db.Use[Product]().Create(...)`。`Table` 和 `Raw` 不执行模型 Hook。
+
+常见用途：校验模型不变量、填充计算字段、标准化值、写入后触发副作用。
+
+## 跳过 Hook
+
+```go
+_, err := db.Use[Product]().SkipHooks().Create(ctx, product)
+```
+
+适合导入、修复脚本或可信内部路径。
+
+## 全局事件
+
+```go
+db.On(oro.EventAfterCreate, func(ctx context.Context, event oro.Event) error {
+    return nil
+})
+```
+
+事件适合把行为挂在模型包外部，例如缓存失效、审计或领域事件发布。
+
+## 跳过事件
+
+```go
+_, err := db.Use[Product]().SkipEvents().Update(ctx, oro.Map{"Price": 120})
+```
+
+## SQL 事件
+
+```go
+db.On(oro.EventSQL, func(ctx context.Context, event oro.Event) error {
+    return nil
+})
+```
+
+日志建议优先通过配置里的 `Logger` 接口适配 `slog`、zap、zerolog 或自定义日志库。

@@ -1,0 +1,73 @@
+---
+title: 安装
+description: 安装 Oro 并配置 SQLite、MySQL 或 PostgreSQL。
+---
+
+## 要求
+
+Oro 开发阶段使用 Go `1.27rc1`。
+
+```bash title="go"
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+```
+
+## 添加模块
+
+```bash title="module"
+go get github.com/duxweb/oro
+```
+
+## 引入驱动
+
+```go
+import (
+    oro "github.com/duxweb/oro"
+    "github.com/duxweb/oro/driver/sqlite"
+    "github.com/duxweb/oro/driver/mysql"
+    "github.com/duxweb/oro/driver/pgsql"
+)
+```
+
+驱动是基于 `database/sql` 的适配层。ORM 层不绑定具体日志库或数据库连接实现细节。
+
+## SQLite
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+})
+```
+
+## MySQL
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {
+            Driver: mysql.Open("root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false"),
+        },
+    },
+})
+```
+
+## PostgreSQL
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {
+            Driver: pgsql.Open("postgres://root@localhost:5432/duxorm?sslmode=disable"),
+        },
+    },
+})
+```
+
+## 文档开发
+
+文档站使用 pnpm。
+
+```bash title="docs"
+cd docs && pnpm install && pnpm run dev
+```

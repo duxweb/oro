@@ -1,0 +1,57 @@
+---
+title: 测试矩阵
+description: 本地测试命令和 SQLite、MySQL、PostgreSQL 共享行为矩阵。
+---
+
+## 完整测试
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+go test ./...
+go test -race ./...
+```
+
+## 驱动测试
+
+```bash
+go test ./driver/sqlite
+go test ./driver/mysql
+go test ./driver/pgsql
+```
+
+MySQL 和 PostgreSQL 默认使用本地配置，也可以通过环境变量覆盖：
+
+```bash
+ORO_MYSQL_DSN='root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false'
+ORO_PGSQL_DSN='postgres://root@localhost:5432/duxorm?sslmode=disable'
+```
+
+| 驱动 | Host | 用户 | 密码 | 数据库 |
+| --- | --- | --- | --- | --- |
+| MySQL | `localhost` | `root` | `root` | `duxorm` |
+| PostgreSQL | `localhost` | `root` | 空 | `duxorm` |
+
+## 共享行为矩阵
+
+- 结构同步建表和加字段；
+- 模型和裸表 CRUD；
+- 创建返回值和插入主键；
+- 默认值和 nullable；
+- 批量创建和 upsert；
+- `Where`、`WhereGroup`、`WhereWhen`、关联过滤；
+- 分页、聚合、stream、chunk；
+- 事务、嵌套事务、锁；
+- join、子查询、group、having；
+- `HasOne`、`HasMany`、`BelongsTo`、`ManyToMany`；
+- 动态关系和中间表字段；
+- `With`、`For`、`WhereHas`、`WhereDoesntHave`；
+- 关系聚合；
+- JSON 查询和序列化。
+
+## 文档构建
+
+```bash
+cd docs
+pnpm install
+pnpm run build
+```

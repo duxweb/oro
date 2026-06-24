@@ -1,0 +1,124 @@
+---
+title: Model Definition
+description: Define tables, columns, indexes, hidden fields, and model-level behavior without struct tags.
+---
+
+Models implement `Define(*oro.SchemaBuilder)`. Field names are Go struct field names; column names default to snake case.
+
+```go
+type User struct {
+    oro.Model
+    Email        string
+    PasswordHash string
+    Status       string
+    Profile      oro.JSONRaw
+    DeletedAt    oro.Null[time.Time]
+}
+
+func (User) Define(s *oro.SchemaBuilder) {
+    s.Table("users")
+    s.Field("Email").String().Size(160).Unique()
+    s.Field("PasswordHash").Column("password_hash").String().Hidden()
+    s.Field("Status").Enum("active", "disabled").Default("active").Index()
+    s.Field("Profile").JSON().Nullable()
+    s.Field("DeletedAt").Timestamp().Nullable()
+}
+```
+
+## Naming rules
+
+| Item | Default | Override |
+| --- | --- | --- |
+| Table | snake-case model name plus `s` | `s.Table("users")` |
+| Column | snake-case field name | `s.Field("PasswordHash").Column("password_hash")` |
+| JSON output | Go JSON tags and serializer rules | relation `JSONName(...)`, normal struct tags |
+
+## Field types
+
+```go
+s.Field("Name").String().Size(120)
+s.Field("Description").Text()
+s.Field("Enabled").Bool().Default(true)
+s.Field("Quantity").Int()
+s.Field("Views").BigInt()
+s.Field("Price").Decimal(12, 2).Default(0)
+s.Field("Ratio").Float()
+s.Field("Payload").Binary()
+s.Field("Meta").JSON().Nullable()
+s.Field("UUID").UUID()
+s.Field("CreatedAt").Timestamp()
+s.Field("Birthday").Date()
+s.Field("SendAt").Time()
+s.Field("Status").Enum("draft", "published")
+```
+
+Oro also provides semantic aliases such as `Email`, `URL`, `IP`, `MAC`, `Phone`, `Slug`, `Color`, `StringArray`, `IntArray`, and `Point`. They keep the model definition expressive while each dialect maps them to supported database types.
+
+## Null values
+
+Use `oro.Null[T]` when you need a nullable value that is still easy to read and serialize.
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[int] `json:"stock"`
+}
+
+product.Stock = oro.NullOf(10)       // valid value
+product.Stock = oro.NullZero[int]()  // SQL NULL
+```
+
+This avoids pointer-heavy code like `*int` for normal nullable fields.
+
+## Defaults, only, and omit
+
+```go
+s.Field("Price").Uint().Default(0)
+s.Field("CreatedAt").Timestamp().DefaultExpr("CURRENT_TIMESTAMP")
+```
+
+For writes, control submitted fields explicitly:
+
+```go
+db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
+db.Use[Product]().Update(ctx, oro.Map{"Price": 120}, oro.Omit("UpdatedAt"))
+```
+
+`Only` means only these fields are written. `Omit` means these fields are excluded, allowing database defaults or existing values to apply.
+
+## Indexes
+
+```go
+s.Field("Code").Unique()
+s.Field("Status").Index()
+s.Field("Title").FullText()
+
+s.Index("idx_posts_status", "Status")
+s.Unique("uk_posts_slug", "Slug")
+s.FullText("ft_posts_title_body", "Title", "Body")
+```
+
+## Hidden and virtual fields
+
+```go
+s.Field("PasswordHash").Hidden()
+s.Field("CommentsCount").Virtual()
+```
+
+Hidden fields are excluded from default select and serialization. Virtual fields are never synced as database columns and are useful for aggregates such as `WithCount`.
+
+## Model-level options
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Connection("mysql")
+    s.Tenant("TenantID", "AppID")
+    s.Shard("orders", "TenantID")
+}
+```
+
+- `Connection` sets the default connection for this model.
+- `Tenant` opts the model into tenant filtering and write injection.
+- `NoTenant` disables global tenant behavior for a model.
+- `Shard` maps model queries to a shard group.

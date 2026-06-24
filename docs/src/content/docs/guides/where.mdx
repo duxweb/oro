@@ -1,0 +1,116 @@
+---
+title: Where Conditions
+description: Simple field conditions, expression objects, callback groups, conditional filters, and subqueries.
+---
+
+Oro keeps common conditions short, but uses explicit callbacks for nested logic.
+
+## Simple conditions
+
+```go
+db.Use[Product]().Where("Code", "P001")          // code = ?
+db.Use[Product]().Where("Price", ">=", 100)     // price >= ?
+db.Table("products").Where("price", ">=", 100) // table query uses column names
+```
+
+Model queries use Go field names. Table queries use database column names.
+
+## Field expressions
+
+```go
+db.Use[Product]().Where(oro.Field("Code").In("P001", "P002"))
+db.Use[Product]().Where(oro.Field("DeletedAt").IsNull())
+db.Use[Product]().Where(oro.Field("Price").Between(100, 500))
+```
+
+Field expressions are useful when you want a condition object that can be composed, reused, or passed with other conditions.
+
+```go
+db.Use[Product]().Where(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Stock").Gt(0),
+)
+```
+
+## Groups
+
+```go
+products, err := db.Use[Product]().
+    Where("TenantID", tenantID).
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Status", "active").OrWhere("Status", "draft")
+    }).
+    Get(ctx)
+```
+
+`WhereGroup` and `OrWhereGroup` only accept callbacks. That makes parentheses explicit and avoids ambiguous argument overloads.
+
+```go
+db.Use[Product]().OrWhereGroup(func(w *oro.WhereBuilder) {
+    w.Where("Code", "P001")
+    w.Where("Code", "P002")
+})
+```
+
+## Conditional filters
+
+```go
+query := db.Use[Product]().Where("TenantID", tenantID)
+
+query = query.WhereWhen(filter.OnlyAvailable, func(w *oro.WhereBuilder) {
+    w.Where("Stock", ">", 0)
+})
+```
+
+`WhereWhen` is intentionally callback-only. It means: if the condition is true, append this condition group.
+
+## Column comparisons
+
+```go
+db.Table("orders").WhereColumn("paid_total", ">=", "total")
+db.Table("orders").WhereGroup(func(w *oro.WhereBuilder) {
+    w.WhereColumn("created_at", "<", "paid_at")
+})
+```
+
+## Raw conditions
+
+```go
+db.Use[Product]().WhereRaw("price * ? > ?", 1.2, 100)
+```
+
+Raw conditions are available when a dialect feature is not covered by the fluent API. Keep them local and parameterized.
+
+## Subqueries
+
+```go
+paidUsers := oro.Query(
+    db.Table("orders").Select("user_id").Where("status", "paid"),
+)
+
+users, err := db.Use[User]().WhereIn("ID", paidUsers).Get(ctx)
+```
+
+```go
+existsPaidOrder := oro.Query(
+    db.Table("orders").WhereColumn("orders.user_id", "users.id").Where("status", "paid"),
+)
+
+users, err := db.Table("users").WhereExists(existsPaidOrder).Get(ctx)
+```
+
+`oro.Query(...)` wraps a model, table, or raw query so it can be used as a subquery in `WhereIn`, `WhereExists`, `Join`, `From`, `Select`, or `Having`-style clauses.
+
+## Relation filters
+
+```go
+articles, err := db.Use[Article]().WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+    q.Where("Status", "approved")
+}).Get(ctx)
+```
+
+```go
+articles, err := db.Use[Article]().WhereDoesntHave(Article{}.Comments()).Get(ctx)
+```
+
+The relation callback is optional for `WhereDoesntHave`, but useful when the absence condition needs a filter.

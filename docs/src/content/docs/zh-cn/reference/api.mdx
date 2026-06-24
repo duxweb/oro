@@ -1,0 +1,92 @@
+---
+title: API 命名
+description: 公开入口、查询方法、写入选项和命名原则。
+---
+
+## 入口
+
+```go
+db.Use[Product]()      // 模型查询
+db.Table("products")   // 裸表查询
+db.Raw("select ...")   // 原生 SQL
+```
+
+这是唯一的顶层查询入口。
+
+原生 SQL 需要带表前缀后的物理表名时，使用 `db.TableName("products")`。
+
+## 查询方法
+
+| API | 含义 |
+| --- | --- |
+| `Use[T]()` | 使用 Go 字段名的泛型模型查询 |
+| `Table(name)` | 使用数据库列名的裸表查询 |
+| `TableName(name)` | 把逻辑表名解析为物理表名 |
+| `Raw(sql, args...)` | 原生 SQL 查询或命令 |
+| `MapTo[T]()` | 把 table/raw 行映射到结构体 |
+| `Where` | 字段条件或条件对象 |
+| `WhereGroup` | 括号分组回调 |
+| `OrWhereGroup` | OR 括号分组回调 |
+| `WhereWhen` | 条件成立时执行回调组 |
+| `WhereColumn` | 列与列比较 |
+| `WhereIn` | `IN (subquery)` |
+| `WhereExists` | `EXISTS (subquery)` |
+| `Select` | 字段、聚合表达式、Raw 表达式 |
+| `GroupBy` / `Having` | 聚合分组 |
+| `Join` / `LeftJoin` | 回调式 join builder |
+| `With` | 预加载关系 |
+| `For` | 通过关系查询目标侧 |
+| `WhereHas` | 按关系存在过滤 |
+| `WhereDoesntHave` | 按关系不存在过滤 |
+
+## 终结方法
+
+| API | 返回 |
+| --- | --- |
+| `First(ctx)` | 一条或 `nil` |
+| `Find(ctx, id)` | 主键查一条或 `nil` |
+| `Get(ctx)` | 切片 |
+| `Create(ctx, value)` | 创建后的行，包含返回主键 |
+| `CreateMany(ctx, values)` | 创建后的多行 |
+| `Update(ctx, Map)` | 影响行数 |
+| `Delete(ctx)` | 影响行数 |
+| `Upsert(ctx, value)` | 插入或更新后的行 |
+| `Count(ctx)` | `int64` |
+| `Exists(ctx)` | `bool` |
+| `Sum` / `Avg` | `oro.Decimal` |
+| `Min[T]` / `Max[T]` | `oro.Null[T]` |
+| `Paginate(size)` | 分页对象 |
+| `Stream(ctx)` | 流式迭代器 |
+| `Chunk(ctx, size, fn)` | 分块回调 |
+
+## 写入选项
+
+```go
+oro.Only("Code", "Price")
+oro.Omit("UpdatedAt")
+oro.BatchSize(500)
+oro.CheckVersion(version)
+oro.ConflictBy("Code").Update("Price")
+```
+
+`Only` 和 `Omit` 用来避免 ORM 猜测 Go 零值是否是使用者主动传入。
+
+## 数据容器
+
+| 类型 | 用途 |
+| --- | --- |
+| `oro.Map` | 写入、裸表行、租户值、中间表字段 |
+| `oro.Null[T]` | nullable 标量值 |
+| `oro.Decimal` | decimal 聚合结果 |
+| `oro.JSONRaw` | 原始 JSON 字段 |
+
+## 命名原则
+
+- `Use[T]` 表示模型查询；
+- `Table` 表示直接查表；
+- `Raw` 表示 SQL 逃生口；
+- `With` 表示预加载；
+- `For` 表示通过关系查询；
+- `MapTo[T]` 表示映射到结构体。
+
+根包是公开门面，`internal/*` 都是实现细节。

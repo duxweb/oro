@@ -1,0 +1,136 @@
+---
+const { starlightRoute } = Astro.locals;
+const { entry, lang } = starlightRoute;
+const hero = entry.data.hero;
+const isZh = (lang || '').toLowerCase().startsWith('zh');
+
+const eyebrow = isZh ? 'Go 泛型 ORM' : 'Generic-first ORM for Go';
+const installCmd = 'go get github.com/duxweb/oro';
+const fileName = 'product.go';
+
+const code = isZh
+  ? `type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+}
+
+// 无生成器，无 struct tag DSL
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").String().Unique()
+    s.Field("Price").Uint().Default(0)
+}
+
+// 语义化条件，读起来就是你想说的那句话
+p, _ := db.Use[Product]().
+    Where(oro.Field("Price").Gte(100)).
+    First(ctx)`
+  : `type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+}
+
+// no generator, no struct-tag DSL
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").String().Unique()
+    s.Field("Price").Uint().Default(0)
+}
+
+// semantic conditions read like the sentence you'd say
+p, _ := db.Use[Product]().
+    Where(oro.Field("Price").Gte(100)).
+    First(ctx)`;
+
+// Small, dependency-free Go highlighter (Starlight disables Astro's Shiki bundle).
+// Stash matched spans behind NUL markers so injected markup / bare numbers
+// are never re-processed.
+function highlight(src: string): string {
+  let s = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const store: string[] = [];
+  const stash = (cls: string, txt: string) => {
+    store.push(`<span class="${cls}">${txt}</span>`);
+    return `\x00${store.length - 1}\x00`;
+  };
+  s = s.replace(/\/\/[^\n]*/g, (m) => stash('tok-com', m));
+  s = s.replace(/&quot;.*?&quot;|"[^"]*"/g, (m) => stash('tok-str', m));
+  s = s.replace(/\b(type|func|struct|string|uint|int|bool|return)\b/g, '<span class="tok-key">$1</span>');
+  s = s.replace(
+    /\b(oro|db|Use|Where|First|Field|Define|Register|Sync|Create|Model|SchemaBuilder|String|Uint|Default|Unique|Table|Get|Debug|Eq|NotEq|Gt|Gte|Lt|Lte|In|NotIn|Like|NotLike|Between|IsNull|IsNotNull)\b/g,
+    '<span class="tok-fn">$1</span>'
+  );
+  s = s.replace(/\x00(\d+)\x00/g, (_, i) => store[Number(i)]);
+  return s;
+}
+
+const title = hero?.title ?? entry.data.title;
+const tagline = hero?.tagline ?? '';
+const actions = hero?.actions ?? [];
+const pills = isZh
+  ? ['人性化语义', 'no codegen', 'no import cycle', '非黑盒']
+  : ['Humane semantics', 'no codegen', 'no import cycle', 'non black box'];
+---
+
+<div class="pb-10 pt-4 md:pb-16 md:pt-10">
+  <div class="mx-auto max-w-3xl text-center">
+    <p class="mb-5 font-mono text-[0.8rem] tracking-[0.06em] text-muted">{eyebrow}</p>
+    <h1
+      class="m-0 bg-linear-to-r from-ink via-ink to-accent bg-clip-text text-[clamp(2rem,4.4vw,3.3rem)] font-extrabold leading-[1.1] tracking-[-0.04em] text-transparent"
+      set:html={title}
+    />
+    {tagline && (
+      <p
+        class="mx-auto mt-6 max-w-[40rem] text-[clamp(1.05rem,1.5vw,1.25rem)] leading-relaxed text-muted"
+        set:html={tagline}
+      />
+    )}
+
+    {actions.length > 0 && (
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        {actions.map((action) => (
+          <a
+            href={action.link}
+            class={`dux-btn ${action.variant === 'primary' ? 'dux-btn--primary' : 'dux-btn--ghost'}`}
+            {...action.attrs}
+          >
+            <span>{action.text}</span>
+            {action.variant === 'primary' && <span aria-hidden="true" class="dux-btn__arrow">→</span>}
+          </a>
+        ))}
+      </div>
+    )}
+
+    <ul class="mt-8 flex list-none flex-wrap justify-center gap-2 p-0" aria-label={isZh ? '核心特性' : 'core principles'}>
+      {pills.map((pill) => (
+        <li class="rounded-full border border-line px-3 py-1 font-mono text-[0.74rem] tracking-[0.01em] text-muted">
+          {pill}
+        </li>
+      ))}
+    </ul>
+  </div>
+
+  <div class="mx-auto mt-12 max-w-3xl">
+    <div class="mb-4 flex justify-center">
+      <div
+        class="inline-flex max-w-full items-center gap-2.5 overflow-x-auto rounded-full border border-line bg-surface px-4 py-2 font-mono text-[0.85rem] text-ink"
+        role="group"
+        aria-label="install"
+      >
+        <span class="select-none text-accent" aria-hidden="true">$</span>
+        <code class="whitespace-nowrap bg-transparent p-0">{installCmd}</code>
+      </div>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border border-code-line bg-code shadow-[var(--dux-shadow)]">
+      <div class="relative flex h-10 items-center border-b border-code-line bg-code-bar px-4">
+        <span class="flex gap-2">
+          <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
+          <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>
+          <span class="h-3 w-3 rounded-full bg-[#28c840]"></span>
+        </span>
+        <span class="pointer-events-none absolute inset-x-0 text-center font-mono text-[0.78rem] text-[var(--dux-term-title)]">{fileName}</span>
+      </div>
+      <pre class="dux-hero-win m-0 overflow-x-auto px-6 py-5 text-left text-[0.85rem] leading-relaxed"><code class="font-mono" set:html={highlight(code)} /></pre>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,82 @@
+---
+title: 多驱动
+description: 配置 SQLite、MySQL、PostgreSQL、读库、模型连接和跨连接读取。
+---
+
+Oro 把所有数据库配置都放在 `Connections` 下，不再额外提供顶层 `Driver`，避免概念重复。
+
+```go
+db, err := oro.Open(oro.Config{
+    Default: "main",
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {Driver: sqlite.Open("app.db")},
+        "mysql": {Driver: mysql.Open("root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false")},
+        "pgsql": {Driver: pgsql.Open("postgres://root@localhost:5432/duxorm?sslmode=disable")},
+    },
+})
+```
+
+没有指定连接时使用 `Default`。
+
+## 连接池默认值和覆盖
+
+```go
+db, err := oro.Open(oro.Config{
+    Pool: oro.PoolConfig{
+        MaxOpenConns:    20,
+        MaxIdleConns:    10,
+        ConnMaxLifetime: time.Hour,
+        PingOnOpen:      true,
+    },
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {Driver: sqlite.Open("app.db")},
+        "reporting": {
+            Driver: pgsql.Open(reportingDSN),
+            Pool: &oro.PoolConfig{MaxOpenConns: 5},
+        },
+    },
+})
+```
+
+全局连接池配置应用到所有连接，单连接配置优先覆盖。
+
+## 读库
+
+```go
+Connections: map[string]oro.ConnectionConfig{
+    "main": {
+        Driver: mysql.Open(primaryDSN),
+        Reads: []oro.Driver{
+            mysql.Open(readDSN1),
+            mysql.Open(readDSN2),
+        },
+    },
+}
+```
+
+读查询可以走读库。写入、事务、行锁和 `UsePrimary()` 强制走主库。
+
+```go
+rows, err := db.Use[Product]().UsePrimary().Get(ctx)
+```
+
+## 模型级连接
+
+```go
+func (Report) Define(s *oro.SchemaBuilder) {
+    s.Connection("pgsql")
+    s.Table("reports")
+}
+```
+
+## 查询级连接
+
+```go
+rows, err := db.Connection("pgsql").Table("reports").Get(ctx)
+```
+
+查询级连接优先级最高。
+
+## 跨连接预加载
+
+`With` 可以按目标模型配置连接加载关系，适合核心数据、媒体、日志、报表拆库的系统。跨库关系建议以读取为主；跨库写入无法靠普通事务保证原子性。

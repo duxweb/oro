@@ -1,0 +1,87 @@
+---
+title: JSON 与全文索引
+description: 使用统一表达式查询 JSON 字段和全文索引。
+---
+
+## JSON 字段定义
+
+```go
+type Product struct {
+    oro.Model
+    Code string
+    Meta oro.JSONRaw
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Meta").JSON().Nullable()
+}
+```
+
+## JSON 路径条件
+
+```go
+rows, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("profile", "country").Eq("CN"),
+).Get(ctx)
+```
+
+```go
+rows, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("flags", "featured").Eq(true),
+).Get(ctx)
+```
+
+支持相等、不等、空值判断、存在判断，以及驱动支持时的 contains 类条件。
+
+## 模型和裸表差异
+
+模型查询使用 Go 字段名：
+
+```go
+db.Use[Product]().Where(oro.JSON("Meta").Path("color").Eq("blue"))
+```
+
+裸表查询使用数据库列名：
+
+```go
+db.Table("products").Where(oro.JSON("meta").Path("color").Eq("blue"))
+```
+
+## 全文索引定义
+
+```go
+func (Post) Define(s *oro.SchemaBuilder) {
+    s.Table("posts")
+    s.Field("Title").String().FullText()
+    s.Field("Body").Text()
+    s.FullText("ft_posts_title_body", "Title", "Body")
+}
+```
+
+## 全文查询
+
+```go
+posts, err := db.Use[Post]().Where(
+    oro.FullText("Title", "Body").Match("generic orm"),
+).Get(ctx)
+```
+
+## 相关度分数
+
+```go
+posts, err := db.Use[Post]().
+    Select("ID", "Title", oro.FullText("Title", "Body").Score("generic orm").As("score")).
+    Where(oro.FullText("Title", "Body").Match("generic orm")).
+    OrderByDesc("score").
+    Get(ctx)
+```
+
+## 方言说明
+
+| 驱动 | JSON | 全文索引 |
+| --- | --- | --- |
+| SQLite | 依赖 SQLite 构建是否启用 JSON 函数 | 普通表全文索引 DDL 不统一，建议专门 FTS 表 |
+| MySQL | 支持 JSON 路径和 contains 类能力 | 依赖 engine/version 的原生全文索引 |
+| PostgreSQL | JSON/JSONB 风格提取 | 编译为 `to_tsvector` / `plainto_tsquery` 类语法 |

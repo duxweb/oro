@@ -1,0 +1,97 @@
+---
+title: Transactions
+description: Callback transactions, manual transactions, nested savepoints, retry, and row locks.
+---
+
+## Callback transaction
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    _, err := tx.Use[Product]().Create(ctx, &Product{Code: "P001"})
+    return err
+})
+```
+
+Returning an error rolls back the transaction. Returning `nil` commits it.
+
+## Nested transactions
+
+Nested transactions use savepoints when the driver supports them.
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    if _, err := tx.Table("orders").Create(ctx, oro.Map{"status": "draft"}); err != nil {
+        return err
+    }
+
+    return tx.Transaction(ctx, func(inner *oro.DB) error {
+        _, err := inner.Table("order_logs").Create(ctx, oro.Map{"message": "created"})
+        return err
+    })
+})
+```
+
+## Manual transaction
+
+```go
+tx, err := db.Begin(ctx)
+if err != nil { return err }
+
+committed := false
+defer func() {
+    if !committed {
+        _ = tx.Rollback(ctx)
+    }
+}()
+
+if _, err := tx.Use[Product]().Create(ctx, product); err != nil {
+    return err
+}
+
+if err := tx.Commit(ctx); err != nil {
+    return err
+}
+committed = true
+```
+
+Manual transactions are useful when transaction boundaries must cross helper functions. Prefer callback transactions for normal application code.
+
+## Locks
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    product, err := tx.Use[Product]().Where("ID", id).LockForUpdate().First(ctx)
+    if err != nil || product == nil {
+        return err
+    }
+
+    _, err = tx.Use[Product]().Where("ID", product.ID).Update(ctx, oro.Map{
+        "Stock": oro.Decrement(1),
+    })
+    return err
+})
+```
+
+Locks require a transaction. Supported helpers include `LockForUpdate`, `LockForShare`, `NoWait`, and `SkipLocked`.
+
+## Retry and timeout
+
+Configure defaults globally:
+
+```go
+db, err := oro.Open(oro.Config{
+    Timeout: oro.TimeoutConfig{
+        Query:       5 * time.Second,
+        Transaction: 10 * time.Second,
+    },
+    Retry: oro.RetryConfig{
+        TxDeadlockAttempts: 3,
+    },
+})
+```
+
+Override per query when needed:
+
+```go
+rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
+```

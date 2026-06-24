@@ -1,0 +1,764 @@
+/* =========================================================================
+   Oro — minimal monochrome theme
+   Tailwind handles component layout; this file owns design tokens, a few
+   shared component classes, syntax-token colors, and Starlight doc overrides.
+   ========================================================================= */
+
+/* ---------- Tokens ---------- */
+:root {
+  --sl-font: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
+
+  --dux-ink: #0a0a0a;
+  --dux-ink-2: #1a1a1a;
+  --dux-muted: #5b6470;
+  --dux-bg: #ffffff;
+  --dux-surface: #f6f7f8;
+  --dux-line: rgba(10, 10, 10, 0.10);
+  --dux-line-strong: rgba(10, 10, 10, 0.18);
+  --dux-accent: #16a34a;
+  --dux-active-bg: #ffffff;
+  --dux-active-shadow: 0 1px 2px rgba(10, 10, 10, 0.07);
+
+  /* code window stays dark in both themes — high-contrast, intentional */
+  --dux-code-bg: #15181f;
+  --dux-code-bar: #1c2029;
+  --dux-code-line: rgba(255, 255, 255, 0.08);
+  --dux-code-muted: #8b93a3;
+  --dux-term-title: #8b93a3; /* terminal title — light mode: gray */
+
+  --dux-shadow: 0 1px 2px rgba(10, 10, 10, 0.04), 0 12px 32px -16px rgba(10, 10, 10, 0.18);
+
+  /* Starlight accent (light) */
+  --sl-color-accent-low: #dcfce7;
+  --sl-color-accent: #16a34a;
+  --sl-color-accent-high: #14532d;
+  --sl-color-bg-nav: rgba(255, 255, 255, 0.72);
+}
+
+:root[data-theme="dark"] {
+  --dux-ink: #f4f5f7;
+  --dux-ink-2: #e6e8ec;
+  --dux-muted: #9aa1ad;
+  --dux-bg: #0a0a0b;
+  --dux-surface: #131317;
+  --dux-line: rgba(255, 255, 255, 0.10);
+  --dux-line-strong: rgba(255, 255, 255, 0.20);
+  --dux-accent: #4ade80;
+  --dux-active-bg: rgba(255, 255, 255, 0.09);
+  --dux-active-shadow: none;
+  --dux-term-title: #d6dce4; /* terminal title — dark mode: lighter */
+
+  --dux-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 50px -24px rgba(0, 0, 0, 0.8);
+
+  --sl-color-bg: #0a0a0b;
+  --sl-color-bg-nav: rgba(10, 10, 11, 0.72);
+  --sl-color-bg-sidebar: rgba(10, 10, 11, 0.82);
+  --sl-color-hairline: rgba(255, 255, 255, 0.10);
+
+  --sl-color-accent-low: #052e16;
+  --sl-color-accent: #4ade80;
+  --sl-color-accent-high: #dcfce7;
+}
+
+/* ---------- Base ---------- */
+body {
+  background: var(--dux-bg);
+}
+
+/* ---------- Header (borderless, frosted) ---------- */
+.header {
+  border-bottom: 0 !important;
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+}
+
+.site-title {
+  letter-spacing: -0.03em;
+  font-weight: 750;
+  color: var(--dux-ink);
+}
+
+/* Search: soft pill instead of a hard bordered box */
+.header button[data-open-modal] {
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  background-color: var(--dux-surface) !important;
+  color: var(--dux-muted) !important;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.header button[data-open-modal]:hover {
+  background-color: color-mix(in srgb, var(--dux-ink) 8%, var(--dux-surface)) !important;
+  color: var(--dux-ink) !important;
+}
+
+.header button[data-open-modal] kbd {
+  background-color: transparent !important;
+  color: var(--dux-muted);
+}
+
+/* Drop the vertical divider line before the theme/language controls */
+.header .social-icons::after {
+  display: none !important;
+}
+
+.header .social-icons a {
+  color: var(--dux-muted);
+}
+
+.header .social-icons a:hover {
+  color: var(--dux-ink);
+}
+
+/* Theme / language selects: muted, no heavy chrome */
+.header :is(starlight-theme-select, starlight-lang-select) {
+  color: var(--dux-muted);
+}
+
+.header :is(starlight-theme-select, starlight-lang-select) select:hover {
+  color: var(--dux-ink);
+}
+
+/* ---------- Shared button ---------- */
+.dux-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.62rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: transform 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.dux-btn--primary {
+  background: var(--dux-ink);
+  color: var(--dux-bg);
+}
+
+.dux-btn--primary:hover {
+  transform: translateY(-1px);
+}
+
+.dux-btn__arrow {
+  transition: transform 0.14s ease;
+}
+
+.dux-btn--primary:hover .dux-btn__arrow {
+  transform: translateX(3px);
+}
+
+.dux-btn--ghost {
+  border-color: var(--dux-line-strong);
+  color: var(--dux-ink);
+}
+
+.dux-btn--ghost:hover {
+  border-color: var(--dux-ink);
+  transform: translateY(-1px);
+}
+
+/* ---------- Syntax token colors ---------- */
+/* default: on a light surface (pillar one-liners) */
+.tok-com { color: var(--dux-muted); }
+.tok-str { color: var(--dux-accent); }
+.tok-key { color: var(--dux-accent); }
+.tok-fn { color: var(--dux-ink); font-weight: 600; }
+
+/* Dark code blocks (hero window + pillar chips) — restrained, low-noise palette */
+.dux-hero-win,
+.dux-code-dark {
+  color: #c9d1d9;
+}
+
+.dux-code-dark {
+  background: var(--dux-code-bg);
+  border: 1px solid var(--dux-code-line);
+}
+
+.dux-hero-win .tok-com,
+.dux-code-dark .tok-com { color: #6e7681; }
+.dux-hero-win .tok-str,
+.dux-code-dark .tok-str { color: #86efac; }
+.dux-hero-win .tok-key,
+.dux-code-dark .tok-key { color: #86efac; }
+.dux-hero-win .tok-fn,
+.dux-code-dark .tok-fn { color: #eef1f6; font-weight: 500; }
+
+/* ---------- Terminal component (dark window) ---------- */
+.terminal-shell {
+  overflow: hidden;
+  margin-block: 1.25rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--dux-code-line);
+  background: var(--dux-code-bg);
+  box-shadow: var(--dux-shadow);
+}
+
+.terminal-shell__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2.5rem;
+  padding: 0 0.9rem;
+  background: var(--dux-code-bar);
+  border-bottom: 1px solid var(--dux-code-line);
+}
+
+.terminal-shell__dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.terminal-shell__title {
+  margin-left: 0.5rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.74rem;
+  color: var(--dux-code-muted);
+}
+
+.terminal-shell__body {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding: 0.9rem 1.1rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.85rem;
+  color: #e6e8ec;
+}
+
+.terminal-shell__prompt {
+  color: var(--dux-accent);
+  user-select: none;
+}
+
+.sl-markdown-content .terminal-shell code {
+  background: none;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
+/* ---------- Landing sections (used from MDX) ---------- */
+.dux-section {
+  margin-top: clamp(3rem, 6vw, 5rem);
+}
+
+.dux-section-head {
+  max-width: 46rem;
+}
+
+.dux-section-head .eyebrow {
+  display: block;
+  font-family: var(--sl-font-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dux-accent);
+  margin-bottom: 0.75rem;
+}
+
+.sl-markdown-content .dux-section-head h2 {
+  font-size: clamp(1.8rem, 3.4vw, 2.6rem);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: var(--dux-ink);
+}
+
+.dux-section-head p {
+  color: var(--dux-muted);
+  font-size: 1.02rem;
+  line-height: 1.6;
+  margin-top: 0.85rem;
+  max-width: 40rem;
+}
+
+.dux-section .expressive-code {
+  margin-top: 2rem;
+}
+
+/* Why band */
+.dux-why {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 2.25rem;
+}
+
+@media (min-width: 52rem) {
+  .dux-why {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.dux-why article {
+  background: var(--dux-surface);
+  border-radius: 1rem;
+  padding: 1.5rem 1.4rem;
+}
+
+.dux-why article::before {
+  content: "";
+  display: block;
+  width: 2rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--dux-ink);
+  margin-bottom: 1rem;
+}
+
+.dux-why h3 {
+  font-size: 1.02rem;
+  margin: 0 0 0.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--dux-ink);
+}
+
+.dux-why p {
+  color: var(--dux-muted);
+  font-size: 0.93rem;
+  line-height: 1.62;
+  margin: 0;
+}
+
+.dux-why code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+}
+
+/* CTA — bold dark finishing band */
+.dux-cta {
+  position: relative;
+  overflow: hidden;
+  margin-top: clamp(3.5rem, 7vw, 6rem);
+  border: 0;
+  border-radius: 1.75rem;
+  background: #0c0d12;
+  padding: clamp(3rem, 7vw, 5rem) clamp(1.5rem, 5vw, 3rem);
+  text-align: center;
+}
+
+/* soft accent glow, kept subtle */
+.dux-cta::before {
+  content: "";
+  position: absolute;
+  inset: -40% 30% auto;
+  height: 22rem;
+  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.30), transparent);
+  pointer-events: none;
+}
+
+.dux-cta > * {
+  position: relative;
+}
+
+.sl-markdown-content .dux-cta h2 {
+  border: 0;
+  padding: 0;
+  margin: 0 auto 0.7rem;
+  max-width: 24ch;
+  font-size: clamp(1.7rem, 3.4vw, 2.5rem);
+  letter-spacing: -0.04em;
+  line-height: 1.12;
+  color: #ffffff;
+}
+
+.dux-cta p {
+  color: rgba(255, 255, 255, 0.66);
+  margin: 0 auto 1.9rem;
+  max-width: 34rem;
+  line-height: 1.6;
+}
+
+.dux-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.dux-cta code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.08em 0.4em;
+}
+
+/* invert buttons on the dark band */
+.dux-cta .dux-btn--primary {
+  background: #ffffff;
+  color: #0c0d12;
+}
+
+.dux-cta .dux-btn--ghost {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+.dux-cta .dux-btn--ghost:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+/* Hide Starlight's prev/next pager on landing pages (those with a hero) */
+:root[data-has-hero] .pagination-links {
+  display: none;
+}
+
+/* ---------- Doc page polish (minimal) ---------- */
+.sl-markdown-content :is(h1, h2, h3) {
+  letter-spacing: -0.03em;
+  color: var(--dux-ink);
+}
+
+.sl-markdown-content h2 {
+  margin-top: 3rem;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--dux-accent);
+  text-underline-offset: 0.2em;
+}
+
+/* inline code: filled chip, no border */
+.sl-markdown-content code:not(:where(.expressive-code *, .dux-code-dark)) {
+  background: var(--dux-surface);
+  color: var(--dux-ink);
+  border: 0;
+  border-radius: 0.4rem;
+  padding: 0.12em 0.42em;
+  font-size: 0.85em;
+}
+
+/* cards & link cards: filled blocks, no border, lift on hover */
+.sl-markdown-content :is(.card, .sl-link-card, a.sl-link-card) {
+  border: 0 !important;
+  border-radius: 1rem;
+  background: var(--dux-surface);
+  box-shadow: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.sl-markdown-content :is(.card, .sl-link-card, a.sl-link-card):hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dux-shadow);
+}
+
+.sl-markdown-content .card .icon {
+  color: var(--dux-accent);
+}
+
+/* tables: clean, conventional — neutral header, hairline row separators */
+.sl-markdown-content table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 0.7rem;
+  border: 1px solid var(--dux-line);
+  font-size: 0.92rem;
+}
+
+.sl-markdown-content thead th {
+  background: var(--dux-surface);
+  color: var(--dux-ink);
+  font-weight: 650;
+  text-align: left;
+}
+
+.sl-markdown-content :is(th, td) {
+  border: 0;
+  border-bottom: 1px solid var(--dux-line);
+  padding: 0.6rem 0.9rem;
+}
+
+.sl-markdown-content tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+/* blockquote: filled block with an accent bar */
+.sl-markdown-content blockquote {
+  border-left: 3px solid var(--dux-accent);
+  background: var(--dux-surface);
+  border-radius: 0 0.6rem 0.6rem 0;
+  padding: 0.85rem 1.1rem;
+}
+
+.sl-markdown-content .starlight-aside {
+  border-radius: 0.8rem;
+}
+
+.expressive-code .frame {
+  border-radius: 0.8rem;
+}
+
+/* unify every code block background (editor + terminal + hero all share it) */
+.expressive-code {
+  --ec-frm-edBg: var(--dux-code-bg);
+}
+
+.expressive-code figcaption {
+  font-family: var(--sl-font-mono);
+  font-size: 0.76rem;
+}
+
+/* ---------- Unified terminal window (doc bash frames = hero window) ----------
+   macOS-style traffic lights (colored, larger), distinct titlebar with a
+   bottom border, matching the hero window in Hero.astro. */
+.expressive-code .frame.is-terminal {
+  --ec-frm-trmBg: var(--dux-code-bg);
+  --ec-frm-trmTtbBg: var(--dux-code-bar);
+  --ec-frm-trmTtbBrdBtmCol: var(--dux-code-line);
+  --ec-frm-trmTtbFg: var(--dux-term-title);
+}
+
+.expressive-code .frame.is-terminal .header {
+  min-height: 2.6rem;
+  padding-block: 0.6rem !important;
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+}
+
+/* colored, larger traffic-light dots — box-shadow keeps them perfectly round */
+.expressive-code .frame.is-terminal .header::before {
+  -webkit-mask: none !important;
+  mask: none !important;
+  opacity: 1 !important;
+  left: 1rem !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 0.78rem !important;
+  height: 0.78rem !important;
+  border-radius: 50% !important;
+  background: #ff5f57 !important;
+  box-shadow: 1.15rem 0 0 #febc2e, 2.3rem 0 0 #28c840 !important;
+}
+
+/* the titlebar bottom border (EC draws it via ::after) */
+.expressive-code .frame.is-terminal .header::after {
+  border-bottom-width: 1px !important;
+}
+
+/* ---------- Sidebar: separate by background, not borders ---------- */
+.sidebar-pane {
+  border-inline-end: 0 !important;
+  background: transparent !important;
+}
+
+/* nav becomes a rounded card sized to its content, not a full-height panel */
+.sidebar-content {
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 1rem 0.75rem !important;
+  padding: 1.1rem 1rem !important;
+  background: var(--dux-surface);
+  border-radius: 1rem;
+}
+
+/* drop the vertical guide line on nested items */
+.sidebar-content ul ul li {
+  border-inline-start: 0 !important;
+}
+
+/* rounded items with hover fill */
+.sidebar-pane a {
+  border-radius: 0.55rem !important;
+  padding-block: 0.4rem !important;
+}
+
+.sidebar-pane a:hover:not([aria-current="page"]) {
+  background: color-mix(in srgb, var(--dux-ink) 6%, transparent);
+}
+
+/* more whitespace between groups and items */
+.sidebar-pane .top-level > li + li {
+  margin-top: 1.5rem !important;
+}
+
+.sidebar-pane ul ul li + li {
+  margin-top: 0.15rem;
+}
+
+/* drop the table-of-contents left border too */
+.right-sidebar {
+  border-inline-start: 0 !important;
+}
+
+/* Right TOC as a timeline with connector dots */
+.right-sidebar-panel .sl-container {
+  margin: 1.25rem 1.25rem 1.25rem 0.25rem;
+  padding: 0.5rem 0.25rem;
+}
+
+.right-sidebar-panel nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.right-sidebar-panel nav li {
+  position: relative;
+  padding-inline-start: 1.1rem;
+}
+
+/* continuous vertical line built from per-item segments */
+.right-sidebar-panel nav li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0.34rem;
+  inset-block: 0;
+  width: 2px;
+  background: var(--dux-line);
+}
+.right-sidebar-panel nav li:first-child::before {
+  inset-block-start: 0.78rem;
+}
+.right-sidebar-panel nav li:last-child::before {
+  inset-block-end: calc(100% - 0.95rem);
+}
+
+.right-sidebar-panel nav a {
+  position: relative;
+  display: block;
+  padding: 0.32rem 0.4rem;
+  transition: color 0.14s ease;
+}
+
+/* the dot */
+.right-sidebar-panel nav a::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -0.95rem;
+  top: 0.62rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--dux-bg);
+  border: 2px solid var(--dux-line);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.right-sidebar-panel nav a:hover {
+  color: var(--dux-ink);
+}
+
+.right-sidebar-panel nav a[aria-current="true"] {
+  color: var(--dux-accent) !important;
+  font-weight: 600;
+}
+
+.right-sidebar-panel nav a[aria-current="true"]::before {
+  background: var(--dux-accent);
+  border-color: var(--dux-accent);
+}
+
+/* active item = translucent accent block + accent text (rounded) */
+a[aria-current="page"] {
+  background-color: var(--dux-active-bg) !important;
+  color: var(--dux-accent) !important;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  box-shadow: var(--dux-active-shadow);
+}
+
+/* ============================================================
+   Centered three-column shell (mx-auto) on desktop.
+   Converts Starlight's edge-fixed columns into a centered grid
+   so sidebar + content + TOC live inside one max-width container.
+   ============================================================ */
+
+/* header bar stays full width, separated from main by a hairline */
+header.header {
+  border-bottom: 1px solid var(--dux-line) !important;
+}
+
+/* All shell rules below are scoped to doc pages only ([data-has-sidebar]).
+   The splash homepage has no sidebar attribute, so it stays untouched. */
+@media (min-width: 50rem) {
+  [data-has-sidebar] header.header > .header {
+    max-width: 90rem;
+    margin-inline: auto;
+    width: 100%;
+  }
+
+  [data-has-sidebar] .page {
+    display: grid !important;
+    grid-template-columns: var(--sl-sidebar-width) minmax(0, 1fr);
+    max-width: 90rem;
+    margin-inline: auto;
+  }
+
+  [data-has-sidebar] .sidebar {
+    grid-column: 1;
+  }
+
+  [data-has-sidebar] .sidebar-pane {
+    position: sticky !important;
+    inset-block-start: var(--sl-nav-height) !important;
+    inset-inline-start: auto !important;
+    width: auto !important;
+    height: calc(100vh - var(--sl-nav-height)) !important;
+  }
+
+  [data-has-sidebar] .main-frame {
+    grid-column: 2;
+    padding-inline-start: 0 !important;
+  }
+}
+
+@media (min-width: 72rem) {
+  [data-has-sidebar] .right-sidebar {
+    position: sticky !important;
+    inset-block-start: var(--sl-nav-height) !important;
+    inset-inline-start: auto !important;
+    width: auto !important;
+    height: calc(100vh - var(--sl-nav-height)) !important;
+  }
+
+  [data-has-sidebar] .right-sidebar-container {
+    width: var(--sl-sidebar-width) !important;
+  }
+}
+
+/* ---------- Pagination: flat, gray label + ink title (no shadow) ---------- */
+.pagination-links a {
+  box-shadow: none !important;
+  border: 1px solid var(--dux-line);
+  border-radius: 0.8rem;
+  color: var(--dux-muted);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.pagination-links a:hover {
+  background: var(--dux-surface);
+  border-color: var(--dux-line-strong);
+}
+
+.pagination-links a .link-title {
+  color: var(--dux-ink);
+  font-weight: 650;
+  font-size: 1.05rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dux-btn,
+  .sl-markdown-content .card,
+  .sl-markdown-content .sl-link-card {
+    transition: none;
+  }
+}

@@ -1,0 +1,150 @@
+---
+title: 增删查改
+description: 创建、查询、更新、删除、upsert、聚合、分页和结构体映射。
+---
+
+## 模型查询
+
+```go
+created, err := db.Use[Product]().Create(ctx, &Product{Code: "P001", Price: 100})
+found, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+rows, err := db.Use[Product]().Where("Price", ">=", 100).OrderBy("ID").Get(ctx)
+```
+
+`Use[T]()` 使用 Go 字段名，返回 `*T` 或 `[]*T`。
+
+## 裸表查询
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P002",
+    "price": 200,
+})
+
+rows, err := db.Table("products").Where("price", ">=", 100).Get(ctx)
+```
+
+`Table` 使用数据库列名，返回 `oro.Map` 或 `[]oro.Map`。
+
+## 映射为 DTO
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+view, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    First(ctx)
+```
+
+映射使用和模型字段一致的命名规则：snake_case 列名映射到导出的 Go 字段。
+
+## Select 和表达式
+
+```go
+rows, err := db.Use[Product]().
+    Select("ID", "Code", oro.Count("*").As("total")).
+    GroupBy("Code").
+    Get(ctx)
+```
+
+需要 SQL 表达式时，在 `Select` 里使用 `oro.Raw(...)`：
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Raw("sum(total) as revenue")).
+    GroupBy("status").
+    Get(ctx)
+```
+
+## 更新
+
+```go
+affected, err := db.Use[Product]().
+    Where("Code", "P001").
+    Update(ctx, oro.Map{"Price": 120})
+```
+
+原子增减使用写入表达式：
+
+```go
+_, err = db.Use[Product]().Where("ID", id).Update(ctx, oro.Map{
+    "Stock": oro.Decrement(1),
+})
+```
+
+## 删除和恢复
+
+```go
+_, err = db.Use[Product]().Where("ID", id).Delete(ctx)
+_, err = db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
+_, err = db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+如果模型有软删除字段，`Delete` 会写入该字段；`ForceDelete` 才是物理删除。
+
+## Upsert
+
+```go
+saved, err := db.Use[Product]().Upsert(ctx, product,
+    oro.ConflictBy("Code").Update("Price", "Stock"),
+)
+```
+
+冲突策略显式表达：
+
+```go
+oro.ConflictBy("Code").DoNothing()
+oro.ConflictBy("Code").Update("Price")
+oro.ConflictBy("Code").UpdateAll()
+oro.ConflictBy("Code").UpdateMap(oro.Map{"UpdatedAt": oro.Raw("CURRENT_TIMESTAMP")})
+```
+
+## 批量写入
+
+```go
+created, err := db.Use[Product]().CreateMany(ctx, []*Product{p1, p2}, oro.BatchSize(500))
+saved, err := db.Table("products").UpsertMany(ctx, rows, oro.ConflictBy("code").UpdateAll())
+```
+
+## 聚合
+
+```go
+total, err := db.Use[Product]().Where("Price", ">", 0).Count(ctx)
+exists, err := db.Use[Product]().Where("Code", "P001").Exists(ctx)
+sum, err := db.Use[Product]().Sum(ctx, "Price")
+min, err := db.Use[Product]().Min[uint](ctx, "Price")
+max, err := db.Use[Product]().Max[uint](ctx, "Price")
+```
+
+`Sum` 和 `Avg` 返回 `oro.Decimal`。`Min` 和 `Max` 返回 `oro.Null[T]`，因为空集合没有标量值。
+
+## 分页、分块和流式读取
+
+```go
+page, err := db.Use[Product]().OrderBy("ID").Paginate(20).Page(ctx, 1)
+items, err := db.Use[Product]().OrderBy("ID").Paginate(20).Items(ctx, 1)
+total, err := db.Use[Product]().Paginate(20).Total(ctx)
+```
+
+```go
+err := db.Use[Product]().OrderBy("ID").Chunk(ctx, 1000, func(items []*Product) error {
+    return nil
+})
+```
+
+```go
+stream, err := db.Use[Product]().Stream(ctx)
+if err != nil { return err }
+defer stream.Close()
+
+for stream.Next() {
+    product := stream.Value()
+    _ = product
+}
+if err := stream.Err(); err != nil { return err }
+```

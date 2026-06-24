@@ -1,0 +1,83 @@
+---
+title: 查询条件
+description: 简单字段条件、表达式对象、分组回调、条件回调和子查询。
+---
+
+## 简单条件
+
+```go
+db.Use[Product]().Where("Code", "P001")
+db.Use[Product]().Where("Price", ">=", 100)
+db.Table("products").Where("price", ">=", 100)
+```
+
+模型查询用 Go 字段名；裸表查询用数据库列名。
+
+## 字段表达式
+
+```go
+db.Use[Product]().Where(oro.Field("Code").In("P001", "P002"))
+db.Use[Product]().Where(oro.Field("DeletedAt").IsNull())
+db.Use[Product]().Where(oro.Field("Price").Between(100, 500))
+```
+
+表达式对象适合组合、复用或一次传入多个条件：
+
+```go
+db.Use[Product]().Where(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Stock").Gt(0),
+)
+```
+
+## 分组
+
+```go
+products, err := db.Use[Product]().
+    Where("TenantID", tenantID).
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Status", "active").OrWhere("Status", "draft")
+    }).
+    Get(ctx)
+```
+
+`WhereGroup` 和 `OrWhereGroup` 只接受回调，括号语义明确。
+
+## 条件回调
+
+```go
+query := db.Use[Product]().Where("TenantID", tenantID)
+query = query.WhereWhen(filter.OnlyAvailable, func(w *oro.WhereBuilder) {
+    w.Where("Stock", ">", 0)
+})
+```
+
+`WhereWhen` 的含义是：条件为真时追加这一组条件。
+
+## 子查询
+
+```go
+paidUsers := oro.Query(
+    db.Table("orders").Select("user_id").Where("status", "paid"),
+)
+
+users, err := db.Use[User]().WhereIn("ID", paidUsers).Get(ctx)
+```
+
+```go
+existsPaidOrder := oro.Query(
+    db.Table("orders").WhereColumn("orders.user_id", "users.id").Where("status", "paid"),
+)
+
+users, err := db.Table("users").WhereExists(existsPaidOrder).Get(ctx)
+```
+
+## 关联过滤
+
+```go
+articles, err := db.Use[Article]().WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+    q.Where("Status", "approved")
+}).Get(ctx)
+
+articles, err = db.Use[Article]().WhereDoesntHave(Article{}.Comments()).Get(ctx)
+```

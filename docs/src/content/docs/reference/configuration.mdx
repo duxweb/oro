@@ -1,0 +1,139 @@
+---
+title: Configuration
+description: Config, connections, pool settings, logger, timeout, tenant, and shard options.
+---
+
+## Config shape
+
+```go
+type Config struct {
+    Default     string
+    Connections map[string]ConnectionConfig
+    TablePrefix string
+    Pool        PoolConfig
+    Tenant      *TenantConfig
+    Shards      map[string]ShardConfig
+    Cache       CacheStore
+    Logger      Logger
+    LogLevel    LogLevel
+    Timeout     TimeoutConfig
+    Retry       RetryConfig
+}
+```
+
+The important rule: all database drivers live under `Connections`.
+
+## Table prefix
+
+```go
+db, err := oro.Open(oro.Config{
+    TablePrefix: "tenant_",
+})
+```
+
+`TablePrefix` converts logical table names to physical table names at compile time.
+
+- `s.Table("products")` syncs and queries `tenant_products`.
+- `db.Table("products")` also queries `tenant_products`.
+- Already-prefixed names are not prefixed twice.
+- Qualified names keep their namespace and prefix the final table part, so `shop.products` becomes `shop.tenant_products`.
+- Raw SQL is never rewritten; use `db.TableName("products")` when composing raw SQL.
+
+```go
+rows, err := db.Raw("select * from "+db.TableName("products")).Get(ctx)
+```
+
+## Connections
+
+```go
+type ConnectionConfig struct {
+    Driver oro.Driver
+    Reads  []oro.Driver
+    Pool   *oro.PoolConfig
+}
+```
+
+- `Driver` is the primary connection.
+- `Reads` are read replicas.
+- `Pool` overrides global pool settings for this connection.
+
+## Pool
+
+```go
+Pool: oro.PoolConfig{
+    MaxOpenConns:    20,
+    MaxIdleConns:    10,
+    ConnMaxLifetime: time.Hour,
+    ConnMaxIdleTime: 10 * time.Minute,
+    PingOnOpen:      true,
+}
+```
+
+Global pool config applies to every connection unless overridden.
+
+## Logger
+
+Oro exposes a small logger interface so standard `slog` or any structured logger can be adapted.
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger:   myLogger,
+    LogLevel: oro.LogLevelInfo,
+})
+```
+
+The ORM does not force a logging package into application code.
+
+## Timeout and retry
+
+```go
+db, err := oro.Open(oro.Config{
+    Timeout: oro.TimeoutConfig{
+        Query:       5 * time.Second,
+        Transaction: 10 * time.Second,
+    },
+    Retry: oro.RetryConfig{
+        ReadAttempts:       2,
+        TxDeadlockAttempts: 3,
+    },
+})
+```
+
+Query-level timeout is also available:
+
+```go
+rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
+```
+
+## Tenant
+
+```go
+Tenant: &oro.TenantConfig{
+    Fields: []string{"TenantID", "AppID"},
+}
+```
+
+Use tenant values with:
+
+```go
+db.Tenant(oro.Map{"TenantID": 1, "AppID": 10})
+```
+
+## Shards
+
+```go
+Shards: map[string]oro.ShardConfig{
+    "orders": {
+        Connections: []string{"orders_0", "orders_1"},
+        Strategy:    oro.ModShard("TenantID", 2),
+    },
+}
+```
+
+Models opt into shard groups in `Define`:
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Shard("orders", "TenantID")
+}
+```

@@ -1,0 +1,148 @@
+---
+title: Quick Start
+description: Open a database, sync a model, and run typed CRUD.
+---
+
+Oro is designed around three entry points:
+
+```go
+db.Use[Product]()      // model query
+db.Table("products")   // table query
+db.Raw("select ...")   // raw SQL
+```
+
+Model queries return structs. Table and raw queries return `oro.Map` by default and can be mapped to DTOs with `MapTo[T]()`.
+
+## Install
+
+```bash title="install"
+go get github.com/duxweb/oro
+```
+
+During development this repository targets `go1.27rc1`.
+
+```bash title="go version"
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+```
+
+## Define a model
+
+```go
+package main
+
+import oro "github.com/duxweb/oro"
+
+type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+    Stock oro.Null[int]
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Size(64).Unique()
+    s.Field("Price").Uint().Default(0)
+    s.Field("Stock").Int().Nullable()
+}
+```
+
+`Define` is the schema source of truth. The struct stays clean, and database-specific details do not leak into tags.
+
+## Open and sync
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    oro "github.com/duxweb/oro"
+    "github.com/duxweb/oro/driver/sqlite"
+)
+
+func main() {
+    ctx := context.Background()
+
+    db, err := oro.Open(oro.Config{
+        Connections: map[string]oro.ConnectionConfig{
+            "default": {Driver: sqlite.Open("app.db")},
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close(ctx)
+
+    if err := db.Register(Product{}); err != nil {
+        log.Fatal(err)
+    }
+    if err := db.Sync(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+`Register` accepts model values that implement `Define`. `Sync` creates missing tables, columns, and indexes. Destructive changes are rejected instead of being silently applied.
+
+## Create and query
+
+```go
+created, err := db.Use[Product]().Create(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+    Stock: oro.NullOf(10),
+})
+
+found, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+rows, err := db.Use[Product]().Where("Price", ">=", 100).OrderBy("ID").Get(ctx)
+```
+
+Return behavior is intentionally simple:
+
+| Method | No rows |
+| --- | --- |
+| `First(ctx)` | `nil, nil` |
+| `Find(ctx, id)` | `nil, nil` |
+| `Get(ctx)` | empty slice |
+| `Count(ctx)` | `0, nil` |
+
+## Update and delete
+
+```go
+_, err = db.Use[Product]().Where("Code", "P001").Update(ctx, oro.Map{
+    "Price": 120,
+    "Stock": oro.NullZero[int](),
+})
+
+_, err = db.Use[Product]().Where("Code", "P001").Delete(ctx)
+```
+
+`Update` and `Delete` require a condition. This prevents accidental full-table writes.
+
+## Use a table directly
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P002",
+    "price": 200,
+})
+
+rows, err := db.Table("products").Where("price", ">=", 100).Get(ctx)
+```
+
+Table queries use database column names and return `oro.Map`.
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+view, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    First(ctx)
+```

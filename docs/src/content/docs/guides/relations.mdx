@@ -1,0 +1,170 @@
+---
+title: Relations
+description: Define, preload, filter, aggregate, and write relationships without cyclic model fields.
+---
+
+Relations are methods returning `oro.Relation`. The struct does not need fields like `Cover *Image`, which avoids many Go import-cycle problems.
+
+```go
+type Article struct {
+    oro.Model
+    Title string
+}
+
+type Image struct {
+    oro.Model
+    ArticleID uint64
+    URL       string
+}
+
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Table("articles")
+    s.Field("Title").String()
+}
+
+func (Image) Define(s *oro.SchemaBuilder) {
+    s.Table("images")
+    s.Field("ArticleID").UnsignedBigInt().Index()
+    s.Field("URL").String()
+}
+
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## Preload with `With`
+
+```go
+article, err := db.Use[Article]().With(Article{}.Cover()).First(ctx)
+cover, err := article.Cover().One[Image]()
+```
+
+Relations are read through the relation method:
+
+```go
+cover, err := article.Cover().One[Image]()
+comments, err := article.Comments().Many[Comment]()
+```
+
+If a relation was not preloaded, `One[T]` or `Many[T]` returns `ErrRelationNotLoaded`.
+
+## Preload callback
+
+```go
+articles, err := db.Use[Article]().With(Article{}.Comments(), func(q *oro.RelationQuery) {
+    q.Where("Status", "approved").OrderByDesc("ID").Limit(5)
+}).Get(ctx)
+```
+
+## Nested preload
+
+```go
+articles, err := db.Use[Article]().With("Comments.Author").Get(ctx)
+```
+
+String paths are supported for dynamic or nested relationships. Method relations are preferred where possible because they are easier to refactor.
+
+## Relation kinds
+
+```go
+func (comment Comment) Article() oro.Relation {
+    return oro.BelongsTo(comment, "Article", "Article").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+Supported relation kinds:
+
+| Kind | Use case |
+| --- | --- |
+| `BelongsTo` | child row stores the parent foreign key |
+| `HasOne` | one target row points back to the source |
+| `HasMany` | many target rows point back to the source |
+| `ManyToMany` | source and target connect through a pivot table |
+| `DynamicBelongsTo` | polymorphic owner on the source row |
+| `DynamicHasMany` | polymorphic children point to source ID and type |
+| `DynamicManyToMany` | polymorphic many-to-many through a pivot table |
+
+## Many-to-many and pivot fields
+
+```go
+type ArticleTag struct {
+    oro.Model
+    ArticleID uint64
+    TagID     uint64
+    Sort      int
+}
+
+func (ArticleTag) Define(s *oro.SchemaBuilder) {
+    s.Table("article_tags")
+    s.Field("ArticleID").UnsignedBigInt().Index()
+    s.Field("TagID").UnsignedBigInt().Index()
+    s.Field("Sort").Int().Default(0)
+    s.Unique("uk_article_tag", "ArticleID", "TagID")
+}
+
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        Through("article_tags").
+        SourceForeignKey("ArticleID").
+        TargetForeignKey("TagID")
+}
+```
+
+Write through the relation operator:
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1})
+err = db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 2})
+err = db.Relation(article.Tags()).Detach(ctx, tag)
+err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[Tag]{
+    {Model: tag, Through: oro.Map{"Sort": 1}},
+})
+```
+
+A pivot table can be a normal model and should be registered if you want schema sync to manage it.
+
+## Query by relation
+
+```go
+comments, err := db.Use[Comment]().For(article.Comments()).Get(ctx)
+```
+
+`For(relation)` converts a loaded model relation into the correct target query conditions.
+
+## Relation aggregates
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    WithExists(Article{}.Cover()).
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+Aggregate aliases default to names like `comments_count`, `cover_exists`, or `comments_score_sum`. Map them into virtual fields when needed.
+
+## Dynamic relations
+
+```go
+func (article Article) Images() oro.Relation {
+    return oro.DynamicHasMany(article, "Images", "Image").
+        IDField("OwnerID").
+        TypeField("OwnerType").
+        TypeValue("Article")
+}
+```
+
+Dynamic relations are useful for media libraries, comments, tags, or audit records shared by multiple modules.

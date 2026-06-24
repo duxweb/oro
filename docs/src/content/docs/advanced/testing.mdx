@@ -1,0 +1,63 @@
+---
+title: Testing Matrix
+description: Local test commands and the shared SQLite, MySQL, PostgreSQL behavior matrix.
+---
+
+## Full suite
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+go test ./...
+go test -race ./...
+```
+
+## Driver tests
+
+```bash
+go test ./driver/sqlite
+go test ./driver/mysql
+go test ./driver/pgsql
+```
+
+MySQL and PostgreSQL use local defaults unless environment variables override them:
+
+```bash
+ORO_MYSQL_DSN='root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false'
+ORO_PGSQL_DSN='postgres://root@localhost:5432/duxorm?sslmode=disable'
+```
+
+The local development convention is:
+
+| Driver | Host | User | Password | Database |
+| --- | --- | --- | --- | --- |
+| MySQL | `localhost` | `root` | `root` | `duxorm` |
+| PostgreSQL | `localhost` | `root` | empty | `duxorm` |
+
+## Shared matrix
+
+The driver matrix covers the same ORM behavior across SQLite, MySQL, and PostgreSQL:
+
+- schema sync table creation and column addition;
+- model and table CRUD;
+- create return values and inserted primary keys;
+- default values and nullable values;
+- batch create and upsert;
+- `Where`, `WhereGroup`, `WhereWhen`, relation filters;
+- pagination, aggregates, stream, chunk;
+- transactions, nested transactions, locks;
+- joins, subqueries, group and having;
+- `HasOne`, `HasMany`, `BelongsTo`, `ManyToMany`;
+- dynamic relations and pivot fields;
+- `With`, `For`, `WhereHas`, `WhereDoesntHave`;
+- relation aggregates;
+- JSON queries and serialization.
+
+## Docs build
+
+The docs use pnpm.
+
+```bash
+cd docs
+pnpm install
+pnpm run build
+```

@@ -1,0 +1,43 @@
+/* Tailwind v4 + Starlight integration.
+   Order of cascade layers matters: Starlight styles sit between Tailwind base
+   and Tailwind utilities so utilities can override Starlight where needed. */
+@layer base, starlight, theme, components, utilities;
+
+@import '@astrojs/starlight-tailwind';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* Expose the Dux design tokens as Tailwind theme variables, so utilities like
+   `bg-canvas`, `text-ink`, `border-line`, `text-accent` are available.
+   The underlying --dux-* vars (defined in custom.css) flip per light/dark,
+   so these utilities stay theme-reactive automatically. */
+@theme {
+  --color-ink: var(--dux-ink);
+  --color-ink-2: var(--dux-ink-2);
+  --color-muted: var(--dux-muted);
+  --color-canvas: var(--dux-bg);
+  --color-surface: var(--dux-surface);
+  --color-line: var(--dux-line);
+  --color-line-strong: var(--dux-line-strong);
+  --color-accent: var(--dux-accent);
+  --color-code: var(--dux-code-bg);
+  --color-code-bar: var(--dux-code-bar);
+  --color-code-line: var(--dux-code-line);
+  --color-code-muted: var(--dux-code-muted);
+
+  --font-sans: var(--sl-font);
+  --font-mono: var(--sl-font-mono);
+
+  /* Map Starlight's accent palette to green. */
+  --color-accent-50: var(--color-green-50);
+  --color-accent-100: var(--color-green-100);
+  --color-accent-200: var(--color-green-200);
+  --color-accent-300: var(--color-green-300);
+  --color-accent-400: var(--color-green-400);
+  --color-accent-500: var(--color-green-500);
+  --color-accent-600: var(--color-green-600);
+  --color-accent-700: var(--color-green-700);
+  --color-accent-800: var(--color-green-800);
+  --color-accent-900: var(--color-green-900);
+  --color-accent-950: var(--color-green-950);
+}

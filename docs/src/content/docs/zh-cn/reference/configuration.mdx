@@ -1,0 +1,137 @@
+---
+title: 配置
+description: Config、连接、连接池、日志、超时、租户和分片配置。
+---
+
+## Config 结构
+
+```go
+type Config struct {
+    Default     string
+    Connections map[string]ConnectionConfig
+    TablePrefix string
+    Pool        PoolConfig
+    Tenant      *TenantConfig
+    Shards      map[string]ShardConfig
+    Cache       CacheStore
+    Logger      Logger
+    LogLevel    LogLevel
+    Timeout     TimeoutConfig
+    Retry       RetryConfig
+}
+```
+
+关键规则：所有数据库驱动都放在 `Connections` 下。
+
+## 表前缀
+
+```go
+db, err := oro.Open(oro.Config{
+    TablePrefix: "tenant_",
+})
+```
+
+`TablePrefix` 在 SQL 编译前把逻辑表名解析为物理表名。
+
+- `s.Table("products")` 会同步和查询 `tenant_products`。
+- `db.Table("products")` 同样查询 `tenant_products`。
+- 已经带前缀的表名不会重复添加前缀。
+- 带命名空间的表名只处理最后一段，`shop.products` 会变成 `shop.tenant_products`。
+- Raw SQL 不会被改写；拼接原生 SQL 时使用 `db.TableName("products")`。
+
+```go
+rows, err := db.Raw("select * from "+db.TableName("products")).Get(ctx)
+```
+
+## 连接
+
+```go
+type ConnectionConfig struct {
+    Driver oro.Driver
+    Reads  []oro.Driver
+    Pool   *oro.PoolConfig
+}
+```
+
+- `Driver` 是主连接；
+- `Reads` 是读库；
+- `Pool` 覆盖全局连接池配置。
+
+## 连接池
+
+```go
+Pool: oro.PoolConfig{
+    MaxOpenConns:    20,
+    MaxIdleConns:    10,
+    ConnMaxLifetime: time.Hour,
+    ConnMaxIdleTime: 10 * time.Minute,
+    PingOnOpen:      true,
+}
+```
+
+全局连接池应用到所有连接，单连接可覆盖。
+
+## 日志
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger:   myLogger,
+    LogLevel: oro.LogLevelInfo,
+})
+```
+
+ORM 只定义小接口，不强制应用使用某个日志库。
+
+## 超时和重试
+
+```go
+db, err := oro.Open(oro.Config{
+    Timeout: oro.TimeoutConfig{
+        Query:       5 * time.Second,
+        Transaction: 10 * time.Second,
+    },
+    Retry: oro.RetryConfig{
+        ReadAttempts:       2,
+        TxDeadlockAttempts: 3,
+    },
+})
+```
+
+单次查询也可以覆盖超时：
+
+```go
+rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
+```
+
+## 租户
+
+```go
+Tenant: &oro.TenantConfig{
+    Fields: []string{"TenantID", "AppID"},
+}
+```
+
+使用租户值：
+
+```go
+db.Tenant(oro.Map{"TenantID": 1, "AppID": 10})
+```
+
+## 分片
+
+```go
+Shards: map[string]oro.ShardConfig{
+    "orders": {
+        Connections: []string{"orders_0", "orders_1"},
+        Strategy:    oro.ModShard("TenantID", 2),
+    },
+}
+```
+
+模型在 `Define` 中启用分片：
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Shard("orders", "TenantID")
+}
+```

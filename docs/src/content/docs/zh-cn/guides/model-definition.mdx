@@ -1,0 +1,115 @@
+---
+title: 模型定义
+description: 不使用 struct tag 定义表、字段、索引、隐藏字段和模型级行为。
+---
+
+模型实现 `Define(*oro.SchemaBuilder)`。字段名使用 Go 结构体字段，列名默认转为 snake_case。
+
+```go
+type User struct {
+    oro.Model
+    Email        string
+    PasswordHash string
+    Status       string
+    Profile      oro.JSONRaw
+    DeletedAt    oro.Null[time.Time]
+}
+
+func (User) Define(s *oro.SchemaBuilder) {
+    s.Table("users")
+    s.Field("Email").String().Size(160).Unique()
+    s.Field("PasswordHash").Column("password_hash").String().Hidden()
+    s.Field("Status").Enum("active", "disabled").Default("active").Index()
+    s.Field("Profile").JSON().Nullable()
+    s.Field("DeletedAt").Timestamp().Nullable()
+}
+```
+
+## 命名规则
+
+| 项 | 默认 | 覆盖 |
+| --- | --- | --- |
+| 表名 | 模型名 snake_case 后加 `s` | `s.Table("users")` |
+| 列名 | 字段名 snake_case | `s.Field("PasswordHash").Column("password_hash")` |
+| JSON 输出 | 标准 JSON tag 和序列化规则 | 关系可用 `JSONName(...)` |
+
+## 字段类型
+
+```go
+s.Field("Name").String().Size(120)
+s.Field("Description").Text()
+s.Field("Enabled").Bool().Default(true)
+s.Field("Quantity").Int()
+s.Field("Views").BigInt()
+s.Field("Price").Decimal(12, 2).Default(0)
+s.Field("Payload").Binary()
+s.Field("Meta").JSON().Nullable()
+s.Field("UUID").UUID()
+s.Field("CreatedAt").Timestamp()
+s.Field("Birthday").Date()
+s.Field("Status").Enum("draft", "published")
+```
+
+还提供 `Email`、`URL`、`IP`、`MAC`、`Phone`、`Slug`、`Color`、`StringArray`、`IntArray`、`Point` 等语义类型，具体映射由方言处理。
+
+## Null 值
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[int] `json:"stock"`
+}
+
+product.Stock = oro.NullOf(10)
+product.Stock = oro.NullZero[int]()
+```
+
+`oro.Null[T]` 避免普通业务字段大量使用 `*int`、`*string` 后取值麻烦。
+
+## 默认值、Only 和 Omit
+
+```go
+s.Field("Price").Uint().Default(0)
+s.Field("CreatedAt").Timestamp().DefaultExpr("CURRENT_TIMESTAMP")
+```
+
+写入字段显式控制：
+
+```go
+db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
+db.Use[Product]().Update(ctx, oro.Map{"Price": 120}, oro.Omit("UpdatedAt"))
+```
+
+`Only` 表示只写这些字段；`Omit` 表示排除这些字段，让数据库默认值或原值生效。
+
+## 索引
+
+```go
+s.Field("Code").Unique()
+s.Field("Status").Index()
+s.Field("Title").FullText()
+
+s.Index("idx_posts_status", "Status")
+s.Unique("uk_posts_slug", "Slug")
+s.FullText("ft_posts_title_body", "Title", "Body")
+```
+
+## Hidden 和 Virtual
+
+```go
+s.Field("PasswordHash").Hidden()
+s.Field("CommentsCount").Virtual()
+```
+
+Hidden 默认不查询、不序列化。Virtual 不同步为数据库字段，适合承接聚合值。
+
+## 模型级配置
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Connection("mysql")
+    s.Tenant("TenantID", "AppID")
+    s.Shard("orders", "TenantID")
+}
+```

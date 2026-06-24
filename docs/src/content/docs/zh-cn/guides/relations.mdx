@@ -1,0 +1,155 @@
+---
+title: 关联关系
+description: 不依赖循环模型字段定义、预加载、过滤、聚合和写入关联。
+---
+
+关系是返回 `oro.Relation` 的模型方法。结构体不需要 `Cover *Image` 这类字段，因此可以减少 Go 模块循环引用问题。
+
+```go
+type Article struct {
+    oro.Model
+    Title string
+}
+
+type Image struct {
+    oro.Model
+    ArticleID uint64
+    URL       string
+}
+
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## 使用 With 预加载
+
+```go
+article, err := db.Use[Article]().With(Article{}.Cover()).First(ctx)
+cover, err := article.Cover().One[Image]()
+```
+
+读取关系也走关系方法：
+
+```go
+cover, err := article.Cover().One[Image]()
+comments, err := article.Comments().Many[Comment]()
+```
+
+如果关系没有预加载，`One[T]` 或 `Many[T]` 返回 `ErrRelationNotLoaded`。
+
+## 预加载回调
+
+```go
+articles, err := db.Use[Article]().With(Article{}.Comments(), func(q *oro.RelationQuery) {
+    q.Where("Status", "approved").OrderByDesc("ID").Limit(5)
+}).Get(ctx)
+```
+
+## 多级预加载
+
+```go
+articles, err := db.Use[Article]().With("Comments.Author").Get(ctx)
+```
+
+字符串路径用于动态或多级关系。能用方法关系时优先用方法关系，重构更安全。
+
+## 关系类型
+
+```go
+func (comment Comment) Article() oro.Relation {
+    return oro.BelongsTo(comment, "Article", "Article").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+| 类型 | 场景 |
+| --- | --- |
+| `BelongsTo` | 当前行保存父级外键 |
+| `HasOne` | 一个目标行指回当前模型 |
+| `HasMany` | 多个目标行指回当前模型 |
+| `ManyToMany` | 通过中间表连接两端 |
+| `DynamicBelongsTo` | 多态归属在当前行上 |
+| `DynamicHasMany` | 多态子表保存来源 ID 和类型 |
+| `DynamicManyToMany` | 多态多对多中间表 |
+
+## 多对多和中间表字段
+
+```go
+type ArticleTag struct {
+    oro.Model
+    ArticleID uint64
+    TagID     uint64
+    Sort      int
+}
+
+func (ArticleTag) Define(s *oro.SchemaBuilder) {
+    s.Table("article_tags")
+    s.Field("ArticleID").UnsignedBigInt().Index()
+    s.Field("TagID").UnsignedBigInt().Index()
+    s.Field("Sort").Int().Default(0)
+    s.Unique("uk_article_tag", "ArticleID", "TagID")
+}
+
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        Through("article_tags").
+        SourceForeignKey("ArticleID").
+        TargetForeignKey("TagID")
+}
+```
+
+通过关系操作器写入：
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1})
+err = db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 2})
+err = db.Relation(article.Tags()).Detach(ctx, tag)
+err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[Tag]{
+    {Model: tag, Through: oro.Map{"Sort": 1}},
+})
+```
+
+中间表可以是普通模型；如果需要结构同步管理，就注册这个模型。
+
+## 通过关系查询
+
+```go
+comments, err := db.Use[Comment]().For(article.Comments()).Get(ctx)
+```
+
+`For(relation)` 会把已知模型关系转换为目标查询条件。
+
+## 关系聚合
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    WithExists(Article{}.Cover()).
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+## 动态关系
+
+```go
+func (article Article) Images() oro.Relation {
+    return oro.DynamicHasMany(article, "Images", "Image").
+        IDField("OwnerID").
+        TypeField("OwnerType").
+        TypeValue("Article")
+}
+```
+
+动态关系适合媒体库、评论、标签和审计记录等跨模块资源。

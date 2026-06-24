@@ -1,0 +1,64 @@
+---
+title: Schema Sync
+description: Sync registered models to database tables without migration files.
+---
+
+Oro uses model definitions as the schema source of truth.
+
+```go
+if err := db.Register(Product{}, User{}, ArticleTag{}); err != nil {
+    return err
+}
+if err := db.Sync(ctx); err != nil {
+    return err
+}
+```
+
+## What sync does automatically
+
+Safe changes are applied automatically:
+
+- create missing tables;
+- add missing columns;
+- create indexes and unique indexes;
+- create supported full-text indexes;
+- keep internal schema snapshots for future diffing.
+
+## What sync refuses
+
+Potentially destructive changes return an error instead of silently mutating data:
+
+- dropping a column;
+- narrowing a type;
+- tightening nullable constraints;
+- ambiguous type changes;
+- ambiguous field rename detection.
+
+The rule is simple: automatic sync is for safe forward changes. Destructive data operations should be explicit application code or a manual database operation.
+
+## Field type changes
+
+Compatible widening changes can be handled by the dialect when safe. Unsafe changes are rejected because different databases have different casting rules and data-loss behavior.
+
+If a field needs a destructive type change, the recommended flow is:
+
+1. add a new field;
+2. backfill data explicitly;
+3. deploy code reading the new field;
+4. remove the old field manually when safe.
+
+## Foreign keys
+
+Foreign key constraints are off by default. Relations are ORM metadata and query behavior first. Add database-level foreign keys only when the application explicitly opts into them through field or sync configuration.
+
+This keeps schema sync usable across SQLite, MySQL, PostgreSQL, sharded tables, and modular projects where cross-module references may be deployed independently.
+
+## Multi-driver behavior
+
+Each driver owns dialect-specific DDL:
+
+| Driver | Notes |
+| --- | --- |
+| SQLite | safe table and column creation; limited native alter support |
+| MySQL | native indexes, JSON and full-text where supported by engine/version |
+| PostgreSQL | rich type mapping, JSONB-style query support, placeholder rewriting |

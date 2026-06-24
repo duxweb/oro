@@ -1,0 +1,94 @@
+---
+title: Multiple Drivers
+description: Configure SQLite, MySQL, PostgreSQL, read replicas, model connections, and cross-connection reads.
+---
+
+Oro keeps driver configuration under `Connections`. There is no separate top-level `Driver` field, so the configuration has one obvious place to look.
+
+```go
+db, err := oro.Open(oro.Config{
+    Default: "main",
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {
+            Driver: sqlite.Open("app.db"),
+        },
+        "mysql": {
+            Driver: mysql.Open("root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false"),
+        },
+        "pgsql": {
+            Driver: pgsql.Open("postgres://root@localhost:5432/duxorm?sslmode=disable"),
+        },
+    },
+})
+```
+
+If a query does not specify a connection, `Default` is used.
+
+## Pool defaults and overrides
+
+```go
+db, err := oro.Open(oro.Config{
+    Pool: oro.PoolConfig{
+        MaxOpenConns:    20,
+        MaxIdleConns:    10,
+        ConnMaxLifetime: time.Hour,
+        PingOnOpen:      true,
+    },
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {
+            Driver: sqlite.Open("app.db"),
+        },
+        "reporting": {
+            Driver: pgsql.Open(reportingDSN),
+            Pool: &oro.PoolConfig{MaxOpenConns: 5},
+        },
+    },
+})
+```
+
+Global pool settings apply to every connection. Per-connection settings override only that connection.
+
+## Read replicas
+
+```go
+Connections: map[string]oro.ConnectionConfig{
+    "main": {
+        Driver: mysql.Open(primaryDSN),
+        Reads: []oro.Driver{
+            mysql.Open(readDSN1),
+            mysql.Open(readDSN2),
+        },
+    },
+}
+```
+
+Read queries may use replicas. Writes, transactions, row locks, and `UsePrimary()` use the primary driver.
+
+```go
+rows, err := db.Use[Product]().UsePrimary().Get(ctx)
+```
+
+## Model-level connection
+
+```go
+func (Report) Define(s *oro.SchemaBuilder) {
+    s.Connection("pgsql")
+    s.Table("reports")
+}
+```
+
+The model connection becomes the default for `db.Use[Report]()`.
+
+## Query-level connection
+
+```go
+rows, err := db.Connection("pgsql").Table("reports").Get(ctx)
+```
+
+Query-level connection selection wins over default connection selection.
+
+## Cross-connection preloading
+
+`With` can load relations from the target model's configured connection. This supports modular systems where core models live in one database and media, logs, or reports live in another.
+
+Keep cross-connection relations read-oriented. Writes spanning multiple databases cannot be made atomic without an external distributed transaction coordinator.

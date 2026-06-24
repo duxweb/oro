@@ -1,0 +1,73 @@
+---
+title: Installation
+description: Install Oro and configure SQLite, MySQL, or PostgreSQL.
+---
+
+## Requirements
+
+Oro currently targets Go `1.27rc1` while method-level generics are being used in the design.
+
+```bash title="go"
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+```
+
+## Add the module
+
+```bash title="module"
+go get github.com/duxweb/oro
+```
+
+## Import a driver
+
+```go
+import (
+    oro "github.com/duxweb/oro"
+    "github.com/duxweb/oro/driver/sqlite"
+    "github.com/duxweb/oro/driver/mysql"
+    "github.com/duxweb/oro/driver/pgsql"
+)
+```
+
+Drivers are thin adapters over `database/sql`. If a driver exposes a compatible `*sql.DB` path through the Oro driver interface, the ORM layer does not need to know whether SQLite is CGO or pure Go.
+
+## SQLite
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+})
+```
+
+## MySQL
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {
+            Driver: mysql.Open("root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false"),
+        },
+    },
+})
+```
+
+## PostgreSQL
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {
+            Driver: pgsql.Open("postgres://root@localhost:5432/duxorm?sslmode=disable"),
+        },
+    },
+})
+```
+
+## Docs development
+
+The documentation site uses pnpm.
+
+```bash title="docs"
+cd docs && pnpm install && pnpm run dev
+```

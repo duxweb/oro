@@ -1,0 +1,21 @@
+---
+interface Props {
+  title?: string;
+  prompt?: string;
+  command?: string;
+}
+
+const { title = 'terminal', prompt = '$', command = '' } = Astro.props;
+---
+<div class="terminal-shell" role="group" aria-label={title}>
+  <div class="terminal-shell__bar">
+    <span class="terminal-shell__dot terminal-shell__dot--red"></span>
+    <span class="terminal-shell__dot terminal-shell__dot--yellow"></span>
+    <span class="terminal-shell__dot terminal-shell__dot--green"></span>
+    <span class="terminal-shell__title">{title}</span>
+  </div>
+  <div class="terminal-shell__body">
+    <span class="terminal-shell__prompt">{prompt}</span>
+    <code>{command}</code>
+  </div>
+</div>

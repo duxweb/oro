@@ -1,0 +1,20 @@
+{
+  "name": "oro-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.0",
+    "@astrojs/starlight-tailwind": "^5.0.0",
+    "@tailwindcss/vite": "^4.3.1",
+    "astro": "^7.0.2",
+    "sharp": "^0.35.2",
+    "tailwindcss": "^4.3.1"
+  },
+  "packageManager": "pnpm@10.31.0"
+}

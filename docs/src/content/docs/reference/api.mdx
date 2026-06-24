@@ -1,0 +1,94 @@
+---
+title: API Naming
+description: Public entry points, query methods, write options, and naming principles.
+---
+
+## Entry points
+
+```go
+db.Use[Product]()      // model query
+db.Table("products")   // direct table query
+db.Raw("select ...")   // raw SQL
+```
+
+These are the only top-level query entry points.
+
+Use `db.TableName("products")` when raw SQL needs the physical table name after `TablePrefix` is applied.
+
+## Query method map
+
+| API | Meaning |
+| --- | --- |
+| `Use[T]()` | typed model query using Go field names |
+| `Table(name)` | raw table query using database column names |
+| `TableName(name)` | resolve a logical table name to the physical table name |
+| `Raw(sql, args...)` | raw SQL query or command |
+| `MapTo[T]()` | map table/raw rows to a struct |
+| `Where` | field condition or condition object |
+| `WhereGroup` | parenthesized callback group |
+| `OrWhereGroup` | OR parenthesized callback group |
+| `WhereWhen` | conditional callback group |
+| `WhereColumn` | column-to-column comparison |
+| `WhereIn` | `IN (subquery)` |
+| `WhereExists` | `EXISTS (subquery)` |
+| `Select` | field names, aggregate expressions, raw expressions |
+| `GroupBy` / `Having` | aggregate grouping |
+| `Join` / `LeftJoin` | callback join builder |
+| `With` | preload relation |
+| `For` | query the target side of a relation |
+| `WhereHas` | filter models by relation existence |
+| `WhereDoesntHave` | filter models by relation absence |
+
+## Terminal methods
+
+| API | Return |
+| --- | --- |
+| `First(ctx)` | one row or `nil` |
+| `Find(ctx, id)` | one model by primary key or `nil` |
+| `Get(ctx)` | all rows as a slice |
+| `Create(ctx, value)` | created row with returned primary key |
+| `CreateMany(ctx, values)` | created rows |
+| `Update(ctx, Map)` | affected row count |
+| `Delete(ctx)` | affected row count |
+| `Upsert(ctx, value)` | inserted or updated row |
+| `Count(ctx)` | `int64` |
+| `Exists(ctx)` | `bool` |
+| `Sum` / `Avg` | `oro.Decimal` |
+| `Min[T]` / `Max[T]` | `oro.Null[T]` |
+| `Paginate(size)` | paginator object |
+| `Stream(ctx)` | streaming iterator |
+| `Chunk(ctx, size, fn)` | chunk callback |
+
+## Write options
+
+```go
+oro.Only("Code", "Price")
+oro.Omit("UpdatedAt")
+oro.BatchSize(500)
+oro.CheckVersion(version)
+oro.ConflictBy("Code").Update("Price")
+```
+
+`Only` and `Omit` are how writes avoid guessing whether a Go zero value was intentional.
+
+## Data containers
+
+| Type | Use |
+| --- | --- |
+| `oro.Map` | writes, table rows, tenant values, pivot fields |
+| `oro.Null[T]` | nullable scalar values |
+| `oro.Decimal` | decimal aggregate results |
+| `oro.JSONRaw` | raw JSON payload field |
+
+## Naming principle
+
+Oro favors fewer names with direct meaning:
+
+- `Use[T]` means model query;
+- `Table` means direct table access;
+- `Raw` means SQL escape hatch;
+- `With` means preload;
+- `For` means query through a relation;
+- `MapTo[T]` means map rows to a struct.
+
+The root package is the public façade. Internal packages are implementation details.

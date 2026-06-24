@@ -1,0 +1,89 @@
+---
+title: JSON & Full Text
+description: Query JSON fields and full-text indexes with portable high-level expressions.
+---
+
+## JSON field definition
+
+```go
+type Product struct {
+    oro.Model
+    Code string
+    Meta oro.JSONRaw
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Meta").JSON().Nullable()
+}
+```
+
+`oro.JSONRaw` stores raw JSON payloads. You can also map JSON into custom types through normal scanner/valuer patterns when needed.
+
+## JSON path conditions
+
+```go
+rows, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("profile", "country").Eq("CN"),
+).Get(ctx)
+```
+
+```go
+rows, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("flags", "featured").Eq(true),
+).Get(ctx)
+```
+
+Supported JSON helpers include equality, inequality, null checks, existence checks, and contains-style predicates where the dialect supports them.
+
+## JSON and table queries
+
+Model queries use Go field names:
+
+```go
+db.Use[Product]().Where(oro.JSON("Meta").Path("color").Eq("blue"))
+```
+
+Table queries use database column names:
+
+```go
+db.Table("products").Where(oro.JSON("meta").Path("color").Eq("blue"))
+```
+
+## Full-text index definition
+
+```go
+func (Post) Define(s *oro.SchemaBuilder) {
+    s.Table("posts")
+    s.Field("Title").String().FullText()
+    s.Field("Body").Text()
+    s.FullText("ft_posts_title_body", "Title", "Body")
+}
+```
+
+## Full-text query
+
+```go
+posts, err := db.Use[Post]().Where(
+    oro.FullText("Title", "Body").Match("generic orm"),
+).Get(ctx)
+```
+
+## Full-text score
+
+```go
+posts, err := db.Use[Post]().
+    Select("ID", "Title", oro.FullText("Title", "Body").Score("generic orm").As("score")).
+    Where(oro.FullText("Title", "Body").Match("generic orm")).
+    OrderByDesc("score").
+    Get(ctx)
+```
+
+## Dialect notes
+
+| Driver | JSON | Full text |
+| --- | --- | --- |
+| SQLite | JSON functions depend on SQLite build | built-in FTS requires dedicated virtual tables; schema sync returns unsupported for normal full-text index DDL |
+| MySQL | JSON path expressions and `JSON_CONTAINS` style support | native full-text indexes where engine/version supports them |
+| PostgreSQL | JSON/JSONB-style extraction | `to_tsvector` / `plainto_tsquery` style compilation |

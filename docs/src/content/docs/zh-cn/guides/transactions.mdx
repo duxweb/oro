@@ -1,0 +1,95 @@
+---
+title: 事务
+description: 回调事务、手动事务、嵌套 savepoint、重试和行锁。
+---
+
+## 回调事务
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    _, err := tx.Use[Product]().Create(ctx, &Product{Code: "P001"})
+    return err
+})
+```
+
+返回错误会回滚，返回 `nil` 会提交。
+
+## 嵌套事务
+
+嵌套事务在驱动支持时使用 savepoint。
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    if _, err := tx.Table("orders").Create(ctx, oro.Map{"status": "draft"}); err != nil {
+        return err
+    }
+
+    return tx.Transaction(ctx, func(inner *oro.DB) error {
+        _, err := inner.Table("order_logs").Create(ctx, oro.Map{"message": "created"})
+        return err
+    })
+})
+```
+
+## 手动事务
+
+```go
+tx, err := db.Begin(ctx)
+if err != nil { return err }
+
+committed := false
+defer func() {
+    if !committed {
+        _ = tx.Rollback(ctx)
+    }
+}()
+
+if _, err := tx.Use[Product]().Create(ctx, product); err != nil {
+    return err
+}
+
+if err := tx.Commit(ctx); err != nil {
+    return err
+}
+committed = true
+```
+
+普通业务优先用回调事务；手动事务适合事务边界跨多个 helper 的场景。
+
+## 行锁
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    product, err := tx.Use[Product]().Where("ID", id).LockForUpdate().First(ctx)
+    if err != nil || product == nil {
+        return err
+    }
+
+    _, err = tx.Use[Product]().Where("ID", product.ID).Update(ctx, oro.Map{
+        "Stock": oro.Decrement(1),
+    })
+    return err
+})
+```
+
+锁必须在事务内使用。支持 `LockForUpdate`、`LockForShare`、`NoWait`、`SkipLocked`。
+
+## 重试和超时
+
+```go
+db, err := oro.Open(oro.Config{
+    Timeout: oro.TimeoutConfig{
+        Query:       5 * time.Second,
+        Transaction: 10 * time.Second,
+    },
+    Retry: oro.RetryConfig{
+        TxDeadlockAttempts: 3,
+    },
+})
+```
+
+也可以设置单次查询超时：
+
+```go
+rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
+```

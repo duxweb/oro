@@ -1,0 +1,150 @@
+---
+title: CRUD Queries
+description: Create, read, update, delete, upsert, aggregate, paginate, and map rows.
+---
+
+## Model queries
+
+```go
+created, err := db.Use[Product]().Create(ctx, &Product{Code: "P001", Price: 100})
+found, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+rows, err := db.Use[Product]().Where("Price", ">=", 100).OrderBy("ID").Get(ctx)
+```
+
+`Use[T]()` works with Go field names. It returns `*T` or `[]*T`.
+
+## Table queries
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P002",
+    "price": 200,
+})
+
+rows, err := db.Table("products").Where("price", ">=", 100).Get(ctx)
+```
+
+`Table` works with database column names. It returns `oro.Map` or `[]oro.Map`.
+
+## Map table or raw rows to DTOs
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+view, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    First(ctx)
+```
+
+Mapping uses the same naming rules as model fields: snake-case columns map to exported Go fields.
+
+## Select and expressions
+
+```go
+rows, err := db.Use[Product]().
+    Select("ID", "Code", oro.Count("*").As("total")).
+    GroupBy("Code").
+    Get(ctx)
+```
+
+Use `oro.Raw(...)` inside `Select` when SQL expression power is required:
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Raw("sum(total) as revenue")).
+    GroupBy("status").
+    Get(ctx)
+```
+
+## Update
+
+```go
+affected, err := db.Use[Product]().
+    Where("Code", "P001").
+    Update(ctx, oro.Map{"Price": 120})
+```
+
+Atomic increments are write expressions:
+
+```go
+_, err = db.Use[Product]().Where("ID", id).Update(ctx, oro.Map{
+    "Stock": oro.Decrement(1),
+})
+```
+
+## Delete and restore
+
+```go
+_, err = db.Use[Product]().Where("ID", id).Delete(ctx)
+_, err = db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
+_, err = db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+If a model has a soft-delete field, `Delete` writes that field. `ForceDelete` performs a physical delete.
+
+## Upsert
+
+```go
+saved, err := db.Use[Product]().Upsert(ctx, product,
+    oro.ConflictBy("Code").Update("Price", "Stock"),
+)
+```
+
+Conflict handling is explicit:
+
+```go
+oro.ConflictBy("Code").DoNothing()
+oro.ConflictBy("Code").Update("Price")
+oro.ConflictBy("Code").UpdateAll()
+oro.ConflictBy("Code").UpdateMap(oro.Map{"UpdatedAt": oro.Raw("CURRENT_TIMESTAMP")})
+```
+
+## Batch writes
+
+```go
+created, err := db.Use[Product]().CreateMany(ctx, []*Product{p1, p2}, oro.BatchSize(500))
+saved, err := db.Table("products").UpsertMany(ctx, rows, oro.ConflictBy("code").UpdateAll())
+```
+
+## Aggregates
+
+```go
+total, err := db.Use[Product]().Where("Price", ">", 0).Count(ctx)
+exists, err := db.Use[Product]().Where("Code", "P001").Exists(ctx)
+sum, err := db.Use[Product]().Sum(ctx, "Price")
+min, err := db.Use[Product]().Min[uint](ctx, "Price")
+max, err := db.Use[Product]().Max[uint](ctx, "Price")
+```
+
+`Sum` and `Avg` return `oro.Decimal`. `Min` and `Max` return `oro.Null[T]` because empty sets have no scalar value.
+
+## Pagination, chunk, and stream
+
+```go
+page, err := db.Use[Product]().OrderBy("ID").Paginate(20).Page(ctx, 1)
+items, err := db.Use[Product]().OrderBy("ID").Paginate(20).Items(ctx, 1)
+total, err := db.Use[Product]().Paginate(20).Total(ctx)
+```
+
+```go
+err := db.Use[Product]().OrderBy("ID").Chunk(ctx, 1000, func(items []*Product) error {
+    return nil
+})
+```
+
+```go
+stream, err := db.Use[Product]().Stream(ctx)
+if err != nil { return err }
+defer stream.Close()
+
+for stream.Next() {
+    product := stream.Value()
+    _ = product
+}
+if err := stream.Err(); err != nil { return err }
+```

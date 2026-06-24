@@ -1,0 +1,136 @@
+---
+title: 快速开始
+description: 打开数据库、同步模型，并运行泛型 CRUD。
+---
+
+Oro 围绕三个入口设计：
+
+```go
+db.Use[Product]()      // 模型查询
+db.Table("products")   // 裸表查询
+db.Raw("select ...")   // 原生 SQL
+```
+
+模型查询返回结构体。裸表和 Raw 查询默认返回 `oro.Map`，也可以通过 `MapTo[T]()` 映射成 DTO。
+
+## 安装
+
+```bash title="install"
+go get github.com/duxweb/oro
+```
+
+开发阶段当前目标是 `go1.27rc1`。
+
+```bash title="go version"
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+```
+
+## 定义模型
+
+```go
+package main
+
+import oro "github.com/duxweb/oro"
+
+type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+    Stock oro.Null[int]
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Size(64).Unique()
+    s.Field("Price").Uint().Default(0)
+    s.Field("Stock").Int().Nullable()
+}
+```
+
+`Define` 是结构定义的唯一来源。结构体保持干净，数据库细节不散落在 tag 里。
+
+## 打开连接并同步
+
+```go
+ctx := context.Background()
+
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close(ctx)
+
+if err := db.Register(Product{}); err != nil {
+    log.Fatal(err)
+}
+if err := db.Sync(ctx); err != nil {
+    log.Fatal(err)
+}
+```
+
+`Register` 接收实现了 `Define` 的模型。`Sync` 会创建缺失表、字段和索引；破坏性变更不会静默执行。
+
+## 创建和查询
+
+```go
+created, err := db.Use[Product]().Create(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+    Stock: oro.NullOf(10),
+})
+
+found, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+rows, err := db.Use[Product]().Where("Price", ">=", 100).OrderBy("ID").Get(ctx)
+```
+
+返回规则保持简单：
+
+| 方法 | 查不到 |
+| --- | --- |
+| `First(ctx)` | `nil, nil` |
+| `Find(ctx, id)` | `nil, nil` |
+| `Get(ctx)` | 空切片 |
+| `Count(ctx)` | `0, nil` |
+
+## 更新和删除
+
+```go
+_, err = db.Use[Product]().Where("Code", "P001").Update(ctx, oro.Map{
+    "Price": 120,
+    "Stock": oro.NullZero[int](),
+})
+
+_, err = db.Use[Product]().Where("Code", "P001").Delete(ctx)
+```
+
+`Update` 和 `Delete` 必须带条件，避免误操作整张表。
+
+## 直接查表
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P002",
+    "price": 200,
+})
+
+rows, err := db.Table("products").Where("price", ">=", 100).Get(ctx)
+```
+
+裸表查询使用数据库列名，并返回 `oro.Map`。
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+view, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    First(ctx)
+```

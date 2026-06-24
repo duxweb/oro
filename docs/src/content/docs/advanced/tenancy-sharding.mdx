@@ -1,0 +1,106 @@
+---
+title: Tenancy & Sharding
+description: Tenant-aware queries, tenant write injection, shard routing, and multi-field tenant values.
+---
+
+Tenancy and sharding are optional. Models opt in explicitly.
+
+## Global tenant config
+
+```go
+db, err := oro.Open(oro.Config{
+    Tenant: &oro.TenantConfig{
+        Fields: []string{"TenantID", "AppID"},
+    },
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+})
+```
+
+## Model tenant fields
+
+```go
+type Order struct {
+    oro.Model
+    TenantID uint64
+    AppID    uint64
+    Total    uint
+}
+
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Tenant("TenantID", "AppID")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("AppID").UnsignedBigInt().Index()
+    s.Field("Total").Uint()
+}
+```
+
+## Query with tenant values
+
+```go
+orders, err := db.Tenant(oro.Map{
+    "TenantID": 1,
+    "AppID":    10,
+}).Use[Order]().Get(ctx)
+```
+
+`oro.Map` is the single tenant value container. The same values are used for automatic where clauses and write injection.
+
+## Disable tenant filtering
+
+```go
+rows, err := db.WithoutTenant().Use[Order]().Get(ctx)
+```
+
+Use this only for admin or maintenance paths.
+
+## Tenant router
+
+Tenant values can route to a connection:
+
+```go
+db, err := oro.Open(oro.Config{
+    Tenant: &oro.TenantConfig{
+        Fields: []string{"TenantID"},
+        Router: oro.TenantRouterFunc(func(ctx context.Context, values oro.Map) (string, error) {
+            if values["TenantID"] == uint64(1) {
+                return "tenant_a", nil
+            }
+            return "tenant_b", nil
+        }),
+    },
+})
+```
+
+## Shard config
+
+```go
+db, err := oro.Open(oro.Config{
+    Shards: map[string]oro.ShardConfig{
+        "orders": {
+            Connections: []string{"orders_0", "orders_1"},
+            Strategy:    oro.ModShard("TenantID", 2),
+        },
+    },
+})
+```
+
+## Model sharding
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Shard("orders", "TenantID")
+}
+```
+
+## Query one shard or all shards
+
+```go
+orders, err := db.Use[Order]().Shard(oro.Map{"TenantID": 10}).Get(ctx)
+all, err := db.Use[Order]().AllShards().Where("Status", "paid").Get(ctx)
+```
+
+A single transaction cannot span multiple shards. Keep multi-shard operations read-oriented or coordinate them at the application layer.
