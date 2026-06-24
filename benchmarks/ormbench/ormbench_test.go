@@ -4,15 +4,26 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	oro "github.com/duxweb/oro"
+	oromysql "github.com/duxweb/oro/driver/mysql"
+	oropgsql "github.com/duxweb/oro/driver/pgsql"
 	orosqlite "github.com/duxweb/oro/driver/sqlite"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/mysqldialect"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
-	"gorm.io/driver/sqlite"
+	"github.com/uptrace/bun/schema"
+	gormmysql "gorm.io/driver/mysql"
+	gormpostgres "gorm.io/driver/postgres"
+	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"xorm.io/xorm"
 )
@@ -33,7 +44,7 @@ func (oroBenchProduct) Define(s *oro.SchemaBuilder) {
 
 type gormBenchProduct struct {
 	ID    uint64 `gorm:"primaryKey"`
-	Code  string `gorm:"uniqueIndex"`
+	Code  string `gorm:"size:191;uniqueIndex"`
 	Price uint
 }
 
@@ -43,7 +54,7 @@ func (gormBenchProduct) TableName() string {
 
 type xormBenchProduct struct {
 	ID    uint64 `xorm:"'id' pk autoincr"`
-	Code  string `xorm:"'code' unique"`
+	Code  string `xorm:"'code' varchar(191) unique"`
 	Price uint   `xorm:"'price'"`
 }
 
@@ -54,7 +65,7 @@ func (xormBenchProduct) TableName() string {
 type bunBenchProduct struct {
 	bun.BaseModel `bun:"table:products,alias:p"`
 	ID            uint64 `bun:",pk,autoincrement"`
-	Code          string `bun:",unique"`
+	Code          string `bun:"type:varchar(191),unique"`
 	Price         uint
 }
 
@@ -512,15 +523,17 @@ func benchBunDeleteByCode(b *testing.B) {
 
 func openOroBenchDB(b *testing.B, ctx context.Context) *oro.DB {
 	b.Helper()
+	config := currentBenchConfig()
 	db, err := oro.Open(oro.Config{
 		SkipDefaultTransaction: true,
 		Connections: map[string]oro.ConnectionConfig{
-			"default": {Driver: orosqlite.Open(memoryDSN())},
+			"default": {Driver: config.oroDriver()},
 		},
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
+	resetOroBenchTables(b, ctx, db)
 	if err := db.Register(oroBenchProduct{}); err != nil {
 		b.Fatal(err)
 	}
@@ -555,10 +568,12 @@ func seedOroProductsWithCode(b *testing.B, ctx context.Context, db *oro.DB, coun
 
 func openGORMBenchDB(b *testing.B) *gorm.DB {
 	b.Helper()
-	db, err := gorm.Open(sqlite.Open(memoryDSN()), &gorm.Config{SkipDefaultTransaction: true})
+	config := currentBenchConfig()
+	db, err := gorm.Open(config.gormDialector(), &gorm.Config{SkipDefaultTransaction: true})
 	if err != nil {
 		b.Fatal(err)
 	}
+	resetGORMBenchTables(b, db)
 	if err := db.AutoMigrate(&gormBenchProduct{}); err != nil {
 		b.Fatal(err)
 	}
@@ -594,11 +609,13 @@ func seedGORMProductsWithCode(b *testing.B, db *gorm.DB, count int, code func(in
 
 func openXORMBenchDB(b *testing.B) *xorm.Engine {
 	b.Helper()
-	engine, err := xorm.NewEngine("sqlite", memoryDSN())
+	config := currentBenchConfig()
+	engine, err := xorm.NewEngine(config.xormDriverName(), config.xormDSN())
 	if err != nil {
 		b.Fatal(err)
 	}
 	engine.ShowSQL(false)
+	resetXORMBenchTables(b, engine)
 	if err := engine.Sync(new(xormBenchProduct)); err != nil {
 		b.Fatal(err)
 	}
@@ -634,11 +651,13 @@ func seedXORMProductsWithCode(b *testing.B, engine *xorm.Engine, count int, code
 
 func openBunBenchDB(b *testing.B, ctx context.Context) *bun.DB {
 	b.Helper()
-	sqlDB, err := sql.Open(sqliteshim.ShimName, memoryDSN())
+	config := currentBenchConfig()
+	sqlDB, err := sql.Open(config.sqlDriverName(), config.sqlDSN())
 	if err != nil {
 		b.Fatal(err)
 	}
-	db := bun.NewDB(sqlDB, sqlitedialect.New())
+	db := bun.NewDB(sqlDB, config.bunDialect())
+	resetBunBenchTables(b, ctx, db)
 	if _, err := db.NewCreateTable().Model((*bunBenchProduct)(nil)).IfNotExists().Exec(ctx); err != nil {
 		b.Fatal(err)
 	}
@@ -669,6 +688,144 @@ func seedBunProductsWithCode(b *testing.B, ctx context.Context, db *bun.DB, coun
 	if _, err := db.NewInsert().Model(&products).Exec(ctx); err != nil {
 		b.Fatal(err)
 	}
+}
+
+func resetOroBenchTables(b *testing.B, ctx context.Context, db *oro.DB) {
+	b.Helper()
+	for _, statement := range currentBenchConfig().resetSQL() {
+		if _, err := db.Raw(statement).Exec(ctx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func resetGORMBenchTables(b *testing.B, db *gorm.DB) {
+	b.Helper()
+	for _, statement := range currentBenchConfig().resetSQL() {
+		if err := db.Exec(statement).Error; err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func resetXORMBenchTables(b *testing.B, engine *xorm.Engine) {
+	b.Helper()
+	for _, statement := range currentBenchConfig().resetSQL() {
+		if _, err := engine.Exec(statement); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func resetBunBenchTables(b *testing.B, ctx context.Context, db *bun.DB) {
+	b.Helper()
+	for _, statement := range currentBenchConfig().resetSQL() {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+type benchDriverConfig struct {
+	name string
+	dsn  string
+}
+
+func currentBenchConfig() benchDriverConfig {
+	name := strings.ToLower(strings.TrimSpace(os.Getenv("ORO_BENCH_DRIVER")))
+	if name == "" {
+		name = "sqlite"
+	}
+	switch name {
+	case "mysql":
+		return benchDriverConfig{name: name, dsn: envOr("ORO_BENCH_DSN", "root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=true&clientFoundRows=true")}
+	case "pgsql", "postgres", "postgresql":
+		return benchDriverConfig{name: "pgsql", dsn: envOr("ORO_BENCH_DSN", "postgres://root@localhost/duxorm?sslmode=disable")}
+	default:
+		return benchDriverConfig{name: "sqlite", dsn: memoryDSN()}
+	}
+}
+
+func (config benchDriverConfig) oroDriver() oro.Driver {
+	switch config.name {
+	case "mysql":
+		return oromysql.Open(config.dsn)
+	case "pgsql":
+		return oropgsql.Open(config.dsn)
+	default:
+		return orosqlite.Open(config.dsn)
+	}
+}
+
+func (config benchDriverConfig) gormDialector() gorm.Dialector {
+	switch config.name {
+	case "mysql":
+		return gormmysql.Open(config.dsn)
+	case "pgsql":
+		return gormpostgres.Open(config.dsn)
+	default:
+		return gormsqlite.Open(config.dsn)
+	}
+}
+
+func (config benchDriverConfig) xormDriverName() string {
+	switch config.name {
+	case "mysql":
+		return "mysql"
+	case "pgsql":
+		return "pgx"
+	default:
+		return "sqlite"
+	}
+}
+
+func (config benchDriverConfig) xormDSN() string {
+	return config.sqlDSN()
+}
+
+func (config benchDriverConfig) sqlDriverName() string {
+	switch config.name {
+	case "mysql":
+		return "mysql"
+	case "pgsql":
+		return "pgx"
+	default:
+		return sqliteshim.ShimName
+	}
+}
+
+func (config benchDriverConfig) sqlDSN() string {
+	return config.dsn
+}
+
+func (config benchDriverConfig) bunDialect() schema.Dialect {
+	switch config.name {
+	case "mysql":
+		return mysqldialect.New()
+	case "pgsql":
+		return pgdialect.New()
+	default:
+		return sqlitedialect.New()
+	}
+}
+
+func (config benchDriverConfig) resetSQL() []string {
+	switch config.name {
+	case "mysql":
+		return []string{"drop table if exists products", "drop table if exists oro_schema"}
+	case "pgsql":
+		return []string{"drop table if exists products cascade", "drop table if exists oro_schema cascade"}
+	default:
+		return []string{"drop table if exists products", "drop table if exists oro_schema"}
+	}
+}
+
+func envOr(key string, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 var benchDBCounter atomic.Uint64

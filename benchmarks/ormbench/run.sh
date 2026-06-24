@@ -10,6 +10,10 @@ PATTERN="${PATTERN:-.}"
 
 mkdir -p "$OUT_DIR"
 
+if [[ -n "${ORO_BENCH_DRIVER:-}" ]]; then
+  echo "ORO_BENCH_DRIVER=$ORO_BENCH_DRIVER"
+fi
+
 go test -run '^$'
 go test -bench="$PATTERN" -benchmem -run '^$' -benchtime="$BENTIME" -count="$COUNT" | tee "$OUT_DIR/bench.txt"
 
