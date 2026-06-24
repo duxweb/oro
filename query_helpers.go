@@ -13,6 +13,7 @@ import (
 
 const defaultChunkSize = 1000
 const defaultResultCapacity = 8
+const defaultCreateBatchSize = 1000
 
 type AggregateExpr struct {
 	Func  string
@@ -54,6 +55,49 @@ func BatchSize(size int) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.batchSize = size
 	})
+}
+
+func createBatchSize(config Config, options writeOptions) int {
+	if options.batchSize > 0 {
+		return options.batchSize
+	}
+	if config.Batch.CreateSize > 0 {
+		return config.Batch.CreateSize
+	}
+	return defaultCreateBatchSize
+}
+
+func chunkMapsForCreate(values []Map, size int) [][]Map {
+	if size <= 0 || size >= len(values) {
+		return [][]Map{values}
+	}
+	chunks := make([][]Map, 0, (len(values)+size-1)/size)
+	for start := 0; start < len(values); start += size {
+		end := start + size
+		if end > len(values) {
+			end = len(values)
+		}
+		chunks = append(chunks, values[start:end])
+	}
+	return chunks
+}
+
+func mapsHaveSameKeys(values []Map) bool {
+	if len(values) <= 1 {
+		return true
+	}
+	first := values[0]
+	for index := 1; index < len(values); index++ {
+		if len(values[index]) != len(first) {
+			return false
+		}
+		for key := range first {
+			if _, ok := values[index][key]; !ok {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func CheckVersion(value any) WriteOption {
@@ -963,6 +1007,13 @@ func upsertLookupConditions(spec WriteSpec, primaryColumns []string, result Exec
 }
 
 func createRowsWithoutReturning(ctx context.Context, db *DB, conn *Connection, spec WriteSpec, compiled CompiledSQL) ([]Map, error) {
+	if len(spec.Values) > 1 {
+		result, err := execCompiled(ctx, db, execForQueryRuntime(db, conn), spec.QuerySpec, compiled, "create")
+		if err != nil {
+			return nil, translateQueryError(conn, err)
+		}
+		return lookupCreatedRows(ctx, db, conn, spec, result)
+	}
 	if len(spec.Values) != 1 {
 		rows := make([]Map, 0, len(spec.Values))
 		for _, value := range spec.Values {
@@ -1016,6 +1067,94 @@ func createRowsWithoutReturning(ctx context.Context, db *DB, conn *Connection, s
 		return nil, &Error{Op: "create", Kind: ErrScan, Table: spec.Table, Field: primaryColumn}
 	}
 	return []Map{row}, nil
+}
+
+func lookupCreatedRows(ctx context.Context, db *DB, conn *Connection, spec WriteSpec, result ExecResult) ([]Map, error) {
+	primaryColumns, err := primaryColumns(ctx, conn, spec)
+	if err != nil {
+		return nil, err
+	}
+	if len(primaryColumns) != 1 {
+		return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Table: spec.Table}
+	}
+	primaryColumn := primaryColumns[0]
+	primaryValues, err := createdPrimaryValues(conn, spec.Values, primaryColumn, result)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := queryRows(ctx, db, QuerySpec{
+		Connection: spec.Connection,
+		Table:      spec.Table,
+		Where: []Condition{{
+			Field: primaryColumn,
+			Op:    "in_values",
+			Value: primaryValues,
+		}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != len(primaryValues) {
+		return nil, &Error{Op: "create", Kind: ErrScan, Table: spec.Table, Field: primaryColumn}
+	}
+	return orderRowsByPrimary(rows, primaryColumn, primaryValues), nil
+}
+
+func createdPrimaryValues(conn *Connection, values []Map, primaryColumn string, result ExecResult) ([]any, error) {
+	if allRowsHavePrimary(values, primaryColumn) {
+		ids := make([]any, 0, len(values))
+		for _, row := range values {
+			ids = append(ids, row[primaryColumn])
+		}
+		return ids, nil
+	}
+	if result.HasLastInsertID && len(values) > 0 {
+		ids := make([]any, 0, len(values))
+		startID := result.LastInsertID
+		switch conn.Dialect.Name() {
+		case "sqlite":
+			startID = result.LastInsertID - int64(len(values)) + 1
+		}
+		for index := range values {
+			ids = append(ids, startID+int64(index))
+		}
+		return ids, nil
+	}
+	return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Field: primaryColumn}
+}
+
+func allRowsHavePrimary(values []Map, primaryColumn string) bool {
+	if primaryColumn == "" {
+		return false
+	}
+	for _, row := range values {
+		value, ok := row[primaryColumn]
+		if !ok || value == nil {
+			return false
+		}
+	}
+	return len(values) > 0
+}
+
+func orderRowsByPrimary(rows []Map, primaryColumn string, primaryValues []any) []Map {
+	if len(rows) <= 1 {
+		return rows
+	}
+	byKey := make(map[any]Map, len(rows))
+	for _, row := range rows {
+		byKey[comparableKey(row[primaryColumn])] = row
+	}
+	ordered := make([]Map, 0, len(rows))
+	for _, value := range primaryValues {
+		row, ok := byKey[comparableKey(value)]
+		if ok {
+			ordered = append(ordered, row)
+		}
+	}
+	if len(ordered) == len(rows) {
+		return ordered
+	}
+	return rows
 }
 
 func queryCompiled(ctx context.Context, db *DB, exec ExecContext, spec QuerySpec, compiled CompiledSQL, operation string) (*RowsResult, error) {
@@ -1835,6 +1974,34 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 		return nil, &Error{Op: "create", Kind: ErrInvalidArgument}
 	}
 	return row, nil
+}
+
+func assignModelCreateValues(schema *ModelSchema, model any, row Map) error {
+	modelValue := reflect.ValueOf(model)
+	if !modelValue.IsValid() || modelValue.Kind() != reflect.Pointer || modelValue.IsNil() {
+		return &Error{Op: "create", Kind: ErrInvalidArgument}
+	}
+	structValue := modelValue.Elem()
+	if structValue.Kind() != reflect.Struct {
+		return &Error{Op: "create", Kind: ErrInvalidArgument}
+	}
+	for _, field := range schema.Fields {
+		if len(field.Index) == 0 {
+			continue
+		}
+		value, ok := row[field.Column]
+		if !ok {
+			continue
+		}
+		fieldValue := structValue.FieldByIndex(field.Index)
+		if !fieldValue.IsValid() || !fieldValue.CanSet() {
+			continue
+		}
+		if err := assignValue(fieldValue, value); err != nil {
+			return &Error{Op: "create", Kind: ErrScan, Field: field.Name, Cause: err}
+		}
+	}
+	return nil
 }
 
 func applyWriteOptions(options []WriteOption) writeOptions {

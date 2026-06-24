@@ -276,6 +276,27 @@ func TestCompileInsertWithoutReturning(t *testing.T) {
 	}
 }
 
+func TestCompileInsertMany(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.InsertAST{
+		Table:     "products",
+		Returning: true,
+		Values: []oro.Map{
+			{"code": "A001", "price": 100},
+			{"code": "A002", "price": 200},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `insert into "products" ("code", "price") values (?, ?), (?, ?) returning *`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q", sql.SQL)
+	}
+	if len(sql.Args) != 4 || sql.Args[0] != "A001" || sql.Args[1] != 100 || sql.Args[2] != "A002" || sql.Args[3] != 200 {
+		t.Fatalf("got args %#v", sql.Args)
+	}
+}
+
 func TestCompileUpdateExpressions(t *testing.T) {
 	sql, err := (dialect{}).Compile(oro.UpdateAST{
 		Table: "products",

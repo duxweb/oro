@@ -330,6 +330,33 @@ func TestCompileInsert(t *testing.T) {
 	}
 }
 
+func TestCompileInsertMany(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.InsertAST{
+		Table:     "products",
+		Returning: true,
+		Values: []oro.Map{
+			{"code": "A001", "price": 100},
+			{"code": "A002", "price": 200},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `insert into "products" ("code", "price") values ($1, $2), ($3, $4) returning *`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+	wantArgs := []any{"A001", 100, "A002", 200}
+	if len(sql.Args) != len(wantArgs) {
+		t.Fatalf("got args %#v", sql.Args)
+	}
+	for index := range wantArgs {
+		if sql.Args[index] != wantArgs[index] {
+			t.Fatalf("got args %#v, want %#v", sql.Args, wantArgs)
+		}
+	}
+}
+
 func TestCompileUpsert(t *testing.T) {
 	sql, err := (dialect{}).Compile(oro.InsertAST{
 		Table: "products",

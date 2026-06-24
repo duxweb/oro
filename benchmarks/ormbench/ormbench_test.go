@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	oro "github.com/duxweb/oro"
 	oromysql "github.com/duxweb/oro/driver/mysql"
@@ -43,9 +44,12 @@ func (oroBenchProduct) Define(s *oro.SchemaBuilder) {
 }
 
 type gormBenchProduct struct {
-	ID    uint64 `gorm:"primaryKey"`
-	Code  string `gorm:"size:191;uniqueIndex"`
-	Price uint
+	ID        uint64 `gorm:"primaryKey"`
+	Code      string `gorm:"size:191;uniqueIndex"`
+	Price     uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 func (gormBenchProduct) TableName() string {
@@ -53,9 +57,12 @@ func (gormBenchProduct) TableName() string {
 }
 
 type xormBenchProduct struct {
-	ID    uint64 `xorm:"'id' pk autoincr"`
-	Code  string `xorm:"'code' varchar(191) unique"`
-	Price uint   `xorm:"'price'"`
+	ID        uint64    `xorm:"'id' pk autoincr"`
+	Code      string    `xorm:"'code' varchar(191) unique"`
+	Price     uint      `xorm:"'price'"`
+	CreatedAt time.Time `xorm:"'created_at'"`
+	UpdatedAt time.Time `xorm:"'updated_at'"`
+	DeletedAt time.Time `xorm:"'deleted_at' deleted"`
 }
 
 func (xormBenchProduct) TableName() string {
@@ -67,6 +74,9 @@ type bunBenchProduct struct {
 	ID            uint64 `bun:",pk,autoincrement"`
 	Code          string `bun:"type:varchar(191),unique"`
 	Price         uint
+	CreatedAt     time.Time `bun:",nullzero"`
+	UpdatedAt     time.Time `bun:",nullzero"`
+	DeletedAt     time.Time `bun:",soft_delete,nullzero"`
 }
 
 type benchCase struct {
@@ -80,6 +90,15 @@ func BenchmarkCreate(b *testing.B) {
 		{name: "GORM", run: benchGORMCreate},
 		{name: "XORM", run: benchXORMCreate},
 		{name: "Bun", run: benchBunCreate},
+	})
+}
+
+func BenchmarkCreateMany100(b *testing.B) {
+	runCases(b, []benchCase{
+		{name: "Oro", run: benchOroCreateMany100},
+		{name: "GORM", run: benchGORMCreateMany100},
+		{name: "XORM", run: benchXORMCreateMany100},
+		{name: "Bun", run: benchBunCreateMany100},
 	})
 }
 
@@ -139,6 +158,25 @@ func benchOroCreate(b *testing.B) {
 		})
 		if err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func benchOroCreateMany100(b *testing.B) {
+	ctx := context.Background()
+	db := openOroBenchDB(b, ctx)
+	defer closeOroBenchDB(b, ctx, db)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		products := makeOroBenchProducts(createManyCode(index), 100)
+		created, err := db.Use[oroBenchProduct]().CreateMany(ctx, products)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(created) != len(products) {
+			b.Fatalf("expected %d created rows, got %d", len(products), len(created))
 		}
 	}
 }
@@ -234,11 +272,22 @@ func benchGORMCreate(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
-		err := db.Create(&gormBenchProduct{
-			Code:  createCode(index),
-			Price: uint(index % 1000),
-		}).Error
+		err := db.Create(newGORMBenchProduct(createCode(index), uint(index%1000))).Error
 		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchGORMCreateMany100(b *testing.B) {
+	db := openGORMBenchDB(b)
+	defer closeGORMBenchDB(b, db)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		products := makeGORMBenchProducts(createManyCode(index), 100)
+		if err := db.CreateInBatches(products, len(products)).Error; err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -322,12 +371,27 @@ func benchXORMCreate(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
-		_, err := engine.Insert(&xormBenchProduct{
-			Code:  createCode(index),
-			Price: uint(index % 1000),
-		})
+		_, err := engine.Insert(newXORMBenchProduct(createCode(index), uint(index%1000)))
 		if err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func benchXORMCreateMany100(b *testing.B) {
+	engine := openXORMBenchDB(b)
+	defer closeXORMBenchDB(b, engine)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		products := makeXORMBenchProducts(createManyCode(index), 100)
+		affected, err := engine.Insert(&products)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if affected != int64(len(products)) {
+			b.Fatalf("expected %d affected rows, got %d", len(products), affected)
 		}
 	}
 }
@@ -416,12 +480,30 @@ func benchBunCreate(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
-		_, err := db.NewInsert().Model(&bunBenchProduct{
-			Code:  createCode(index),
-			Price: uint(index % 1000),
-		}).Exec(ctx)
+		_, err := db.NewInsert().Model(newBunBenchProduct(createCode(index), uint(index%1000))).Exec(ctx)
 		if err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func benchBunCreateMany100(b *testing.B) {
+	ctx := context.Background()
+	db := openBunBenchDB(b, ctx)
+	defer closeBunBenchDB(b, db)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		products := makeBunBenchProducts(createManyCode(index), 100)
+		result, err := db.NewInsert().Model(&products).Exec(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if affected, err := result.RowsAffected(); err != nil {
+			b.Fatal(err)
+		} else if affected != int64(len(products)) {
+			b.Fatalf("expected %d affected rows, got %d", len(products), affected)
 		}
 	}
 }
@@ -600,7 +682,7 @@ func seedGORMProductsWithCode(b *testing.B, db *gorm.DB, count int, code func(in
 	b.Helper()
 	products := make([]gormBenchProduct, 0, count)
 	for index := 0; index < count; index++ {
-		products = append(products, gormBenchProduct{Code: code(index), Price: uint(index % 1000)})
+		products = append(products, *newGORMBenchProduct(code(index), uint(index%1000)))
 	}
 	if err := db.CreateInBatches(products, 500).Error; err != nil {
 		b.Fatal(err)
@@ -641,7 +723,7 @@ func seedXORMProductsWithCode(b *testing.B, engine *xorm.Engine, count int, code
 		end := min(offset+batchSize, count)
 		products := make([]xormBenchProduct, 0, end-offset)
 		for index := offset; index < end; index++ {
-			products = append(products, xormBenchProduct{Code: code(index), Price: uint(index % 1000)})
+			products = append(products, *newXORMBenchProduct(code(index), uint(index%1000)))
 		}
 		if _, err := engine.Insert(&products); err != nil {
 			b.Fatal(err)
@@ -683,7 +765,7 @@ func seedBunProductsWithCode(b *testing.B, ctx context.Context, db *bun.DB, coun
 	b.Helper()
 	products := make([]bunBenchProduct, 0, count)
 	for index := 0; index < count; index++ {
-		products = append(products, bunBenchProduct{Code: code(index), Price: uint(index % 1000)})
+		products = append(products, *newBunBenchProduct(code(index), uint(index%1000)))
 	}
 	if _, err := db.NewInsert().Model(&products).Exec(ctx); err != nil {
 		b.Fatal(err)
@@ -838,10 +920,63 @@ func createCode(index int) string {
 	return fmt.Sprintf("C%08d", index)
 }
 
+func createManyCode(index int) func(int) string {
+	return func(offset int) string {
+		return fmt.Sprintf("M%08d_%03d", index, offset)
+	}
+}
+
 func deleteCode(index int) string {
 	return fmt.Sprintf("D%08d", index)
 }
 
 func seedCode(index int) string {
 	return fmt.Sprintf("S%08d", index%seedRows)
+}
+
+func makeOroBenchProducts(code func(int) string, count int) []*oroBenchProduct {
+	products := make([]*oroBenchProduct, 0, count)
+	for index := 0; index < count; index++ {
+		products = append(products, &oroBenchProduct{Code: code(index), Price: uint(index % 1000)})
+	}
+	return products
+}
+
+func makeGORMBenchProducts(code func(int) string, count int) []gormBenchProduct {
+	products := make([]gormBenchProduct, 0, count)
+	for index := 0; index < count; index++ {
+		products = append(products, *newGORMBenchProduct(code(index), uint(index%1000)))
+	}
+	return products
+}
+
+func makeXORMBenchProducts(code func(int) string, count int) []xormBenchProduct {
+	products := make([]xormBenchProduct, 0, count)
+	for index := 0; index < count; index++ {
+		products = append(products, *newXORMBenchProduct(code(index), uint(index%1000)))
+	}
+	return products
+}
+
+func makeBunBenchProducts(code func(int) string, count int) []bunBenchProduct {
+	products := make([]bunBenchProduct, 0, count)
+	for index := 0; index < count; index++ {
+		products = append(products, *newBunBenchProduct(code(index), uint(index%1000)))
+	}
+	return products
+}
+
+func newGORMBenchProduct(code string, price uint) *gormBenchProduct {
+	now := time.Now()
+	return &gormBenchProduct{Code: code, Price: price, CreatedAt: now, UpdatedAt: now}
+}
+
+func newXORMBenchProduct(code string, price uint) *xormBenchProduct {
+	now := time.Now()
+	return &xormBenchProduct{Code: code, Price: price, CreatedAt: now, UpdatedAt: now}
+}
+
+func newBunBenchProduct(code string, price uint) *bunBenchProduct {
+	now := time.Now()
+	return &bunBenchProduct{Code: code, Price: price, CreatedAt: now, UpdatedAt: now}
 }

@@ -3,6 +3,7 @@ package oro
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/duxweb/oro/internal/fifocache"
@@ -140,12 +141,12 @@ func selectSQLCacheKey(dialect string, stmt SelectAST) (string, []any, bool) {
 }
 
 func insertSQLCacheKey(dialect string, stmt InsertAST) (string, []any, bool) {
-	if len(stmt.Values) != 1 || len(stmt.Conflict.Columns) > 0 {
+	if len(stmt.Values) == 0 || len(stmt.Conflict.Columns) > 0 {
 		return "", nil, false
 	}
 	row := stmt.Values[0]
 	keys := sortedSQLMapKeys(row)
-	args := make([]any, 0, len(keys))
+	args := make([]any, 0, len(keys)*len(stmt.Values))
 	key := strings.Builder{}
 	key.WriteString("i|")
 	key.WriteString(dialect)
@@ -157,10 +158,23 @@ func insertSQLCacheKey(dialect string, stmt InsertAST) (string, []any, bool) {
 	} else {
 		key.WriteByte('0')
 	}
+	key.WriteString("|n:")
+	key.WriteString(strconv.Itoa(len(stmt.Values)))
 	for _, column := range keys {
 		key.WriteByte('|')
 		key.WriteString(column)
-		args = append(args, row[column])
+	}
+	for _, value := range stmt.Values {
+		if len(value) != len(keys) {
+			return "", nil, false
+		}
+		for _, column := range keys {
+			item, ok := value[column]
+			if !ok {
+				return "", nil, false
+			}
+			args = append(args, item)
+		}
 	}
 	return key.String(), args, true
 }

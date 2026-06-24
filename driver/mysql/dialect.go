@@ -424,14 +424,26 @@ func (d dialect) compileInsert(stmt oro.InsertAST) (oro.CompiledSQL, error) {
 	row := stmt.Values[0]
 	columnNames := sortedKeys(row)
 	columns := make([]string, 0, len(row))
-	args := make([]any, 0, len(row))
-	placeholders := make([]string, 0, len(row))
 	for _, column := range columnNames {
 		columns = append(columns, d.QuoteIdent(column))
-		args = append(args, row[column])
-		placeholders = append(placeholders, "?")
 	}
-	sql := fmt.Sprintf("insert into %s (%s) values (%s)", d.QuoteIdent(stmt.Table), strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+	rowPlaceholder := "(" + strings.TrimRight(strings.Repeat("?, ", len(columnNames)), ", ") + ")"
+	args := make([]any, 0, len(columnNames)*len(stmt.Values))
+	rows := make([]string, 0, len(stmt.Values))
+	for _, value := range stmt.Values {
+		if len(value) != len(columnNames) {
+			return oro.CompiledSQL{}, &oro.Error{Op: "mysql.insert", Kind: oro.ErrInvalidArgument}
+		}
+		rows = append(rows, rowPlaceholder)
+		for _, column := range columnNames {
+			item, ok := value[column]
+			if !ok {
+				return oro.CompiledSQL{}, &oro.Error{Op: "mysql.insert", Kind: oro.ErrInvalidArgument}
+			}
+			args = append(args, item)
+		}
+	}
+	sql := fmt.Sprintf("insert into %s (%s) values %s", d.QuoteIdent(stmt.Table), strings.Join(columns, ", "), strings.Join(rows, ", "))
 	if stmt.Returning {
 		sql += " returning *"
 	}

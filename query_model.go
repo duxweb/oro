@@ -709,15 +709,19 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 	if len(models) == 0 {
 		return []*T{}, nil
 	}
-
-	spec, _, err := modelInsertSpec(query)
+	spec, schema, err := modelInsertSpec(query)
 	if err != nil {
 		return nil, err
 	}
+	if !query.canBatchCreate(models) {
+		return query.createManyOneByOne(ctx, spec, models, options...)
+	}
+	return query.createManyBatch(ctx, spec, schema, models, options...)
+}
+
+func (query *ModelQuery[T]) createManyOneByOne(ctx context.Context, spec QuerySpec, models []*T, options ...WriteOption) ([]*T, error) {
 	createdModels := make([]*T, 0, len(models))
-	err = withSpecConnection(query.db, spec).Transaction(ctx, func(tx *DB) error {
-		txQuery := *query
-		txQuery.db = tx
+	err := query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
 		for _, model := range models {
 			if model == nil {
 				return &Error{Op: "create", Kind: ErrInvalidArgument}
@@ -731,6 +735,215 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 		return nil
 	})
 	return createdModels, err
+}
+
+func (query *ModelQuery[T]) createManyBatch(ctx context.Context, spec QuerySpec, schema *ModelSchema, models []*T, options ...WriteOption) ([]*T, error) {
+	writeOptions := applyWriteOptions(options)
+	createdModels := make([]*T, len(models))
+	err := query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
+		tx := txQuery.db
+		rows := make([]Map, 0, len(models))
+		for _, model := range models {
+			if model == nil {
+				return &Error{Op: "create", Kind: ErrInvalidArgument}
+			}
+			row, err := buildModelInsertMap(schema, model, writeOptions)
+			if err != nil {
+				return err
+			}
+			if err := applyTenantColumns(tx, schema, row); err != nil {
+				return err
+			}
+			if err := validateShardWriteValuesForDB(tx, schema, txQuery.shard, row); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		if !mapsHaveSameKeys(rows) {
+			for index, model := range models {
+				created, err := txQuery.createWithSpec(ctx, spec, schema, model, options...)
+				if err != nil {
+					return err
+				}
+				createdModels[index] = created
+			}
+			return nil
+		}
+		offset := 0
+		for _, chunk := range chunkMapsForCreate(rows, createBatchSize(tx.runtime.Config, writeOptions)) {
+			modelChunk := models[offset : offset+len(chunk)]
+			if canCreateModelsExec(tx, spec, schema, writeOptions, chunk) {
+				if err := txQuery.createModelsChunkExec(ctx, spec, schema, chunk, modelChunk); err != nil {
+					return err
+				}
+				copy(createdModels[offset:offset+len(chunk)], modelChunk)
+				offset += len(chunk)
+				continue
+			}
+			if canCreateModelsDirect(tx, spec) {
+				if err := txQuery.createModelsChunkDirect(ctx, spec, schema, chunk, models[offset:offset+len(chunk)]); err != nil {
+					return err
+				}
+				copy(createdModels[offset:offset+len(chunk)], models[offset:offset+len(chunk)])
+				offset += len(chunk)
+				continue
+			}
+			createdRows, err := createRows(ctx, tx, WriteSpec{
+				QuerySpec: spec,
+				Values:    chunk,
+				Primary:   primaryColumnsForSchema(schema),
+			})
+			if err != nil {
+				return err
+			}
+			if len(createdRows) != len(chunk) {
+				return &Error{Op: "create", Kind: ErrScan, Model: schema.Name, Table: schema.Table}
+			}
+			for index, row := range createdRows {
+				model := models[offset+index]
+				if err := tx.runtime.Mapper.MapModel(schema, row, model); err != nil {
+					return err
+				}
+				createdModels[offset+index] = model
+			}
+			offset += len(chunk)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return createdModels, nil
+}
+
+func (query *ModelQuery[T]) createModelsChunkExec(ctx context.Context, spec QuerySpec, schema *ModelSchema, rows []Map, models []*T) error {
+	conn, err := connectionForQuery(query.db, spec.Connection)
+	if err != nil {
+		return err
+	}
+	writeSpec := WriteSpec{
+		QuerySpec: spec,
+		Values:    rows,
+		Primary:   primaryColumnsForSchema(schema),
+		Returning: false,
+	}
+	tableNames(query.db).ApplyWrite(&writeSpec)
+	compiled, err := compileInsertSQL(query.db, conn, writeSpec)
+	if err != nil {
+		return err
+	}
+	result, err := execCompiled(ctx, query.db, execForQueryRuntime(query.db, conn), writeSpec.QuerySpec, compiled, "create")
+	if err != nil {
+		return translateQueryError(conn, err)
+	}
+	primaryColumn := ""
+	if len(writeSpec.Primary) == 1 {
+		primaryColumn = writeSpec.Primary[0]
+	}
+	primaryValues, err := createdPrimaryValues(conn, writeSpec.Values, primaryColumn, result)
+	if err != nil {
+		return err
+	}
+	for index, model := range models {
+		row := rows[index]
+		if primaryColumn != "" {
+			row[primaryColumn] = primaryValues[index]
+		}
+		if err := assignModelCreateValues(schema, model, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (query *ModelQuery[T]) createModelsChunkDirect(ctx context.Context, spec QuerySpec, schema *ModelSchema, rows []Map, models []*T) error {
+	conn, err := connectionForQuery(query.db, spec.Connection)
+	if err != nil {
+		return err
+	}
+	writeSpec := WriteSpec{
+		QuerySpec: spec,
+		Values:    rows,
+		Primary:   primaryColumnsForSchema(schema),
+		Returning: true,
+	}
+	tableNames(query.db).ApplyWrite(&writeSpec)
+	compiled, err := compileInsertSQL(query.db, conn, writeSpec)
+	if err != nil {
+		return err
+	}
+	return createModelsDirect(ctx, query.db, conn, writeSpec, schema, compiled, models)
+}
+
+func canCreateModelsExec(db *DB, spec QuerySpec, schema *ModelSchema, options writeOptions, rows []Map) bool {
+	if db == nil || db.runtime == nil || !usesDefaultExecutor(db) || !usesDefaultMapper(db) || cacheEnabled(db, spec) {
+		return false
+	}
+	if len(options.only) > 0 || len(options.omit) > 0 || len(rows) == 0 || len(schema.PrimaryColumns) != 1 {
+		return false
+	}
+	conn, err := connectionForQuery(db, spec.Connection)
+	if err != nil || !conn.Dialect.Capabilities().Returning || !supportsCreateExecPrimary(conn) {
+		return false
+	}
+	primaryColumn := schema.PrimaryColumns[0]
+	explicitPrimary := allRowsHavePrimary(rows, primaryColumn)
+	if !explicitPrimary && conn.Dialect.Name() == "pgsql" {
+		return false
+	}
+	first := rows[0]
+	for _, field := range schema.Fields {
+		if field.Ignore || field.Virtual || field.Hidden || len(field.Index) == 0 {
+			continue
+		}
+		if field.SoftDelete {
+			continue
+		}
+		if field.Primary && field.Column == primaryColumn && !explicitPrimary {
+			continue
+		}
+		if _, ok := first[field.Column]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func supportsCreateExecPrimary(conn *Connection) bool {
+	if conn == nil || conn.Dialect == nil {
+		return false
+	}
+	switch conn.Dialect.Name() {
+	case "sqlite", "mysql", "pgsql":
+		return true
+	default:
+		return false
+	}
+}
+
+func canCreateModelsDirect(db *DB, spec QuerySpec) bool {
+	if db == nil || db.runtime == nil || cacheEnabled(db, spec) {
+		return false
+	}
+	conn, err := connectionForQuery(db, spec.Connection)
+	if err != nil || !conn.Dialect.Capabilities().Returning {
+		return false
+	}
+	return usesDefaultExecutor(db) && usesDefaultMapper(db)
+}
+
+func (query *ModelQuery[T]) canBatchCreate(models []*T) bool {
+	if shouldEmitEvent(query.db, query.skipEvents, BeforeCreate, AfterCreate) {
+		return false
+	}
+	if !query.skipHooks {
+		for _, model := range models {
+			if hasCreateHooks(model) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {

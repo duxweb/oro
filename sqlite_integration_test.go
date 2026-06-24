@@ -1268,6 +1268,9 @@ func TestSQLiteCreateMany(t *testing.T) {
 	if len(tableRows) != 2 || tableRows[0]["code"] != "A010" || tableRows[1]["code"] != "A011" {
 		t.Fatalf("unexpected table rows %#v", tableRows)
 	}
+	if tableRows[0]["id"] == nil || tableRows[1]["id"] == nil {
+		t.Fatalf("expected table create many ids %#v", tableRows)
+	}
 
 	products, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
 		{Code: "A012", Price: 12},
@@ -1276,8 +1279,11 @@ func TestSQLiteCreateMany(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(products) != 2 || products[0].ID == 0 || products[1].Code != "A013" {
+	if len(products) != 2 || products[0].ID == 0 || products[1].ID == 0 || products[0].Code != "A012" || products[1].Code != "A013" {
 		t.Fatalf("unexpected model rows %#v", products)
+	}
+	if products[0].CreatedAt.IsZero() || products[1].UpdatedAt.IsZero() {
+		t.Fatalf("expected timestamps in model rows %#v", products)
 	}
 
 	type productView struct {
@@ -1295,6 +1301,54 @@ func TestSQLiteCreateMany(t *testing.T) {
 	}
 	if len(views) != 2 || views[0].ID == 0 || views[1].Code != "A015" {
 		t.Fatalf("unexpected mapped create many rows %#v", views)
+	}
+
+	chunked, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
+		{Code: "A016", Price: 16},
+		{Code: "A017", Price: 17},
+	}, oro.BatchSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunked) != 2 || chunked[0].Code != "A016" || chunked[1].Code != "A017" {
+		t.Fatalf("unexpected chunked create many rows %#v", chunked)
+	}
+}
+
+func TestSQLiteCreateManyFallbackWithoutReturning(t *testing.T) {
+	db, ctx := openSQLiteTestDBWithDriver(t, sqlite.Open(":memory:", sqlite.DisableReturning()))
+
+	tableRows, err := db.Table("products").CreateMany(ctx, []oro.Map{
+		{"code": "A018", "price": 18},
+		{"code": "A019", "price": 19},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tableRows) != 2 || tableRows[0]["code"] != "A018" || tableRows[1]["code"] != "A019" || tableRows[0]["id"] == nil || tableRows[1]["id"] == nil {
+		t.Fatalf("unexpected table fallback rows %#v", tableRows)
+	}
+
+	products, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
+		{Code: "A020", Price: 20},
+		{Code: "A021", Price: 21},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(products) != 2 || products[0].ID == 0 || products[1].ID == 0 || products[0].Code != "A020" || products[1].Code != "A021" {
+		t.Fatalf("unexpected model fallback rows %#v", products)
+	}
+
+	mixedRows, err := db.Table("products").CreateMany(ctx, []oro.Map{
+		{"code": "A022", "price": 22},
+		{"id": uint64(100), "code": "A023", "price": 23},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixedRows) != 2 || mixedRows[0]["code"] != "A022" || mixedRows[1]["code"] != "A023" {
+		t.Fatalf("unexpected mixed-shape fallback rows %#v", mixedRows)
 	}
 }
 

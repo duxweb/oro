@@ -533,20 +533,43 @@ func (query *TableQuery) Upsert(ctx context.Context, values Map, options ...Writ
 }
 
 func (query *TableQuery) CreateMany(ctx context.Context, values []Map, options ...WriteOption) ([]Map, error) {
+	if query.allShards {
+		return nil, &Error{Op: "create", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
+	}
 	if len(values) == 0 {
 		return []Map{}, nil
 	}
 
+	spec, err := tableShardSpec(query)
+	if err != nil {
+		return nil, err
+	}
+	writeOptions := applyWriteOptions(options)
 	rows := make([]Map, 0, len(values))
-	for _, value := range values {
-		if len(value) == 0 {
-			return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Table: query.spec.Table}
+	for _, chunk := range chunkMapsForCreate(values, createBatchSize(query.db.runtime.Config, writeOptions)) {
+		for _, value := range chunk {
+			if len(value) == 0 {
+				return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Table: query.spec.Table}
+			}
 		}
-		created, err := query.Create(ctx, value, options...)
+		if !mapsHaveSameKeys(chunk) {
+			for _, value := range chunk {
+				created, err := query.Create(ctx, value, options...)
+				if err != nil {
+					return nil, err
+				}
+				rows = append(rows, created)
+			}
+			continue
+		}
+		created, err := createRows(ctx, query.db, WriteSpec{
+			QuerySpec: spec,
+			Values:    chunk,
+		})
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, created)
+		rows = append(rows, created...)
 	}
 	return rows, nil
 }

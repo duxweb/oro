@@ -469,14 +469,29 @@ func (d dialect) compileInsert(stmt oro.InsertAST) (oro.CompiledSQL, error) {
 	row := stmt.Values[0]
 	columnNames := sortedKeys(row)
 	columns := make([]string, 0, len(row))
-	args := make([]any, 0, len(row))
-	placeholders := make([]string, 0, len(row))
-	for index, column := range columnNames {
+	for _, column := range columnNames {
 		columns = append(columns, d.QuoteIdent(column))
-		args = append(args, row[column])
-		placeholders = append(placeholders, d.Placeholder(index+1))
 	}
-	sql := fmt.Sprintf("insert into %s (%s) values (%s)", d.QuoteIdent(stmt.Table), strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+	args := make([]any, 0, len(columnNames)*len(stmt.Values))
+	rows := make([]string, 0, len(stmt.Values))
+	placeholderIndex := 1
+	for _, value := range stmt.Values {
+		if len(value) != len(columnNames) {
+			return oro.CompiledSQL{}, &oro.Error{Op: "pgsql.insert", Kind: oro.ErrInvalidArgument}
+		}
+		placeholders := make([]string, 0, len(columnNames))
+		for _, column := range columnNames {
+			item, ok := value[column]
+			if !ok {
+				return oro.CompiledSQL{}, &oro.Error{Op: "pgsql.insert", Kind: oro.ErrInvalidArgument}
+			}
+			args = append(args, item)
+			placeholders = append(placeholders, d.Placeholder(placeholderIndex))
+			placeholderIndex++
+		}
+		rows = append(rows, "("+strings.Join(placeholders, ", ")+")")
+	}
+	sql := fmt.Sprintf("insert into %s (%s) values %s", d.QuoteIdent(stmt.Table), strings.Join(columns, ", "), strings.Join(rows, ", "))
 	if stmt.Returning {
 		sql += " returning *"
 	}

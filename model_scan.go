@@ -115,6 +115,40 @@ func queryStructFirstDirect[T any](ctx context.Context, db *DB, spec QuerySpec, 
 	return models[0], nil
 }
 
+func createModelsDirect[T any](ctx context.Context, db *DB, conn *Connection, spec WriteSpec, schema *ModelSchema, compiled CompiledSQL, models []*T) error {
+	rows, err := openCompiledRowsWithExec(ctx, db, execForQueryRuntime(db, conn), spec.QuerySpec, compiled, "create", conn)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	destType, err := structTypeOfGeneric[T]()
+	if err != nil {
+		return err
+	}
+	mappers, values, dests, err := modelScanPlan(rows, schema, destType)
+	if err != nil {
+		return err
+	}
+	index := 0
+	for rows.Next() {
+		if index >= len(models) {
+			return &Error{Op: "create", Kind: ErrScan, Model: spec.ModelName, Table: spec.Table}
+		}
+		if err := scanStructRow(rows, models[index], schema, mappers, values, dests); err != nil {
+			return err
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return &Error{Op: "create", Kind: err, Cause: err}
+	}
+	if index != len(models) {
+		return &Error{Op: "create", Kind: ErrScan, Model: spec.ModelName, Table: spec.Table}
+	}
+	return nil
+}
+
 func queryRawStructRowsDirect[T any](ctx context.Context, db *DB, raw RawSpec, timeout time.Duration, schema *ModelSchema) ([]*T, error) {
 	rows, err := openRawRowsDirect(ctx, db, raw, timeout)
 	if err != nil {
@@ -197,8 +231,12 @@ func openRawRowsDirect(ctx context.Context, db *DB, raw RawSpec, timeout time.Du
 }
 
 func openCompiledRows(ctx context.Context, db *DB, conn *Connection, spec QuerySpec, compiled CompiledSQL, operation string) (*modelRows, error) {
+	return openCompiledRowsWithExec(ctx, db, execForReadRuntime(db, conn, spec), spec, compiled, operation, conn)
+}
+
+func openCompiledRowsWithExec(ctx context.Context, db *DB, exec ExecContext, spec QuerySpec, compiled CompiledSQL, operation string, conn *Connection) (*modelRows, error) {
 	ctx, cancel := withOperationTimeout(ctx, queryTimeout(db, spec))
-	querier, ok := execForReadRuntime(db, conn, spec).(sqlQuerier)
+	querier, ok := exec.(sqlQuerier)
 	if !ok {
 		cancel()
 		return nil, &Error{Op: operation, Kind: ErrInvalidArgument}
@@ -211,7 +249,10 @@ func openCompiledRows(ctx context.Context, db *DB, conn *Connection, spec QueryS
 	rows, err := querier.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
 		cancel()
-		queryErr := translateQueryError(conn, wrapContextError(operation, err))
+		queryErr := wrapContextError(operation, err)
+		if conn != nil {
+			queryErr = translateQueryError(conn, queryErr)
+		}
 		_ = emitSQLEvent(ctx, db, spec, AfterSQL, compiled, operation, 0, time.Since(startedAt), queryErr)
 		return nil, queryErr
 	}
