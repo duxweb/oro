@@ -38,22 +38,25 @@ type RelationSchema struct {
 }
 
 type ModelSchema struct {
-	Name          string
-	Table         string
-	Connection    string
-	ShardGroup    string
-	ShardFields   []string
-	TenantFields  []string
-	NoTenant      bool
-	Fields        []FieldSchema
-	FieldByGo     map[string]FieldSchema
-	FieldByDB     map[string]FieldSchema
-	Primary       []string
-	Indexes       []IndexSpec
-	Relations     []RelationSchema
-	DefaultSelect []string
-	DefaultExprs  []queryast.SelectExpr
-	Type          reflect.Type
+	Name           string
+	Table          string
+	Connection     string
+	ShardGroup     string
+	ShardFields    []string
+	TenantFields   []string
+	NoTenant       bool
+	Fields         []FieldSchema
+	FieldByGo      map[string]FieldSchema
+	FieldByDB      map[string]FieldSchema
+	Primary        []string
+	PrimaryColumns []string
+	Indexes        []IndexSpec
+	Relations      []RelationSchema
+	DefaultSelect  []string
+	DefaultExprs   []queryast.SelectExpr
+	InsertFields   []FieldSchema
+	ModelIndex     []int
+	Type           reflect.Type
 }
 
 type FieldSchema struct {

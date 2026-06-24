@@ -577,7 +577,7 @@ func (query *ModelQuery[T]) Create(ctx context.Context, model *T, options ...Wri
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelInsertSpec(query)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +710,7 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 		return []*T{}, nil
 	}
 
-	spec, _, err := modelQuerySpec(query)
+	spec, _, err := modelInsertSpec(query)
 	if err != nil {
 		return nil, err
 	}
@@ -886,7 +886,7 @@ func (query *ModelQuery[T]) createInTransaction(ctx context.Context, spec QueryS
 }
 
 func (query *ModelQuery[T]) create(ctx context.Context, model *T, options ...WriteOption) (*T, error) {
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelInsertSpec(query)
 	if err != nil {
 		return nil, err
 	}
@@ -897,8 +897,9 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	if model == nil {
 		return nil, &Error{Op: "create", Kind: ErrInvalidArgument}
 	}
-	hook := &Hook{DB: query.db, Operation: "create"}
 	emitEvents := shouldEmitEvent(query.db, query.skipEvents, BeforeCreate, AfterCreate)
+	useHooks := !query.skipHooks && hasCreateHooks(model)
+	var hook *Hook
 	var event *Event
 	if emitEvents {
 		event = modelEvent(query.db, schema, model, "create")
@@ -906,7 +907,8 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 			return nil, err
 		}
 	}
-	if !query.skipHooks {
+	if useHooks {
+		hook = &Hook{DB: query.db, Operation: "create"}
 		if err := callBeforeCreate(ctx, model, hook); err != nil {
 			return nil, err
 		}
@@ -922,7 +924,9 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	if err := validateShardWriteValuesForDB(query.db, schema, query.shard, row); err != nil {
 		return nil, err
 	}
-	hook.Values = row
+	if useHooks {
+		hook.Values = row
+	}
 	if emitEvents {
 		event.Values = row
 	}
@@ -940,7 +944,7 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
 		return nil, err
 	}
-	if !query.skipHooks {
+	if useHooks {
 		if err := callAfterCreate(ctx, model, hook); err != nil {
 			return nil, err
 		}

@@ -68,10 +68,10 @@ func queryModelRowsDirect[T any](ctx context.Context, db *DB, spec QuerySpec, sc
 		return nil, err
 	}
 
-	models := make([]*T, 0)
+	models := make([]*T, 0, resultCapacity(spec.Limit))
 	for rows.Next() {
 		model := new(T)
-		if err := scanModelRow(rows, model, mappers, values, dests); err != nil {
+		if err := scanModelRow(rows, model, schema, mappers, values, dests); err != nil {
 			return nil, err
 		}
 		models = append(models, model)
@@ -239,7 +239,7 @@ func modelScanPlanKey(schema *ModelSchema, sql string, columns []string) (string
 	return builder.String(), true
 }
 
-func scanModelRow[T any](rows *modelRows, model *T, mappers []modelColumnMapper, values []any, dests []any) error {
+func scanModelRow[T any](rows *modelRows, model *T, schema *ModelSchema, mappers []modelColumnMapper, values []any, dests []any) error {
 	if err := rows.Scan(dests...); err != nil {
 		return &Error{Op: "scan", Kind: ErrScan, Cause: err}
 	}
@@ -256,8 +256,20 @@ func scanModelRow[T any](rows *modelRows, model *T, mappers []modelColumnMapper,
 			return &Error{Op: "map", Kind: ErrScan, Field: mapper.fieldName, Cause: err}
 		}
 	}
-	ensureModelState(model)
+	ensureModelStateForSchema(structValue, schema)
 	return nil
+}
+
+func ensureModelStateForSchema(structValue reflect.Value, schema *ModelSchema) {
+	if schema == nil || len(schema.ModelIndex) == 0 {
+		return
+	}
+	modelField := structValue.FieldByIndex(schema.ModelIndex)
+	if !modelField.IsValid() || !modelField.CanAddr() || modelField.Type() != reflect.TypeOf(Model{}) {
+		return
+	}
+	model := modelField.Addr().Interface().(*Model)
+	model.ensureRelationState()
 }
 
 func fieldTypeByIndex(schema *ModelSchema, index []int) reflect.Type {

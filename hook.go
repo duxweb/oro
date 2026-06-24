@@ -55,6 +55,15 @@ func callBeforeCreate(ctx context.Context, model any, hook *Hook) error {
 	return nil
 }
 
+func hasCreateHooks(model any) bool {
+	if model == nil {
+		return false
+	}
+	_, before := model.(beforeCreateHook)
+	_, after := model.(afterCreateHook)
+	return before || after
+}
+
 func callAfterCreate(ctx context.Context, model any, hook *Hook) error {
 	if handler, ok := model.(afterCreateHook); ok {
 		if err := handler.AfterCreate(ctx, hook); err != nil {

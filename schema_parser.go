@@ -44,6 +44,7 @@ func (schemaParser) Parse(model any) (*ModelSchema, error) {
 			continue
 		}
 		if structField.Anonymous && structField.Type == reflect.TypeOf(Model{}) {
+			schema.ModelIndex = append([]int(nil), structField.Index...)
 			if err := addModelFields(schema, structField.Index); err != nil {
 				return nil, err
 			}
@@ -139,6 +140,8 @@ func (schemaParser) Parse(model any) (*ModelSchema, error) {
 	}
 	schema.DefaultSelect = defaultSelectColumns(schema)
 	schema.DefaultExprs = defaultSelectExprs(schema.DefaultSelect)
+	schema.InsertFields = insertFields(schema)
+	schema.PrimaryColumns = schemaPrimaryColumns(schema)
 
 	return schema, nil
 }
@@ -195,6 +198,27 @@ func defaultSelectExprs(columns []string) []SelectExpr {
 		exprs = append(exprs, SelectExpr{Expr: column})
 	}
 	return exprs
+}
+
+func insertFields(schema *ModelSchema) []FieldSchema {
+	fields := make([]FieldSchema, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if field.Ignore || field.Virtual || len(field.Index) == 0 {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func schemaPrimaryColumns(schema *ModelSchema) []string {
+	columns := make([]string, 0, len(schema.Primary))
+	for _, fieldName := range schema.Primary {
+		if field, ok := schema.FieldByGo[fieldName]; ok {
+			columns = append(columns, field.Column)
+		}
+	}
+	return columns
 }
 
 func validateFieldSchema(modelName string, field FieldSchema, goType reflect.Type) error {

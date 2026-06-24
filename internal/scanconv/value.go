@@ -8,6 +8,17 @@ import (
 	internaltypes "github.com/duxweb/oro/internal/types"
 )
 
+var timeLayouts = [...]string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02 15:04:05 -0700 MST",
+	"2006-01-02 15:04:05.999999999-07:00",
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
 func Normalize(value any, dbType string) any {
 	if value == nil {
 		return nil
@@ -69,18 +80,7 @@ func ParseTimeString(value string) (time.Time, bool) {
 	if value == "" {
 		return time.Time{}, false
 	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700 MST",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
+	for _, layout := range timeLayouts {
 		parsedTime, err := time.Parse(layout, value)
 		if err == nil {
 			return parsedTime, true

@@ -12,6 +12,7 @@ import (
 )
 
 const defaultChunkSize = 1000
+const defaultResultCapacity = 8
 
 type AggregateExpr struct {
 	Func  string
@@ -280,6 +281,13 @@ func pagesForTotal(total int64, size int) int {
 		return 0
 	}
 	return int((total + int64(size) - 1) / int64(size))
+}
+
+func resultCapacity(limit *int) int {
+	if limit == nil || *limit <= 0 {
+		return defaultResultCapacity
+	}
+	return *limit
 }
 
 func paginateSpecError(spec QuerySpec) error {
@@ -1149,7 +1157,7 @@ func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 	if err := convertModelSelects(schema, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyModelSelectVisibility(schema, &spec, query.selectHidden); err != nil {
+	if err := applyModelSelectVisibility(query.db, schema, &spec, query.selectHidden); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	applySoftDeleteScope(schema, &spec, query.softDeleteMode)
@@ -1185,6 +1193,23 @@ func modelWriteSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 		if softDeleteField, ok := softDeleteField(schema); ok {
 			spec.Where = append(spec.Where, isNullCondition(softDeleteField.Column))
 		}
+	}
+	return spec, schema, nil
+}
+
+func modelInsertSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
+	schema, err := schemaForModel[T](query.db)
+	if err != nil {
+		return QuerySpec{}, nil, err
+	}
+	spec := cloneQuerySpec(query.spec)
+	spec.Table = schema.Table
+	spec.ModelName = schema.Name
+	if err := applyTenantModelConnection(context.Background(), query.db, schema, &spec); err != nil {
+		return QuerySpec{}, nil, err
+	}
+	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+		return QuerySpec{}, nil, err
 	}
 	return spec, schema, nil
 }
@@ -1371,13 +1396,10 @@ func softDeleteField(schema *ModelSchema) (FieldSchema, bool) {
 }
 
 func primaryColumnsForSchema(schema *ModelSchema) []string {
-	columns := make([]string, 0, len(schema.Primary))
-	for _, fieldName := range schema.Primary {
-		if field, ok := schema.FieldByGo[fieldName]; ok {
-			columns = append(columns, field.Column)
-		}
+	if schema == nil {
+		return nil
 	}
-	return columns
+	return schema.PrimaryColumns
 }
 
 func convertModelConditions(schema *ModelSchema, conditions []Condition) ([]Condition, error) {
@@ -1618,7 +1640,7 @@ func isQualifiedIdentifier(name string) bool {
 	return queryutil.IsQualifiedIdentifier(name)
 }
 
-func applyModelSelectVisibility(schema *ModelSchema, spec *QuerySpec, hiddenFields []string) error {
+func applyModelSelectVisibility(db *DB, schema *ModelSchema, spec *QuerySpec, hiddenFields []string) error {
 	for _, fieldName := range hiddenFields {
 		field, ok := schema.FieldByGo[fieldName]
 		if !ok {
@@ -1633,7 +1655,11 @@ func applyModelSelectVisibility(schema *ModelSchema, spec *QuerySpec, hiddenFiel
 		return nil
 	}
 	if len(schema.DefaultExprs) > 0 {
-		spec.Select = append([]SelectExpr(nil), schema.DefaultExprs...)
+		if db == nil || db.runtime == nil || db.runtime.Config.TablePrefix == "" {
+			spec.Select = schema.DefaultExprs
+		} else {
+			spec.Select = append([]SelectExpr(nil), schema.DefaultExprs...)
+		}
 	}
 	return nil
 }
@@ -1766,13 +1792,14 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 
 	allowed := optionSet(options.only)
 	omitted := optionSet(options.omit)
-	row := Map{}
+	fields := schema.InsertFields
+	if len(fields) == 0 {
+		fields = schema.Fields
+	}
+	row := make(Map, len(fields))
 	now := time.Now()
 
-	for _, field := range schema.Fields {
-		if field.Ignore || field.Virtual {
-			continue
-		}
+	for _, field := range fields {
 		if len(allowed) > 0 && !allowed[field.Name] {
 			continue
 		}
@@ -1780,9 +1807,6 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 			continue
 		}
 
-		if len(field.Index) == 0 {
-			continue
-		}
 		fieldValue := structValue.FieldByIndex(field.Index)
 		if !fieldValue.IsValid() || !fieldValue.CanInterface() {
 			continue

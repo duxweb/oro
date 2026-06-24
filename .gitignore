@@ -25,6 +25,7 @@ coverage.*
 *.coverprofile
 *.prof
 *.pprof
+benchmarks/ormbench/.bench/
 bin/
 tmp/
 .tmp/

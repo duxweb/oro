@@ -53,6 +53,9 @@ func (resolver *tableNameResolver) ApplyQuery(spec *QuerySpec) {
 	if spec == nil {
 		return
 	}
+	if resolver == nil || resolver.prefix == "" {
+		return
+	}
 	context := resolver.queryContext(*spec)
 	spec.Table = resolver.Physical(spec.Table)
 	resolver.applySource(&spec.From)
@@ -80,15 +83,24 @@ func (resolver *tableNameResolver) ApplyWrite(spec *WriteSpec) {
 	if spec == nil {
 		return
 	}
+	if resolver == nil || resolver.prefix == "" {
+		return
+	}
 	resolver.ApplyQuery(&spec.QuerySpec)
 	spec.Table = resolver.Physical(spec.Table)
 }
 
 func (resolver *tableNameResolver) ApplySource(source *SourceAST) {
+	if resolver == nil || resolver.prefix == "" {
+		return
+	}
 	resolver.applySource(source)
 }
 
 func (resolver *tableNameResolver) ApplySelect(ast *SelectAST) {
+	if resolver == nil || resolver.prefix == "" {
+		return
+	}
 	resolver.applySelect(ast)
 }
 
