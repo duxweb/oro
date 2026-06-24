@@ -1,0 +1,67 @@
+---
+title: Write Options
+description: Only, Omit, BatchSize, ConflictBy, CheckVersion, and CreateResult reference.
+---
+
+Write options make insert/update behavior explicit.
+
+## Only
+
+```go
+db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
+```
+
+Only the named fields are written.
+
+## Omit
+
+```go
+db.Use[Product]().Create(ctx, product, oro.Omit("CreatedAt", "UpdatedAt"))
+```
+
+Named fields are excluded from the write.
+
+## BatchSize
+
+```go
+result, err := db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
+```
+
+Controls chunk size for batch insert.
+
+## CreateMany result
+
+```go
+result, err := db.Use[Product]().CreateMany(ctx, products)
+ids, err := result.IDs[uint64]()
+```
+
+`CreateMany` returns a lightweight result with row count and primary keys. Use `CreateManyResult` when you need full rows.
+
+## ConflictBy
+
+```go
+saved, err := db.Use[Product]().Upsert(ctx, product,
+    oro.ConflictBy("Code").Update("Price", "Stock"),
+)
+```
+
+`ConflictBy` defines the unique key used for upsert. Model queries use Go field names; table queries use database columns.
+
+## CheckVersion
+
+```go
+rows, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120}, oro.CheckVersion(version))
+```
+
+A stale version returns `oro.ErrStaleData`.
+
+## Skip hooks and events
+
+```go
+db.Use[Product]().SkipHooks().SkipEvents().Create(ctx, product)
+```
+
+Use this for trusted import or maintenance jobs only.

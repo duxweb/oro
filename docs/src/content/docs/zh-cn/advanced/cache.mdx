@@ -1,0 +1,181 @@
+---
+title: 查询缓存
+description: 查询结果缓存、缓存 key、标签、失效策略和内部性能缓存的区别。
+---
+
+Oro 有两类缓存，语义完全不同：
+
+- 内部性能缓存：ORM 自己用，不改变查询结果；
+- 查询结果缓存：用户显式开启，缓存数据库返回的数据。
+
+这点必须分清。内部性能缓存不等于业务缓存，也不等于查询结果缓存。
+
+## 内部性能缓存
+
+内部性能缓存包括：
+
+| 缓存 | 作用 |
+| --- | --- |
+| Statement cache | 复用 prepared statement |
+| SQL cache | 缓存 AST 编译 SQL 的结果 |
+| Scan cache | 缓存结构体扫描计划，减少反射开销 |
+
+配置：
+
+```go
+db, err := oro.Open(oro.Config{
+    StatementCache: oro.StatementCacheConfig{MaxSize: 128},
+    SQLCache:       oro.SQLCacheConfig{MaxSize: 256},
+    ScanCache:      oro.ScanCacheConfig{MaxSize: 256},
+})
+```
+
+禁用：
+
+```go
+db, err := oro.Open(oro.Config{
+    SQLCache: oro.SQLCacheConfig{Disabled: true},
+})
+```
+
+一般不需要手动调整，除非你在做 benchmark 或排查驱动行为。
+
+## 查询结果缓存
+
+查询结果缓存需要显式配置 `CacheStore`，并在查询上调用 `Cache(ttl)`。
+
+```go
+db, err := oro.Open(oro.Config{
+    Cache: oro.NewMemoryCacheStore(),
+})
+
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    Cache(30 * time.Second).
+    Get(ctx)
+```
+
+`Cache(ttl)` 只缓存读查询结果，不缓存写入，也不会自动让模型进入“二级缓存”。
+
+## CacheKey
+
+默认 key 由连接、租户、分片、表、模型、SQL、参数、预加载和锁等信息生成。
+
+如果你需要稳定业务 key，可以显式指定：
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    Cache(30 * time.Second).
+    CacheKey("products:active").
+    Get(ctx)
+```
+
+显式 key 要自己保证包含租户、语言、筛选条件等业务维度，避免串数据。
+
+## CacheTags
+
+标签用于批量失效。
+
+```go
+products, err := db.Use[Product]().
+    Cache(5 * time.Minute).
+    CacheTags("products", "tenant:1").
+    Get(ctx)
+```
+
+写入后清理：
+
+```go
+if _, err := db.Use[Product]().Create(ctx, product); err != nil {
+    return err
+}
+
+if err := db.Cache().ForgetTag(ctx, "products"); err != nil {
+    return err
+}
+```
+
+也可以在事件里统一做：
+
+```go
+db.On(oro.AfterUpdate, func(ctx context.Context, event *oro.Event) error {
+    if event.ModelName == "Product" {
+        return event.DB.Cache().ForgetTag(ctx, "products")
+    }
+    return nil
+})
+```
+
+## 手动失效
+
+```go
+err := db.Cache().Forget(ctx, "products:active")
+err := db.Cache().ForgetTag(ctx, "products")
+```
+
+未配置 `CacheStore` 时，缓存查询或失效操作会返回 `oro.ErrCacheStoreRequired`。
+
+## Raw 查询缓存
+
+```go
+rows, err := db.Raw("select id, code from "+db.TableName("products")).
+    Cache(time.Minute).
+    CacheKey("product-options").
+    Get(ctx)
+```
+
+Raw SQL 不会自动处理表前缀，需要使用 `db.TableName`。
+
+## Table 和 MapTo 缓存
+
+```go
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    Where("status", "active").
+    Cache(time.Minute).
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+缓存的是数据库行数据，`MapTo` 会在读取缓存后再映射为结构体。
+
+## 事务和锁
+
+事务内查询、带锁查询不会使用查询结果缓存。
+
+原因：
+
+- 事务内需要看到当前事务一致性视图；
+- 行锁语义不能被缓存绕过；
+- 缓存读可能破坏并发控制。
+
+## 自定义 CacheStore
+
+接口很小，方便接 Redis、Memcached 或应用自己的缓存层。
+
+```go
+type CacheStore interface {
+    Get(ctx context.Context, key string) ([]byte, bool, error)
+    Set(ctx context.Context, key string, value []byte, ttl time.Duration, tags ...string) error
+    Forget(ctx context.Context, key string) error
+    ForgetTag(ctx context.Context, tag string) error
+}
+```
+
+`NewMemoryCacheStore()` 适合测试、单进程工具和本地开发；多实例生产环境应使用共享缓存。
+
+## 失效策略建议
+
+常见失效策略建议：
+
+| 场景 | 建议 |
+| --- | --- |
+| 后台列表 | 短 TTL + 标签失效 |
+| 字典/选项 | 显式 key + 写入后清理 |
+| 强一致详情页 | 不缓存，或只缓存业务层结果 |
+| 多租户 | key/tag 必须包含租户维度 |
+| 事务内读取 | 不使用缓存 |
+| 高频写表 | 谨慎使用查询缓存 |
+
+Oro 不会自动推断“写了 A 表要清理哪些查询”。这应该由业务事件或服务层显式定义。

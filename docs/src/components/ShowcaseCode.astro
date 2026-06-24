@@ -1,0 +1,27 @@
+---
+interface Props {
+  code: string;
+}
+
+const { code } = Astro.props;
+
+function highlight(src: string): string {
+  let s = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const store: string[] = [];
+  const stash = (cls: string, txt: string) => {
+    store.push(`<span class="${cls}">${txt}</span>`);
+    return `\x00${store.length - 1}\x00`;
+  };
+  s = s.replace(/\/\/[^\n]*/g, (m) => stash('tok-com', m));
+  s = s.replace(/&quot;.*?&quot;|"[^"]*"/g, (m) => stash('tok-str', m));
+  s = s.replace(/\b(type|func|struct|string|uint|return)\b/g, '<span class="tok-key">$1</span>');
+  s = s.replace(
+    /\b(oro|db|Product|Define|SchemaBuilder|Table|Field|String|Uint|Default|Unique|Use|Raw|MapTo)\b/g,
+    '<span class="tok-fn">$1</span>'
+  );
+  s = s.replace(/\x00(\d+)\x00/g, (_, i) => store[Number(i)]);
+  return s;
+}
+---
+
+<pre class="dux-showcase-code"><code set:html={highlight(code)} /></pre>

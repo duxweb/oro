@@ -1,0 +1,182 @@
+---
+title: 性能基准
+description: Oro 与主流 Go ORM/SQL ORM 在 SQLite、MySQL、PostgreSQL 下的十轮基准参考。
+---
+
+本页提供 Oro 与 GORM、XORM、Bun 在相同测试场景、相同数据库驱动下的性能参考。结果用于评估 ORM 层相对开销、常见业务路径表现和后续优化方向。
+
+:::note[读取口径]
+主表数据取 `go test -bench` 连续 10 轮的 **中位数**，不是单次最快值。中位数比平均值更不容易被一次系统调度、数据库缓存刷新或后台任务抖动影响，更适合做用户侧性能参考。
+:::
+
+## 测试环境
+
+| 项目 | 值 |
+| --- | --- |
+| 日期 | 2026-06-24 |
+| CPU | Apple M4 Pro |
+| OS | macOS 26.5.1，darwin/arm64 |
+| Kernel | Darwin 25.5.0 |
+| Go | go1.27rc1 darwin/arm64 |
+| MySQL | 8.0.45，本地 `localhost` |
+| PostgreSQL | 18.4 Homebrew，本地 `localhost` |
+| SQLite | in-memory，本地进程内 |
+
+MySQL 和 PostgreSQL 均使用本地 `duxorm` 数据库。网络数据库结果会受到数据库配置、连接池、后台负载和缓存状态影响，应按相对趋势阅读。
+
+## 对比库版本
+
+Benchmark 位于独立 Go module：`benchmarks/ormbench`。
+
+| 库/驱动 | 版本 |
+| --- | --- |
+| Oro | 本地工作区 `github.com/duxweb/oro v0.0.0`，通过 `replace ../..` 引用 |
+| GORM | `gorm.io/gorm v1.31.1` |
+| GORM MySQL Driver | `gorm.io/driver/mysql v1.6.0` |
+| GORM PostgreSQL Driver | `gorm.io/driver/postgres v1.6.0` |
+| GORM SQLite Driver | `gorm.io/driver/sqlite v1.6.0` |
+| XORM | `xorm.io/xorm v1.3.11` |
+| Bun | `github.com/uptrace/bun v1.2.18` |
+| MySQL driver | `github.com/go-sql-driver/mysql v1.10.0` |
+| PostgreSQL driver | `github.com/jackc/pgx/v5 v5.10.0` |
+| SQLite driver | `github.com/mattn/go-sqlite3 v1.14.34` |
+
+## 公平性规则
+
+- SQLite：Oro、GORM、XORM、Bun 均使用 `mattn/go-sqlite3`。
+- MySQL：均使用 `go-sql-driver/mysql`。
+- PostgreSQL：均使用 `pgx`。
+- Oro 和 GORM 均关闭默认写事务，用于高吞吐路径公平对比。
+- 表结构、唯一索引、软删除字段和测试数据规模保持等价。
+- 写入、查询、更新、删除都执行真实数据库操作，不是 SQL 编译 micro benchmark。
+- 每个数据库执行 `-count=10 -benchtime=1s -benchmem`。
+
+## 运行命令
+
+SQLite 使用 `mattn/go-sqlite3`：
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+MySQL：
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=mysql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+PostgreSQL：
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=pgsql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+## 测试场景
+
+| 场景 | 说明 |
+| --- | --- |
+| `Create` | 每次插入 1 条 `product` |
+| `CreateMany100` | 每次批量插入 100 条 `product` |
+| `FirstByCode` | 按唯一索引 `code` 查询 1 条 |
+| `WhereList` | `where price >= ? order by id limit 20` 查询 20 条 |
+| `UpdateByCode` | 按唯一索引 `code` 更新 1 条 |
+| `DeleteByCode` | 按唯一索引 `code` 删除 1 条 |
+
+读、更新场景会预先插入测试数据。删除场景会预先插入足够行，保证每次删除唯一行。
+
+## SQLite 结果
+
+SQLite 结果使用同一个 CGO driver：`mattn/go-sqlite3`。
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `9.17µs` | `9.44µs` | `6.15µs` | `8.15µs` |
+| CreateMany100 | `119.82µs` | `195.59µs` | `206.18µs` | `173.10µs` |
+| FirstByCode | `5.02µs` | `7.31µs` | `11.07µs` | `6.13µs` |
+| WhereList | `24.32µs` | `34.13µs` | `56.75µs` | `28.58µs` |
+| UpdateByCode | `3.97µs` | `5.72µs` | `4.16µs` | `3.31µs` |
+| DeleteByCode | `2.84µs` | `6.84µs` | `8.06µs` | `4.62µs` |
+
+### SQLite 分配
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `4.5KB / 102` | `5.0KB / 66` | `3.5KB / 69` | `5.6KB / 35` |
+| CreateMany100 | `81.5KB / 1322` | `119.5KB / 1757` | `172.1KB / 3851` | `71.2KB / 1128` |
+| FirstByCode | `4.2KB / 68` | `4.6KB / 91` | `7.1KB / 220` | `6.0KB / 46` |
+| WhereList | `10.0KB / 200` | `13.6KB / 339` | `45.2KB / 1158` | `16.5KB / 184` |
+| UpdateByCode | `3.8KB / 49` | `4.5KB / 64` | `3.2KB / 78` | `5.0KB / 17` |
+| DeleteByCode | `2.1KB / 28` | `3.8KB / 64` | `5.2KB / 162` | `5.5KB / 21` |
+
+## MySQL 结果
+
+MySQL 结果使用 `go-sql-driver/mysql`。
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `134.44µs` | `127.72µs` | `128.43µs` | `102.39µs` |
+| CreateMany100 | `634.42µs` | `868.68µs` | `861.11µs` | `813.34µs` |
+| FirstByCode | `38.50µs` | `73.49µs` | `79.83µs` | `41.75µs` |
+| WhereList | `60.96µs` | `103.45µs` | `123.31µs` | `67.11µs` |
+| UpdateByCode | `100.19µs` | `131.75µs` | `118.71µs` | `108.04µs` |
+| DeleteByCode | `113.57µs` | `160.96µs` | `148.68µs` | `121.98µs` |
+
+### MySQL 分配
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `5.2KB / 102` | `4.2KB / 50` | `3.7KB / 74` | `5.1KB / 23` |
+| CreateMany100 | `63.4KB / 814` | `107.8KB / 1128` | `172.1KB / 3738` | `68.3KB / 1001` |
+| FirstByCode | `4.3KB / 60` | `4.8KB / 85` | `6.7KB / 188` | `6.0KB / 36` |
+| WhereList | `10.4KB / 231` | `12.8KB / 296` | `36.5KB / 937` | `15.5KB / 136` |
+| UpdateByCode | `3.7KB / 50` | `4.5KB / 65` | `2.9KB / 67` | `5.0KB / 18` |
+| DeleteByCode | `2.2KB / 30` | `3.8KB / 61` | `5.2KB / 161` | `5.5KB / 21` |
+
+## PostgreSQL 结果
+
+PostgreSQL 结果使用 `pgx`。
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `61.56µs` | `62.71µs` | `62.65µs` | `113.80µs` |
+| CreateMany100 | `755.59µs` | `756.51µs` | `1.28ms` | `1.68ms` |
+| FirstByCode | `38.72µs` | `83.25µs` | `46.55µs` | `113.36µs` |
+| WhereList | `107.95µs` | `122.95µs` | `138.04µs` | `101.86µs` |
+| UpdateByCode | `57.62µs` | `104.80µs` | `58.54µs` | `62.78µs` |
+| DeleteByCode | `52.12µs` | `65.31µs` | `64.87µs` | `70.55µs` |
+
+### PostgreSQL 分配
+
+| 场景 | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `4.7KB / 93` | `4.9KB / 60` | `5.0KB / 123` | `6.6KB / 48` |
+| CreateMany100 | `146.0KB / 1461` | `152.7KB / 1866` | `302.4KB / 7511` | `96.7KB / 1110` |
+| FirstByCode | `4.6KB / 68` | `5.0KB / 88` | `7.5KB / 207` | `7.2KB / 61` |
+| WhereList | `9.2KB / 163` | `12.8KB / 299` | `36.3KB / 918` | `15.6KB / 142` |
+| UpdateByCode | `3.8KB / 48` | `4.3KB / 58` | `3.2KB / 83` | `4.9KB / 13` |
+| DeleteByCode | `2.2KB / 29` | `3.7KB / 58` | `5.3KB / 168` | `5.4KB / 16` |
+
+## 结论
+
+- Oro 在批量插入、按唯一索引读取、列表查询、更新和删除这些常见路径上整体处于主流 Go ORM 的第一梯队。
+- SQLite 公平驱动口径下，Oro 在 `CreateMany100`、`FirstByCode`、`WhereList`、`DeleteByCode` 上表现稳定。
+- MySQL 下，Oro 的批量插入、读取、更新和删除中位数优于本轮 GORM/XORM/Bun 对比结果；单条 Create 不是最快。
+- PostgreSQL 下，Oro 的单条 Create、批量插入、读取、更新和删除都接近或优于主流库；`WhereList` 本轮 Bun 更快。
+- 分配次数方面，Oro 在批量写入和查询路径上保持较低分配，说明模型扫描计划、SQL 编译缓存和批量 insert 路径已经发挥作用。
+
+## 如何解读
+
+- 看同一机器、同一数据库、同一 driver 下的相对趋势。
+- 看 10 轮中位数，不看单次最快值。
+- 同时看 `B/op` 和 `allocs/op`，判断 ORM 层对象分配是否健康。
+- SQLite 结果必须注明 driver；纯 Go SQLite driver 和 CGO SQLite driver 的成本差异很大。
+- 本页结果是基准参考，不代表所有生产环境的固定性能承诺。

@@ -107,7 +107,9 @@ oro.ConflictBy("Code").UpdateMap(oro.Map{"UpdatedAt": oro.Raw("CURRENT_TIMESTAMP
 ## 批量写入
 
 ```go
-created, err := db.Use[Product]().CreateMany(ctx, []*Product{p1, p2}, oro.BatchSize(500))
+result, err := db.Use[Product]().CreateMany(ctx, []*Product{p1, p2}, oro.BatchSize(500))
+ids, err := result.IDs[uint64]()
+created, err := db.Use[Product]().CreateManyResult(ctx, []*Product{p3, p4})
 saved, err := db.Table("products").UpsertMany(ctx, rows, oro.ConflictBy("code").UpdateAll())
 ```
 

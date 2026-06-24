@@ -1,0 +1,233 @@
+---
+title: 查询数据
+description: First、Find、Get、排序、限制、DTO 映射、缓存、超时和查询返回规则。
+---
+
+Oro 查询默认遵循一个规则：查不到不是错误。只有 SQL、连接、扫描、约束、事务等问题才返回 error。
+
+## 查询入口
+
+```go
+db.Use[Product]()      // 模型查询，使用 Go 字段名
+db.Table("products")   // 裸表查询，使用数据库列名
+db.Raw("select ...")   // 原生 SQL
+```
+
+模型查询返回结构体；裸表和 Raw 默认返回 `oro.Map`。
+
+## First
+
+```go
+product, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+if err != nil {
+    return err
+}
+if product == nil {
+    return nil
+}
+```
+
+`First` 返回一条或 `nil`。如果没有指定排序，数据库返回哪条记录取决于执行计划。业务上需要稳定结果时应显式 `OrderBy`。
+
+```go
+latest, err := db.Use[Product]().OrderByDesc("ID").First(ctx)
+```
+
+## Find
+
+```go
+product, err := db.Use[Product]().Find(ctx, id)
+```
+
+`Find` 是主键查询。查不到返回 `nil, nil`。
+
+适合详情页、编辑页、内部按 ID 查找。
+
+## Get
+
+```go
+products, err := db.Use[Product]().
+    Where("Price", ">=", 100).
+    Get(ctx)
+```
+
+`Get` 返回切片。查不到返回空切片。
+
+```go
+if len(products) == 0 {
+    // 没有数据，不是错误
+}
+```
+
+## 字段名规则
+
+| 查询类型 | 字段名 |
+| --- | --- |
+| `Use[T]()` | Go 字段名，如 `CreatedAt` |
+| `Table(name)` | 数据库列名，如 `created_at` |
+| `Raw(sql)` | SQL 里自己决定 |
+
+示例：
+
+```go
+// 模型查询
+products, err := db.Use[Product]().Where("CreatedAt", ">=", start).Get(ctx)
+
+// 裸表查询
+rows, err := db.Table("products").Where("created_at", ">=", start).Get(ctx)
+```
+
+## 排序和限制
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    OrderByDesc("ID").
+    Limit(20).
+    Offset(40).
+    Get(ctx)
+```
+
+多个排序字段：
+
+```go
+products, err := db.Use[Product]().
+    OrderByDesc("PublishedAt").
+    OrderBy("ID").
+    Get(ctx)
+```
+
+Raw 排序表达式：
+
+```go
+rows, err := db.Table("products").
+    OrderByRaw("case when stock > 0 then 0 else 1 end").
+    OrderByDesc("id").
+    Get(ctx)
+```
+
+## 选择字段
+
+```go
+products, err := db.Use[Product]().Select("ID", "Code", "Price").Get(ctx)
+```
+
+如果选择字段不完整，未选择字段保持 Go 零值。需要输出 DTO 时优先使用 `MapTo[T]()`，避免把不完整模型传到业务层。
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+Raw 查询也能映射：
+
+```go
+views, err := db.Raw("select id, code, price from "+db.TableName("products")).
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+映射规则遵循字段定义和默认 snake_case 转换，不依赖 `db` tag。
+
+## 聚合终结方法
+
+```go
+total, err := db.Use[Product]().Where("Status", "active").Count(ctx)
+exists, err := db.Use[Product]().Where("Code", "P001").Exists(ctx)
+sum, err := db.Use[Product]().Sum(ctx, "Price")
+avg, err := db.Use[Product]().Avg(ctx, "Price")
+min, err := db.Use[Product]().Min[uint](ctx, "Price")
+max, err := db.Use[Product]().Max[uint](ctx, "Price")
+```
+
+`Sum` / `Avg` 返回 `oro.Decimal`。`Min` / `Max` 返回 `oro.Null[T]`，因为空集合没有标量值。
+
+## 使用主库
+
+读写分离开启时，读查询可能走读库。需要强制读主库：
+
+```go
+product, err := db.Use[Product]().
+    UsePrimary().
+    Where("ID", id).
+    First(ctx)
+```
+
+写入、事务和行锁查询始终使用主库。
+
+## 超时
+
+```go
+products, err := db.Use[Product]().
+    Timeout(2 * time.Second).
+    Get(ctx)
+```
+
+查询级超时优先于全局配置，适合报表或外部请求入口。
+
+Raw 也支持：
+
+```go
+rows, err := db.Raw("select * from "+db.TableName("products")).
+    Timeout(5 * time.Second).
+    Get(ctx)
+```
+
+## 查询缓存
+
+```go
+products, err := db.Use[Product]().
+    Cache(30 * time.Second).
+    CacheKey("active-products").
+    Where("Status", "active").
+    Get(ctx)
+```
+
+缓存只缓存查询结果，不影响写入语义。事务内和带锁查询不会使用查询结果缓存。
+
+## Stream 和 Chunk
+
+大批量读取不要直接 `Get`。
+
+```go
+err := db.Use[Product]().OrderBy("ID").Chunk(ctx, 1000, func(items []*Product) error {
+    return nil
+})
+```
+
+```go
+stream, err := db.Use[Product]().Stream(ctx)
+if err != nil {
+    return err
+}
+defer stream.Close()
+
+for stream.Next() {
+    product := stream.Value()
+    _ = product
+}
+if err := stream.Err(); err != nil {
+    return err
+}
+```
+
+## 返回规则
+
+| 方法 | 无数据时 |
+| --- | --- |
+| `First` | `nil, nil` |
+| `Find` | `nil, nil` |
+| `Get` | 空切片 |
+| `Exists` | `false, nil` |
+| `Count` | `0, nil` |
+| `Min` / `Max` | `oro.Null[T]` 无效值 |
+
+不要用 error 表达“没有数据”。

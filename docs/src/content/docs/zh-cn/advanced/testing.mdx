@@ -1,17 +1,39 @@
 ---
 title: 测试矩阵
-description: 本地测试命令和 SQLite、MySQL、PostgreSQL 共享行为矩阵。
+description: 本地测试命令、三数据库集成测试、race、benchmark、examples 和 docs 构建检查。
 ---
 
-## 完整测试
+Oro 的测试目标是保证 SQLite、MySQL、PostgreSQL 三个首期驱动行为一致。测试文档参考主流 ORM 的方式，把“如何跑”和“覆盖什么”分开写清楚。
+
+## Go 版本
+
+项目目标 Go 版本是 `go1.27rc1`。
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm
+gvm use go1.27rc1
+go version
+```
+
+如果本地没有 gvm，可以直接使用兼容的 Go 1.27 工具链。
+
+## 基础测试
+
+```bash
 go test ./...
+```
+
+这是提交前最低要求，覆盖根包、内部包、官方驱动包和 examples 的编译测试。
+
+## Race 测试
+
+```bash
 go test -race ./...
 ```
 
-## 驱动测试
+Race 测试会更慢，但适合改动连接池、缓存、事件、关系预加载、分片路由等并发相关代码后执行。
+
+## 官方驱动测试
 
 ```bash
 go test ./driver/sqlite
@@ -19,39 +41,136 @@ go test ./driver/mysql
 go test ./driver/pgsql
 ```
 
-MySQL 和 PostgreSQL 默认使用本地配置，也可以通过环境变量覆盖：
+SQLite 测试默认可直接运行。MySQL 和 PostgreSQL 需要本地数据库。
 
-```bash
-ORO_MYSQL_DSN='root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false'
-ORO_PGSQL_DSN='postgres://root@localhost:5432/duxorm?sslmode=disable'
-```
+## 本地数据库配置
+
+默认测试配置：
 
 | 驱动 | Host | 用户 | 密码 | 数据库 |
 | --- | --- | --- | --- | --- |
 | MySQL | `localhost` | `root` | `root` | `duxorm` |
 | PostgreSQL | `localhost` | `root` | 空 | `duxorm` |
 
+可以通过环境变量覆盖：
+
+```bash
+export ORO_MYSQL_DSN='root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false'
+export ORO_PGSQL_DSN='postgres://root@localhost:5432/duxorm?sslmode=disable'
+```
+
+再运行：
+
+```bash
+go test ./driver/mysql ./driver/pgsql
+```
+
 ## 共享行为矩阵
 
-- 结构同步建表和加字段；
-- 模型和裸表 CRUD；
-- 创建返回值和插入主键；
-- 默认值和 nullable；
-- 批量创建和 upsert；
-- `Where`、`WhereGroup`、`WhereWhen`、关联过滤；
-- 分页、聚合、stream、chunk；
-- 事务、嵌套事务、锁；
-- join、子查询、group、having；
-- `HasOne`、`HasMany`、`BelongsTo`、`ManyToMany`；
-- 动态关系和中间表字段；
-- `With`、`For`、`WhereHas`、`WhereDoesntHave`；
-- 关系聚合；
-- JSON 查询和序列化。
+三数据库集成测试覆盖这些共享行为：
+
+| 分类 | 覆盖点 |
+| --- | --- |
+| 结构同步 | 建表、加字段、索引、唯一索引、全文索引、快照、危险变更拒绝 |
+| 模型 CRUD | `Create`、`CreateMany`、`CreateManyResult`、`Find`、`First`、`Get`、`Update`、`Delete` |
+| 裸表 CRUD | `Table`、`oro.Map`、`MapTo[T]`、批量写入、返回主键 |
+| 默认值/null | 数据库默认值、`Omit`、`Only`、`oro.Null[T]`、时间字段 |
+| 查询条件 | `Where`、`Field`、`WhereGroup`、`WhereWhen`、`WhereRaw`、列比较 |
+| 高级查询 | `Select`、聚合、`GroupBy`、`Having`、排序、分页、子查询 |
+| Join | inner/left/right/full/cross join、join alias、join 条件 |
+| 事务 | `Transaction`、`Begin`、嵌套事务、savepoint、rollback、重试 |
+| 锁 | `LockForUpdate`、`LockForShare`、`NoWait`、`SkipLocked` 能力差异 |
+| 关系 | `BelongsTo`、`HasOne`、`HasMany`、`ManyToMany`、动态关系 |
+| 预加载 | `With`、多级预加载、回调过滤、跨连接加载 |
+| 关系查询 | `For`、`WhereHas`、`WhereDoesntHave`、数量条件 |
+| 关系写入 | `Attach`、`Detach`、`Sync`、`Set`、`Clear`、pivot 字段 |
+| JSON/全文 | JSON path 条件、JSON contains、全文 match/score |
+| 多租户/分片 | 租户字段注入、租户路由、分片路由、跨分片限制 |
+| 缓存/事件 | 查询缓存、标签失效、Hook、事件、SQL 日志事件 |
+| 序列化 | `Serialize`、Hidden、JSON tag、已加载关系、循环保护 |
+
+## Examples 验证
+
+示例目录用于保证 README 和文档里的基本用法可运行。
+
+```bash
+go run ./examples/quickstart
+go run ./examples/crud
+go run ./examples/relations
+go run ./examples/transactions
+go run ./examples/multi-driver
+```
+
+如果某个示例依赖具体数据库，先确认本地 DSN 和驱动 import。
 
 ## 文档构建
+
+文档使用 Astro + Starlight，包管理器是 pnpm。
 
 ```bash
 cd docs
 pnpm install
 pnpm run build
 ```
+
+不要使用 npm 生成 lock 文件。
+
+## Benchmark
+
+benchmark 位于独立模块。发布级性能参考使用同一数据库驱动、10 轮运行和中位数口径：
+
+```bash
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+ORO_BENCH_DRIVER=mysql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+ORO_BENCH_DRIVER=pgsql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+快速冒烟可以使用较短时间：
+
+```bash
+COUNT=1 BENTIME=100ms ./run.sh
+```
+
+benchmark 主要用于比较同一台机器、同一数据库配置、同一数据库驱动下的相对表现。不同机器、数据库配置和驱动实现会影响结果。
+
+## 改动后该跑什么
+
+| 改动类型 | 建议命令 |
+| --- | --- |
+| 普通根包逻辑 | `go test ./...` |
+| 查询编译、字段映射 | `go test ./...` + 三驱动测试 |
+| 驱动方言 | `go test ./driver/sqlite ./driver/mysql ./driver/pgsql` |
+| 并发、缓存、连接池 | `go test -race ./...` |
+| 性能优化 | `cd benchmarks/ormbench && ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0` |
+| 文档改动 | `cd docs && pnpm run build` |
+| 示例改动 | `go run ./examples/...` 分目录执行 |
+
+## 测试数据安全
+
+MySQL/PostgreSQL 集成测试会操作 `duxorm` 数据库中的测试表。不要把测试 DSN 指向生产库。
+
+建议本地准备专用数据库：
+
+```sql
+create database duxorm;
+```
+
+CI 环境应使用一次性数据库或容器数据库。
+
+## 第三方驱动测试建议
+
+第三方 SQL 驱动至少应复用官方驱动 smoke 测试思路，覆盖：
+
+- `Sync` 建表和加字段；
+- 模型和裸表 CRUD；
+- 批量创建和主键回填；
+- `Where`、`Join`、子查询、聚合；
+- 事务和 savepoint；
+- 错误转换；
+- JSON/全文能力如果声明支持，也必须有测试。
+
+`Capabilities` 声明什么，就应该测试什么。

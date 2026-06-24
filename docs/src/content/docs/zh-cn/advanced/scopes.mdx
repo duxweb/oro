@@ -1,0 +1,184 @@
+---
+title: 查询作用域
+description: 使用 Scope 封装可复用查询片段，而不是到处复制 Where 链。
+---
+
+Scope 是可复用的查询片段。Oro 把作用域定义成显式 Go 函数，避免反射魔法和命名约定。
+
+`Where` 表达一个条件；`Scope` 表达一组有业务名字的查询规则。
+
+## 模型 Scope
+
+```go
+func ActiveProducts(q *oro.ScopeQuery[Product]) {
+    q.Where("Status", "active")
+}
+```
+
+使用：
+
+```go
+products, err := db.Use[Product]().
+    Scope(ActiveProducts).
+    Get(ctx)
+```
+
+Scope 函数直接修改传入的 `ScopeQuery[T]`，不需要返回 query。
+
+## 带参数 Scope
+
+```go
+func MinPrice(price uint) oro.Scope[Product] {
+    return func(q *oro.ScopeQuery[Product]) {
+        q.Where("Price", ">=", price)
+    }
+}
+
+func Latest(limit int) oro.Scope[Product] {
+    return func(q *oro.ScopeQuery[Product]) {
+        q.OrderByDesc("ID").Limit(limit)
+    }
+}
+```
+
+使用：
+
+```go
+products, err := db.Use[Product]().
+    Scope(MinPrice(100), Latest(20)).
+    Get(ctx)
+```
+
+多个 Scope 按传入顺序执行。
+
+## 条件 Scope
+
+```go
+query := db.Use[Product]().Scope(MinPrice(100))
+
+query = query.ScopeWhen(filter.OnlyActive, ActiveProducts)
+
+products, err := query.Get(ctx)
+```
+
+`ScopeWhen(false, ...)` 什么都不做。
+
+## Table Scope
+
+裸表也支持 Scope。
+
+```go
+func PaidRows() oro.TableScope {
+    return func(q *oro.TableScopeQuery) {
+        q.Where("status", "paid")
+    }
+}
+
+rows, err := db.Table("orders").
+    Scope(PaidRows()).
+    OrderByDesc("id").
+    Get(ctx)
+```
+
+Table Scope 使用数据库列名。
+
+## Scope 能做什么
+
+`ScopeQuery[T]` 覆盖大多数查询方法，包括：
+
+| 能力 | 方法 |
+| --- | --- |
+| 条件 | `Where`、`OrWhere`、`WhereGroup`、`WhereWhen`、`WhereRaw`、`WhereColumn` |
+| 子查询 | `WhereIn`、`WhereExists` |
+| 选择 | `Select`、`SelectHidden` |
+| 关系 | `With`、`For` |
+| Join | `Join`、`LeftJoin`、`RightJoin`、`FullJoin`、`CrossJoin`、`JoinRaw` |
+| 排序分页 | `OrderBy`、`OrderByDesc`、`Limit`、`Offset` |
+| 聚合 | `GroupBy`、`Having`、`HavingRaw` |
+| 锁 | `LockForUpdate`、`LockForShare` |
+| 软删除 | `WithDeleted`、`OnlyDeleted` |
+| 分片 | `Shard`、`AllShards` |
+| 执行行为 | `UsePrimary`、`Cache`、`Timeout`、`SkipHooks`、`SkipEvents` |
+
+Table Scope 覆盖表查询对应的方法，但没有模型关系和 Hook 相关能力。
+
+## Scope 和 Where 的区别
+
+| 写法 | 适合场景 |
+| --- | --- |
+| `Where("Status", "active")` | 一次性字段条件 |
+| `WhereWhen(condition, fn)` | 当前查询里按条件追加分组 |
+| `Scope(ActiveProducts)` | 可复用业务规则 |
+| `ScopeWhen(condition, scope)` | 条件成立时复用一组规则 |
+
+不要为了单个简单条件创建 Scope。Scope 应该有业务语义。
+
+## 常见业务 Scope
+
+租户和权限：
+
+```go
+func VisibleTo(user User) oro.Scope[Article] {
+    return func(q *oro.ScopeQuery[Article]) {
+        q.WhereGroup(func(w *oro.WhereBuilder) {
+            w.Where("OwnerID", user.ID).
+                OrWhere("Visibility", "public")
+        })
+    }
+}
+```
+
+软状态：
+
+```go
+func Published(q *oro.ScopeQuery[Article]) {
+    q.Where("Status", "published").Where("PublishedAt", "<=", time.Now())
+}
+```
+
+常用排序：
+
+```go
+func Newest[T any]() oro.Scope[T] {
+    return func(q *oro.ScopeQuery[T]) {
+        q.OrderByDesc("ID")
+    }
+}
+```
+
+## 和租户功能的关系
+
+全局租户过滤不建议写成普通 Scope。Oro 已提供 `TenantConfig` 和 `db.Tenant(oro.Map)`，可以自动处理查询、写入和预加载。
+
+Scope 更适合业务筛选，例如“可见内容”“已发布”“后台可搜索”。
+
+## 和 Repository 的关系
+
+Scope 不替代 repository/service。推荐边界：
+
+| 层级 | 放什么 |
+| --- | --- |
+| Scope | 可复用查询片段 |
+| Repository | 组合查询、事务、返回 DTO |
+| Service | 业务流程和外部系统调用 |
+
+示例：
+
+```go
+func (repo ProductRepo) ListActive(ctx context.Context, tenantID uint64) ([]*Product, error) {
+    return repo.db.Use[Product]().
+        Scope(ByTenant(tenantID), ActiveProducts).
+        OrderByDesc("ID").
+        Get(ctx)
+}
+```
+
+## 测试 Scope
+
+Scope 是普通函数，测试成本很低。推荐通过集成测试确认结果，而不是测试 SQL 字符串。
+
+```go
+products, err := db.Use[Product]().Scope(MinPrice(100)).Get(ctx)
+```
+
+这样能覆盖不同数据库方言的编译差异。

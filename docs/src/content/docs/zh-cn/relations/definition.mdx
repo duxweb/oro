@@ -1,0 +1,113 @@
+---
+title: 关系定义
+description: 使用模型方法定义 BelongsTo、HasOne、HasMany、ManyToMany 和动态关系。
+---
+
+Oro 的关系是模型方法，不是结构体字段。这样可以避免 Go 包循环依赖，也让预加载状态明确。
+
+## 基本形式
+
+```go
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+参数含义：
+
+| 参数 | 含义 |
+| --- | --- |
+| `article` | 当前模型实例 |
+| `"Cover"` | 关系名称 |
+| `"Image"` | 目标模型名称 |
+| `ForeignKey` | 目标侧或当前侧外键 |
+| `ReferenceKey` | 被引用的主键或唯一键 |
+
+## BelongsTo
+
+当前模型保存父级 ID：
+
+```go
+func (comment Comment) Article() oro.Relation {
+    return oro.BelongsTo(comment, "Article", "Article").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## HasOne
+
+目标表中有一行指向当前模型：
+
+```go
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## HasMany
+
+目标表中有多行指向当前模型：
+
+```go
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## ManyToMany
+
+```go
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        Through("article_tags").
+        SourceForeignKey("ArticleID").
+        TargetForeignKey("TagID")
+}
+```
+
+中间表可以定义为普通模型并注册，这样可以参与结构同步。
+
+## 动态关系
+
+动态关系适合媒体、评论、标签、审计记录等跨模块资源：
+
+```go
+func (article Article) Images() oro.Relation {
+    return oro.DynamicHasMany(article, "Images", "Image").
+        IDField("OwnerID").
+        TypeField("OwnerType").
+        TypeValue("Article")
+}
+```
+
+动态关系依赖“来源 ID + 来源类型”区分归属。
+
+## 为什么不放结构体字段
+
+不推荐：
+
+```go
+type Article struct {
+    Cover *Image
+}
+```
+
+推荐：
+
+```go
+func (article Article) Cover() oro.Relation { ... }
+```
+
+关系方法的优势：
+
+- 不需要双向 import 模型包；
+- 未预加载时能明确返回 `ErrRelationNotLoaded`；
+- 关系元数据集中在方法里；
+- 关系写入和查询可以共用同一个定义。

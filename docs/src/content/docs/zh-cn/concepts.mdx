@@ -1,0 +1,170 @@
+---
+title: 核心概念
+description: 理解 Oro 的入口、模型、字段名、Map、Null、同步和驱动边界。
+---
+
+Oro 的目标是把 ORM 的概念压到少数几个清晰入口上。使用者不需要记一堆历史 API，也不需要运行代码生成器。
+
+## 三个查询入口
+
+```go
+db.Use[Product]()      // 模型查询
+db.Table("products")   // 裸表查询
+db.Raw("select ...")   // 原生 SQL
+```
+
+| 入口 | 使用场景 | 字段命名 | 返回值 |
+| --- | --- | --- | --- |
+| `Use[T]()` | 业务模型查询 | Go 字段名，如 `Price` | `*T` / `[]*T` |
+| `Table(name)` | 直接查表、封装底层能力 | 数据库列名，如 `price` | `oro.Map` / `[]oro.Map` |
+| `Raw(sql)` | 原生 SQL 逃生口 | 手写 SQL | `oro.Map`，可 `MapTo[T]()` |
+
+模型查询适合日常业务。裸表查询适合后台工具、报表、动态表名、低层封装。Raw 只用于 ORM DSL 不该覆盖的场景。
+
+## 模型和表
+
+模型是带 `Define` 方法的 Go 结构体：
+
+```go
+type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Price").Uint().Default(0)
+}
+```
+
+`Define` 是数据库结构来源。Oro 不使用 tag 描述字段类型，这样字段定义可以带方法、索引、默认值、租户、连接和分片配置，不会把复杂配置塞进字符串 tag。
+
+## Go 字段名和数据库列名
+
+模型查询使用 Go 字段名：
+
+```go
+db.Use[Product]().Where("Price", ">=", 100)
+db.Use[Product]().OrderBy("ID")
+```
+
+裸表查询使用数据库列名：
+
+```go
+db.Table("products").Where("price", ">=", 100)
+db.Table("products").OrderBy("id")
+```
+
+这个规则避免了 ORM 在不同入口里偷偷转换字段名。你看到的是哪一层，就写哪一层的名字。
+
+## `oro.Map`
+
+`oro.Map` 是统一的数据容器：
+
+```go
+oro.Map{"Price": 100}
+oro.Map{"price": 100}
+```
+
+它用于：
+
+- 模型更新；
+- 裸表写入；
+- Raw / Table 查询结果；
+- 租户值；
+- 多对多中间表字段。
+
+模型查询里的 `oro.Map` 使用 Go 字段名；裸表查询里的 `oro.Map` 使用数据库列名。
+
+## `oro.Null[T]`
+
+数据库 `NULL` 不等于 Go 零值。Oro 使用 `oro.Null[T]` 表达 nullable 字段：
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[int]
+}
+
+product.Stock = oro.NullOf(10)
+product.Stock = oro.NullZero[int]()
+```
+
+这样业务代码不用到处处理 `*int`、`*string` 的取值问题，也能明确区分“有值 0”和“数据库 NULL”。
+
+## 自动同步
+
+```go
+db.Register(Product{}, User{})
+db.Sync(ctx)
+```
+
+自动同步只做安全变更：建表、加字段、建索引、维护结构快照。删除字段、危险类型变更、收紧 nullable 约束不会静默执行。
+
+Oro 不要求每次早期结构调整都写迁移文件，但也不会冒险替你做破坏性变更。结构来源始终是 Go 模型定义。
+
+## 驱动边界
+
+官方驱动包是 `database/sql` 包装器和方言适配器，不主动注册具体数据库实现。
+
+```go
+import (
+    "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
+)
+```
+
+如果你想使用 `mattn/go-sqlite3`：
+
+```go
+import _ "github.com/mattn/go-sqlite3"
+
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db", sqlite.DriverName("sqlite3"))},
+    },
+})
+```
+
+高级场景可以直接传入已有连接：
+
+```go
+sqlDB, _ := sql.Open("sqlite3", "app.db")
+driver := sqlite.Wrap(sqlDB, sqlite.OwnsDB(true))
+```
+
+## 返回规则
+
+查询不到不是错误：
+
+| 方法 | 查不到时 |
+| --- | --- |
+| `First(ctx)` | `nil, nil` |
+| `Find(ctx, id)` | `nil, nil` |
+| `Get(ctx)` | 空切片 |
+| `Count(ctx)` | `0, nil` |
+
+错误只表示 SQL、连接、约束、事务或扫描出现异常。
+
+## 关系不是结构体字段
+
+Oro 不要求模型里写 `Cover *Image` 这类字段。关系是方法：
+
+```go
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+读取时也通过方法：
+
+```go
+cover, err := article.Cover().One[Image]()
+comments, err := article.Comments().Many[Comment]()
+```
+
+这种设计能减少 Go 包循环依赖，也让预加载状态更明确。

@@ -5,9 +5,18 @@ import "database/sql"
 type Option func(*driverConfig)
 
 type driverConfig struct {
-	dsn   string
-	db    *sql.DB
-	owned bool
+	driverName string
+	dsn        string
+	db         *sql.DB
+	owned      bool
+}
+
+func DriverName(name string) Option {
+	return func(config *driverConfig) {
+		if name != "" {
+			config.driverName = name
+		}
+	}
 }
 
 func OwnsDB(owned bool) Option {

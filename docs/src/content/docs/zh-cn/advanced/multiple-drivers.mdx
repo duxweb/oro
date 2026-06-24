@@ -1,0 +1,120 @@
+---
+title: 多驱动与连接
+description: 配置多连接、默认连接、读写分离、连接池、模型连接和跨连接预加载。
+---
+
+Oro 把所有数据库配置统一放在 `Connections` 下。没有额外的顶层 `Driver`，避免概念重复。
+
+## 基础配置
+
+```go
+db, err := oro.Open(oro.Config{
+    Default: "main",
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {
+            Driver: sqlite.Open("app.db"),
+        },
+        "mysql": {
+            Driver: mysql.Open(mysqlDSN),
+        },
+        "pgsql": {
+            Driver: pgsql.Open(pgDSN),
+        },
+    },
+})
+```
+
+未指定连接时使用 `Default`；如果 `Default` 为空，默认使用 `"default"`。
+
+## 具体 SQL driver 由应用引入
+
+```go
+import (
+    "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
+)
+```
+
+官方驱动包只提供方言、结构检查和 `database/sql` 包装，不主动注册具体 SQL driver。
+
+## DriverName
+
+```go
+sqlite.Open("app.db", sqlite.DriverName("sqlite3"))
+```
+
+适合 SQLite 这种同一方言有多个 `database/sql` 实现的场景。
+
+## Wrap
+
+```go
+sqlDB, err := sql.Open("sqlite3", "app.db")
+driver := sqlite.Wrap(sqlDB, sqlite.OwnsDB(true))
+```
+
+当你需要自己配置连接、认证、插件、连接器或已有连接池时，使用 `Wrap`。
+
+## 连接池
+
+```go
+db, err := oro.Open(oro.Config{
+    Pool: oro.PoolConfig{
+        MaxOpenConns:    20,
+        MaxIdleConns:    10,
+        ConnMaxLifetime: time.Hour,
+        PingOnOpen:      true,
+    },
+    Connections: map[string]oro.ConnectionConfig{
+        "main": {Driver: mysql.Open(primaryDSN)},
+        "reporting": {
+            Driver: pgsql.Open(reportingDSN),
+            Pool: &oro.PoolConfig{MaxOpenConns: 5},
+        },
+    },
+})
+```
+
+全局连接池配置应用到所有连接；单连接配置优先覆盖。
+
+## 读写分离
+
+```go
+Connections: map[string]oro.ConnectionConfig{
+    "main": {
+        Driver: mysql.Open(primaryDSN),
+        Reads: []oro.Driver{
+            mysql.Open(readDSN1),
+            mysql.Open(readDSN2),
+        },
+    },
+}
+```
+
+读查询可以走读库。写入、事务、锁和 `UsePrimary()` 强制走主库。
+
+```go
+rows, err := db.Use[Product]().UsePrimary().Get(ctx)
+```
+
+## 模型级连接
+
+```go
+func (Report) Define(s *oro.SchemaBuilder) {
+    s.Connection("pgsql")
+    s.Table("reports")
+}
+```
+
+模型连接会成为 `db.Use[Report]()` 的默认连接。
+
+## 查询级连接
+
+```go
+rows, err := db.Connection("pgsql").Table("reports").Get(ctx)
+```
+
+查询级连接优先级最高。
+
+## 跨连接关系
+
+预加载允许关系目标在另一个连接上。Oro 会拆成多次查询，不生成跨库 join。跨连接写入建议放在应用层显式协调，不假装提供分布式事务。

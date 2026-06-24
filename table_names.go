@@ -236,6 +236,13 @@ func (resolver *tableNameResolver) applySelectExpr(context tableNameContext, ite
 				resolver.applySource(source)
 			}
 		}
+	case "__oro_aggregate__":
+		if len(item.Args) > 0 {
+			if expr, ok := item.Args[0].(AggregateExpr); ok {
+				expr.Field = context.identifier(expr.Field)
+				item.Args[0] = expr
+			}
+		}
 	case "__oro_fulltext_score__":
 		if len(item.Args) > 0 {
 			if expr, ok := item.Args[0].(FullTextExpr); ok {

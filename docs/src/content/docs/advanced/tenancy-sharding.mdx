@@ -81,11 +81,13 @@ db, err := oro.Open(oro.Config{
     Shards: map[string]oro.ShardConfig{
         "orders": {
             Connections: []string{"orders_0", "orders_1"},
-            Strategy:    oro.ModShard("TenantID", 2),
+            Strategy:    oro.ModShard("TenantID"),
         },
     },
 })
 ```
+
+`ModShard` uses the number of configured `Connections` as the shard count.
 
 ## Model sharding
 

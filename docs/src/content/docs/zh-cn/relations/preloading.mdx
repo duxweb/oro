@@ -1,0 +1,207 @@
+---
+title: 预加载
+description: 使用 With 预加载关系、回调过滤、多级预加载、动态关系和读取已加载关系。
+---
+
+`With` 表示预加载：主查询先查模型，再按关系批量查询目标数据，最后挂到模型的关系状态里。
+
+Oro 不把关联结果直接放进结构体字段，这样可以避免 Go 包循环引用。读取关系时仍然通过关系方法。
+
+## 基础预加载
+
+一对一或反向关系：
+
+```go
+article, err := db.Use[Article]().
+    With(Article{}.Cover()).
+    First(ctx)
+if err != nil || article == nil {
+    return err
+}
+
+cover, err := article.Cover().One[Image]()
+```
+
+一对多：
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Comments()).
+    Get(ctx)
+if err != nil {
+    return err
+}
+
+for _, article := range articles {
+    comments, err := article.Comments().Many[Comment]()
+    if err != nil {
+        return err
+    }
+    _ = comments
+}
+```
+
+## One 和 Many
+
+关系读取方法固定两个：
+
+| 方法 | 场景 | 返回 |
+| --- | --- | --- |
+| `One[T]()` | `BelongsTo` / `HasOne` | `*T` 或 `nil` |
+| `Many[T]()` | `HasMany` / `ManyToMany` | `[]*T` |
+
+```go
+cover, err := article.Cover().One[Image]()
+comments, err := article.Comments().Many[Comment]()
+```
+
+如果关系没有被预加载，返回 `oro.ErrRelationNotLoaded`。这比结构体字段默认为 nil 更明确，因为 nil 可能表示“没加载”，也可能表示“数据库确实没有”。
+
+## 回调过滤
+
+`With` 的第二个参数是可选回调，用来限制关系查询。
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved").
+            OrderByDesc("ID").
+            Limit(5)
+    }).
+    Get(ctx)
+```
+
+回调只影响被预加载的关系查询，不影响主查询。
+
+常用方法：
+
+| 方法 | 用途 |
+| --- | --- |
+| `Where` / `OrWhere` | 关系查询条件 |
+| `WhereGroup` / `OrWhereGroup` | 条件分组 |
+| `WhereWhen` | 条件成立时追加条件组 |
+| `WhereRaw` / `WhereColumn` | 原生条件和列比较 |
+| `OrderBy` / `OrderByDesc` | 关系排序 |
+| `Limit` | 限制每个关系查询结果 |
+| `With` | 继续预加载下级关系 |
+| `Shard` / `AllShards` | 分片关系查询 |
+
+## 多级预加载
+
+多级关系可以使用字符串路径：
+
+```go
+articles, err := db.Use[Article]().With("Comments.Author").Get(ctx)
+```
+
+也可以使用回调写得更明确：
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved").With(Comment{}.Author())
+    }).
+    Get(ctx)
+```
+
+建议：
+
+- 能用方法关系时优先用方法关系，重构更安全；
+- 动态关系、多级路径、插件扩展场景可以用字符串；
+- 字符串路径区分大小写，使用关系方法名。
+
+## 预加载多个关系
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Cover()).
+    With(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    With(Article{}.Tags()).
+    Get(ctx)
+```
+
+每个 `With` 独立执行关系加载。Oro 不会为了多个关系生成复杂大 join，避免重复行和扫描混乱。
+
+## 多对多预加载
+
+```go
+articles, err := db.Use[Article]().With(Article{}.Tags()).Get(ctx)
+
+for _, article := range articles {
+    tags, err := article.Tags().Many[Tag]()
+    if err != nil {
+        return err
+    }
+    _ = tags
+}
+```
+
+多对多会通过中间表批量查询目标模型。中间表字段和 pivot 读取详见“多对多与中间表”。
+
+## 动态关系预加载
+
+动态关系适合资源库、附件、评论等多模型共用目标表的场景。
+
+```go
+articles, err := db.Use[Article]().With(Article{}.Images()).Get(ctx)
+```
+
+字符串关系也支持动态关系：
+
+```go
+articles, err := db.Use[Article]().With("Images").Get(ctx)
+```
+
+动态关系依赖 `TypeField` / `TypeValue` 或目标模型类型信息，定义方式详见“关系定义”。
+
+## 跨连接预加载
+
+目标模型可以定义自己的连接：
+
+```go
+func (Image) Define(s *oro.SchemaBuilder) {
+    s.Connection("media")
+    s.Table("images")
+}
+```
+
+预加载时 Oro 会按模型连接和当前查询连接解析。跨连接预加载通常拆成多次查询，不尝试生成跨库 join。
+
+这比强行跨库 join 更稳定，也更适合读写分离和模块化项目。
+
+## 和 Select 的关系
+
+如果主查询使用 `Select`，必须包含关系所需的本地键字段。
+
+```go
+articles, err := db.Use[Article]().
+    Select("ID", "Title").
+    With(Article{}.Comments()).
+    Get(ctx)
+```
+
+如果缺少关系键，预加载无法建立 source -> target 映射，会返回错误或空关系。
+
+## 序列化输出
+
+预加载后的关系可以通过 `oro.Serialize` 输出：
+
+```go
+payload := oro.Serialize(article)
+```
+
+`Serialize` 会输出已加载关系，并做循环保护；不会主动查询未加载关系。
+
+## 常见问题
+
+| 问题 | 建议 |
+| --- | --- |
+| 只是过滤主模型 | 用 `WhereHas`，不是 `With` |
+| 只是查询某个实例的关系目标 | 用 `For(relation)` |
+| 需要 API 输出关系 | `With` 后 `oro.Serialize` |
+| 关系没加载 | 检查是否调用了 `With`，或处理 `ErrRelationNotLoaded` |
+| 大量关系数据 | 在回调中加 `Where`、`OrderBy`、`Limit` |
+
+`With` 不改变主查询返回哪些记录，它只解决 N+1 查询和输出关系数据的问题。

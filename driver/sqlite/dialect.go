@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/duxweb/oro"
+	"github.com/duxweb/oro/internal/queryutil"
 )
 
 type dialect struct {
@@ -244,13 +245,34 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		return "exists " + expr + " as " + d.QuoteIdent(item.Alias), args, nil
 	}
 	expr := item.Expr
-	if !item.Raw {
+	if item.Expr == "__oro_aggregate__" {
+		aggregateSQL, err := d.compileAggregateSelect(item)
+		if err != nil {
+			return "", nil, err
+		}
+		expr = aggregateSQL
+	} else if !item.Raw {
 		expr = d.QuoteIdent(item.Expr)
 	}
 	if item.Alias != "" {
 		expr += " as " + d.QuoteIdent(item.Alias)
 	}
 	return expr, nil, nil
+}
+
+func (d dialect) compileAggregateSelect(item oro.SelectExpr) (string, error) {
+	if len(item.Args) == 0 {
+		return "", &oro.Error{Op: "sqlite.select", Kind: oro.ErrInvalidArgument}
+	}
+	expr, ok := item.Args[0].(oro.AggregateExpr)
+	if !ok {
+		return "", &oro.Error{Op: "sqlite.select", Kind: oro.ErrInvalidArgument}
+	}
+	sql, err := queryutil.AggregateSelectSQL(expr.Func, expr.Field, d.QuoteIdent)
+	if err != nil {
+		return "", &oro.Error{Op: "sqlite.select", Kind: oro.ErrInvalidArgument}
+	}
+	return sql, nil
 }
 
 func (d dialect) compileSelectSource(stmt oro.SelectAST) (string, []any, error) {

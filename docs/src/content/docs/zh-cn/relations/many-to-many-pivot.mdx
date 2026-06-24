@@ -1,0 +1,198 @@
+---
+title: 多对多与中间表
+description: 多对多关系、中间表模型、Through 字段、RelationItem.Data 和中间表查询写入。
+---
+
+多对多关系通过中间表连接两端模型。Oro 推荐把中间表也定义成普通模型，尤其是中间表有额外字段时。
+
+很多 ORM 把中间表数据叫 pivot。Oro 文档里使用“中间表”作为主要术语，API 使用 `Through` 表示中间表，使用 `RelationItem.Data` 表示中间表附加字段。
+
+## 中间表模型
+
+```go
+type ArticleTag struct {
+    oro.Model
+    ArticleID uint64
+    TagID     uint64
+    Sort      int
+    Source    string
+}
+
+func (ArticleTag) Define(s *oro.SchemaBuilder) {
+    s.Table("article_tags")
+    s.Field("ArticleID").UnsignedBigInt().Index()
+    s.Field("TagID").UnsignedBigInt().Index()
+    s.Field("Sort").Int().Default(0)
+    s.Field("Source").String().Size(32).Default("manual")
+    s.Unique("uk_article_tag", "ArticleID", "TagID")
+}
+```
+
+注册中间表模型后，`Sync` 会管理它的结构。
+
+```go
+err := db.Register(Article{}, Tag{}, ArticleTag{})
+```
+
+## 关系定义
+
+```go
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        Through("article_tags").
+        SourceForeignKey("ArticleID").
+        TargetForeignKey("TagID")
+}
+```
+
+| 方法 | 含义 |
+| --- | --- |
+| `Through(table)` | 中间表名 |
+| `SourceForeignKey(field)` | 中间表指向来源模型的字段 |
+| `TargetForeignKey(field)` | 中间表指向目标模型的字段 |
+
+字段名使用 Go 字段名，Oro 会转成数据库列名。
+
+## 预加载多对多
+
+```go
+articles, err := db.Use[Article]().With(Article{}.Tags()).Get(ctx)
+
+for _, article := range articles {
+    tags, err := article.Tags().Many[Tag]()
+    if err != nil {
+        return err
+    }
+    _ = tags
+}
+```
+
+预加载负责加载目标模型，不会把中间表字段塞进目标模型。需要中间表字段时，直接查中间表。
+
+## 写入中间表字段
+
+单条 attach：
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1, "Source": "manual"})
+```
+
+`Attach` / `RelationItem.Data` / `UpdateThrough` 里的 `oro.Map` 使用中间表字段的 Go 风格名称，内部按 snake_case 转成数据库列名；这条路径不依赖中间表模型注册。
+
+## 批量 Attach
+
+如果不需要中间表额外字段，可以直接传目标模型切片：
+
+```go
+err := db.Relation(article.Tags()).AttachMany(ctx, []*Tag{tag1, tag2})
+```
+
+需要额外字段时，使用 `RelationItem[T]`：
+
+```go
+err := db.Relation(article.Tags()).AttachMany(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag1, Data: oro.Map{"Sort": 1}},
+    {Model: tag2, Data: oro.Map{"Sort": 2}},
+})
+```
+
+## Sync
+
+`Sync` 会让中间表结果和传入列表一致：未传入的旧关系会被删除，传入但不存在的关系会新增。
+
+```go
+err := db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag1, Data: oro.Map{"Sort": 1}},
+    {Model: tag2, Data: oro.Map{"Sort": 2}},
+})
+```
+
+只新增缺失关系，不删除旧关系：
+
+```go
+err := db.Relation(article.Tags()).SyncWithoutDetach(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag3, Data: oro.Map{"Sort": 3}},
+})
+```
+
+## 更新中间表字段
+
+```go
+err := db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 3})
+```
+
+`UpdateThrough` 只更新中间表字段，不影响两端模型。
+
+## Detach 和 Clear
+
+```go
+err := db.Relation(article.Tags()).Detach(ctx, tag)
+err = db.Relation(article.Tags()).DetachMany(ctx, []*Tag{tag1, tag2})
+err = db.Relation(article.Tags()).Clear(ctx)
+```
+
+| 方法 | 行为 |
+| --- | --- |
+| `Detach` | 删除指定目标的中间表记录 |
+| `DetachMany` | 删除多个目标的中间表记录 |
+| `Clear` | 清空当前来源模型的所有中间表记录 |
+
+这些操作不会删除 `Tag` 本身，只删除连接关系。
+
+## 获取中间表字段
+
+如果业务需要读取中间表字段，推荐直接查询中间表模型或 DTO。
+
+```go
+type ArticleTagView struct {
+    ArticleID uint64
+    TagID     uint64
+    Sort      int
+    Source    string
+}
+
+rows, err := db.Table("article_tags").
+    Where("article_id", article.ID).
+    OrderBy("sort").
+    MapTo[ArticleTagView]().
+    Get(ctx)
+```
+
+也可以把中间表当普通模型查询：
+
+```go
+items, err := db.Use[ArticleTag]().
+    Where("ArticleID", article.ID).
+    OrderBy("Sort").
+    Get(ctx)
+```
+
+这种方式更清晰：关系负责两端连接，中间表字段属于独立数据。
+
+## 动态多对多
+
+动态多对多适合标签、附件、收藏等多模型共用一张中间表的场景。
+
+```go
+func (article Article) Tags() oro.Relation {
+    return oro.DynamicManyToMany(article, "Tags", "Tag").
+        Through("taggables").
+        SourceForeignKey("OwnerID").
+        TargetForeignKey("TagID").
+        SourceType("OwnerType", "Article")
+}
+```
+
+动态多对多会在中间表中额外写入类型字段，避免不同模型的数据混在一起。
+
+## 事务建议
+
+多对多写入通常涉及多条 SQL，建议放在事务中：
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    return tx.Relation(article.Tags()).Sync(ctx, items)
+})
+```
+
+`Sync` 和批量操作内部也会使用事务，但上层有其他业务写入时，仍建议放在同一个事务里。

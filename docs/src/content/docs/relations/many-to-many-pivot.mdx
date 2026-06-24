@@ -1,0 +1,55 @@
+---
+title: Many-to-Many & Pivot
+description: Join table models, pivot fields, attach/sync/update-through, and reading pivot data.
+---
+
+Many-to-many relations use a join table. The join table can be just a table name, or it can be modeled when it has business fields.
+
+## Relation definition
+
+```go
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        JoinTable("article_tags").
+        ForeignKey("ArticleID").
+        RelatedKey("TagID")
+}
+```
+
+## Pivot model
+
+```go
+type ArticleTag struct {
+    oro.Model
+    ArticleID uint64
+    TagID     uint64
+    Position  int
+}
+
+func (ArticleTag) Define(s *oro.SchemaBuilder) {
+    s.Table("article_tags")
+    s.Field("ArticleID").UnsignedBigInt().Index()
+    s.Field("TagID").UnsignedBigInt().Index()
+    s.Field("Position").Int().Default(0)
+    s.Unique("uk_article_tag", "ArticleID", "TagID")
+}
+```
+
+Using a model keeps pivot fields visible and avoids special cases for schema sync.
+
+## Attach and sync
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"position": 10})
+err = db.Relation(article.Tags()).Sync(ctx, []*Tag{tagA, tagB})
+```
+
+## Read pivot data
+
+When pivot fields matter, query the pivot model directly:
+
+```go
+links, err := db.Use[ArticleTag]().Where("ArticleID", article.ID).Get(ctx)
+```
+
+This keeps pivot data explicit instead of hiding it inside related models.

@@ -1,0 +1,176 @@
+---
+title: 日志
+description: Logger 接口、日志级别、慢查询、SQL 参数输出和 slog/zap 接入方式。
+---
+
+Oro 不绑定具体日志库。你可以接入 `slog`、zap、zerolog 或任何自定义日志系统。
+
+日志接口只关注 SQL 执行结果；复杂审计和业务事件建议用 `db.On`。
+
+## Logger 接口
+
+```go
+type Logger interface {
+    Log(ctx context.Context, event oro.LogEvent)
+}
+```
+
+使用 `LoggerFunc` 快速接入：
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger: oro.LoggerFunc(func(ctx context.Context, event oro.LogEvent) {
+        slog.InfoContext(ctx, "sql",
+            "op", event.Operation,
+            "sql", event.SQL,
+            "duration", event.Duration,
+            "rows", event.Rows,
+            "err", event.Err,
+        )
+    }),
+    LogLevel: oro.LogLevelInfo,
+})
+```
+
+## LogEvent
+
+```go
+type LogEvent struct {
+    Level     oro.LogLevel
+    Operation string
+    Model     string
+    Table     string
+    SQL       string
+    Args      []any
+    Duration  time.Duration
+    Rows      int64
+    Err       error
+    Slow      bool
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `Level` | 本次日志级别 |
+| `Operation` | 操作名，例如 query、create、update |
+| `Model` | 模型名，模型查询时有值 |
+| `Table` | 表名，表查询或写入时有值 |
+| `SQL` | 编译后的 SQL |
+| `Args` | SQL 参数，只有 `LogArgs` 开启时有值 |
+| `Duration` | SQL 执行耗时 |
+| `Rows` | 影响行数或读取行数 |
+| `Err` | SQL 执行错误 |
+| `Slow` | 是否超过慢查询阈值 |
+
+## 日志级别
+
+```go
+oro.LogLevelSilent
+oro.LogLevelError
+oro.LogLevelWarn
+oro.LogLevelInfo
+oro.LogLevelDebug
+```
+
+级别含义：
+
+| 级别 | 输出 |
+| --- | --- |
+| `Silent` | 不输出 |
+| `Error` | 只输出错误 SQL |
+| `Warn` | 输出错误和慢查询 |
+| `Info` | 输出 info/warn/error |
+| `Debug` | 输出所有 SQL |
+
+本地调试可用 `Debug`，生产通常用 `Warn` 或 `Info`。
+
+## 慢查询
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger:             logger,
+    LogLevel:           oro.LogLevelWarn,
+    SlowQueryThreshold: 200 * time.Millisecond,
+})
+```
+
+超过阈值时，`event.Slow` 为 `true`，`event.Level` 为 `LogLevelWarn`。
+
+## SQL 参数输出
+
+默认不输出参数。需要时开启：
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger:  logger,
+    LogArgs: true,
+})
+```
+
+生产环境谨慎开启 `LogArgs`，避免泄露密码、token、手机号、邮箱等敏感数据。
+
+## slog 示例
+
+```go
+logger := oro.LoggerFunc(func(ctx context.Context, event oro.LogEvent) {
+    attrs := []any{
+        "op", event.Operation,
+        "sql", event.SQL,
+        "duration", event.Duration.String(),
+        "rows", event.Rows,
+        "slow", event.Slow,
+    }
+    if len(event.Args) > 0 {
+        attrs = append(attrs, "args", event.Args)
+    }
+    if event.Err != nil {
+        attrs = append(attrs, "err", event.Err)
+        slog.ErrorContext(ctx, "oro sql", attrs...)
+        return
+    }
+    if event.Slow {
+        slog.WarnContext(ctx, "oro slow sql", attrs...)
+        return
+    }
+    slog.DebugContext(ctx, "oro sql", attrs...)
+})
+```
+
+## zap/zerolog 接入
+
+zap、zerolog 也只需要实现 `Log(ctx, event)`。
+
+```go
+type ZapLogger struct {
+    log *zap.Logger
+}
+
+func (l ZapLogger) Log(ctx context.Context, event oro.LogEvent) {
+    l.log.Info("oro sql",
+        zap.String("op", event.Operation),
+        zap.String("sql", event.SQL),
+        zap.Duration("duration", event.Duration),
+        zap.Int64("rows", event.Rows),
+        zap.Bool("slow", event.Slow),
+        zap.Error(event.Err),
+    )
+}
+```
+
+## Logger 和 SQL 事件的区别
+
+| 能力 | 推荐用途 |
+| --- | --- |
+| `Logger` | SQL 日志、慢查询、错误 SQL |
+| `BeforeSQL` / `AfterSQL` 事件 | trace、metrics、审计、调试插件 |
+| Hook | 模型内部逻辑 |
+
+不要把所有 SQL 日志都塞进事件系统。日志接口更直接，也更容易接入统一日志平台。
+
+## 性能建议
+
+- 生产不要默认 `Debug`；
+- `LogArgs` 只在必要时打开；
+- logger 内避免同步网络调用；
+- 如果日志量大，应交给异步日志库处理；
+- 慢查询阈值按业务设置，不要过低。

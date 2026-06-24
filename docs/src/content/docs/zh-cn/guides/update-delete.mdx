@@ -1,0 +1,246 @@
+---
+title: 更新与删除
+description: 条件更新、原子增减、软删除、恢复、强制删除、乐观锁和安全边界。
+---
+
+Oro 只保留一个更新入口：`Update(ctx, oro.Map{...})`。没有 `Save`，避免“按主键保存还是按条件更新”的歧义。
+
+核心规则：更新和删除应该明确条件，不让 ORM 猜测你的意图。
+
+## 条件更新
+
+```go
+affected, err := db.Use[Product]().
+    Where("Code", "P001").
+    Update(ctx, oro.Map{"Price": 120})
+```
+
+模型查询里的 `oro.Map` 使用 Go 字段名。
+
+裸表更新使用数据库列名：
+
+```go
+affected, err := db.Table("products").
+    Where("code", "P001").
+    Update(ctx, oro.Map{"price": 120})
+```
+
+返回值是影响行数。
+
+## 为什么不用结构体更新
+
+Go 结构体无法区分“字段没传”和“字段主动传了零值”。
+
+```go
+Product{Price: 0}
+```
+
+这可能表示：
+
+- 用户要把价格改成 0；
+- 调用方根本没传价格；
+- JSON 反序列化后的零值。
+
+所以 Oro 更新统一使用 `oro.Map`：写什么字段就传什么字段。
+
+## 原子增减
+
+库存、浏览量、计数器建议用表达式，避免先查再写。
+
+```go
+_, err := db.Use[Product]().Where("ID", id).Update(ctx, oro.Map{
+    "Stock": oro.Decrement(1),
+    "Sold":  oro.Increment(1),
+})
+```
+
+裸表：
+
+```go
+_, err := db.Table("products").Where("id", id).Update(ctx, oro.Map{
+    "stock": oro.Decrement(1),
+})
+```
+
+## Raw 写入表达式
+
+```go
+_, err := db.Table("products").Where("id", id).Update(ctx, oro.Map{
+    "updated_at": oro.Raw("CURRENT_TIMESTAMP"),
+})
+```
+
+Raw 表达式只用于可信 SQL 片段，不要拼接用户输入。
+
+## Only 和 Omit
+
+`Only` / `Omit` 可以限制写入字段。
+
+```go
+_, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{
+        "Price":     120,
+        "UpdatedAt": time.Now(),
+    }, oro.Only("Price"))
+```
+
+```go
+_, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120}, oro.Omit("UpdatedAt"))
+```
+
+`Omit` 常见场景是跳过自动更新时间或避免覆盖某些字段。
+
+## 乐观锁
+
+字段定义：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Version").UnsignedBigInt().Default(1).OptimisticLock()
+}
+```
+
+更新时校验：
+
+```go
+rows, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120}, oro.CheckVersion(version))
+```
+
+如果版本不匹配，返回 `oro.ErrStaleData`。适合库存、余额、配置编辑等需要避免覆盖他人修改的场景。
+
+## Upsert
+
+更新已有记录或创建新记录时，使用 `Upsert`。
+
+```go
+saved, err := db.Use[Product]().Upsert(ctx, product,
+    oro.ConflictBy("Code").Update("Price", "Stock"),
+)
+```
+
+裸表：
+
+```go
+row, err := db.Table("products").Upsert(ctx, oro.Map{
+    "code":  "P001",
+    "price": 120,
+}, oro.ConflictBy("code").Update("price"))
+```
+
+`ConflictBy` 对模型使用 Go 字段名，对裸表使用数据库列名。
+
+## 删除
+
+```go
+affected, err := db.Use[Product]().Where("ID", id).Delete(ctx)
+```
+
+如果模型定义了软删除字段，`Delete` 会写入软删除时间；否则执行物理删除。
+
+裸表删除始终是物理删除：
+
+```go
+affected, err := db.Table("products").Where("id", id).Delete(ctx)
+```
+
+## 软删除查询
+
+默认查询会排除软删除记录。
+
+包含软删除：
+
+```go
+product, err := db.Use[Product]().WithDeleted().Find(ctx, id)
+```
+
+只查软删除：
+
+```go
+products, err := db.Use[Product]().OnlyDeleted().Get(ctx)
+```
+
+恢复：
+
+```go
+_, err := db.Use[Product]().
+    WithDeleted().
+    Where("ID", id).
+    Restore(ctx)
+```
+
+强制物理删除：
+
+```go
+_, err := db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+## 防止误操作
+
+Oro 会拒绝无条件更新和删除，返回：
+
+- `oro.ErrUnsafeUpdate`；
+- `oro.ErrUnsafeDelete`。
+
+```go
+_, err := db.Use[Product]().Update(ctx, oro.Map{"Status": "archived"})
+```
+
+批量维护脚本要显式写清范围：
+
+```go
+_, err := db.Use[Product]().
+    Where("Status", "archived").
+    Where("UpdatedAt", "<", cutoff).
+    Delete(ctx)
+```
+
+如果确实要全表操作，建议用 Raw 明确表达，并放在受控脚本中：
+
+```go
+_, err := db.Raw("update "+db.TableName("products")+" set status = ?", "archived").Exec(ctx)
+```
+
+## Hook 和事件
+
+模型更新/删除会触发 Hook 和事件。
+
+```go
+_, err := db.Use[Product]().
+    SkipHooks().
+    SkipEvents().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120})
+```
+
+裸表和 Raw 不触发模型 Hook。
+
+## 事务里更新
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    if _, err := tx.Use[Product]().Where("ID", id).Update(ctx, oro.Map{"Stock": oro.Decrement(1)}); err != nil {
+        return err
+    }
+    _, err := tx.Use[Order]().Create(ctx, order)
+    return err
+})
+```
+
+涉及多个写操作时优先放在事务中。
+
+## 选择方式
+
+| 需求 | 推荐 |
+| --- | --- |
+| 修改指定字段 | `Update(ctx, oro.Map{...})` |
+| 计数器增减 | `Increment` / `Decrement` |
+| 冲突插入更新 | `Upsert` / `UpsertMany` |
+| 逻辑删除 | 模型 `Delete` |
+| 物理删除 | `ForceDelete` 或 `Table.Delete` |
+| 恢复软删除 | `WithDeleted().Restore` |
+| 防并发覆盖 | `OptimisticLock` + `CheckVersion` |

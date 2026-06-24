@@ -127,8 +127,8 @@ Write through the relation operator:
 err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1})
 err = db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 2})
 err = db.Relation(article.Tags()).Detach(ctx, tag)
-err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[Tag]{
-    {Model: tag, Through: oro.Map{"Sort": 1}},
+err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag, Data: oro.Map{"Sort": 1}},
 })
 ```
 

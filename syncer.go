@@ -113,7 +113,14 @@ func (syncer schemaSyncer) syncSchema(ctx context.Context, db *DB, schema *Model
 		}
 		return nil
 	}
-	return syncer.syncSchemaOnConnection(ctx, db, schema)
+	return syncer.syncSchemaOnConnection(ctx, syncDBForSchema(db, schema), schema)
+}
+
+func syncDBForSchema(db *DB, schema *ModelSchema) *DB {
+	if db == nil || schema == nil || db.session.manualConnection || schema.Connection == "" {
+		return db
+	}
+	return db.Connection(schema.Connection)
 }
 
 func (syncer schemaSyncer) syncSchemaOnConnection(ctx context.Context, db *DB, schema *ModelSchema) error {

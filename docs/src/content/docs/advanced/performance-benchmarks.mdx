@@ -1,0 +1,182 @@
+---
+title: Performance Benchmarks
+description: Ten-run SQLite, MySQL, and PostgreSQL benchmark reference for Oro and mainstream Go ORM/SQL ORM libraries.
+---
+
+This page provides a performance reference for Oro, GORM, XORM, and Bun under the same benchmark scenarios and database drivers. Use it to compare relative ORM overhead, common business-path performance, and optimization direction.
+
+:::note[Reading the Numbers]
+The main tables report the **median** from 10 consecutive `go test -bench` runs, not the fastest single run. Median is less sensitive to scheduler noise, database cache churn, and background tasks than a raw average.
+:::
+
+## Environment
+
+| Item | Value |
+| --- | --- |
+| Date | 2026-06-24 |
+| CPU | Apple M4 Pro |
+| OS | macOS 26.5.1, darwin/arm64 |
+| Kernel | Darwin 25.5.0 |
+| Go | go1.27rc1 darwin/arm64 |
+| MySQL | 8.0.45, local `localhost` |
+| PostgreSQL | 18.4 Homebrew, local `localhost` |
+| SQLite | in-memory, same local process |
+
+MySQL and PostgreSQL use the local `duxorm` database. Networked database results are affected by database configuration, connection pooling, background load, and cache state.
+
+## Versions
+
+The benchmark lives in the standalone Go module `benchmarks/ormbench`.
+
+| Library / Driver | Version |
+| --- | --- |
+| Oro | Local workspace `github.com/duxweb/oro v0.0.0`, via `replace ../..` |
+| GORM | `gorm.io/gorm v1.31.1` |
+| GORM MySQL Driver | `gorm.io/driver/mysql v1.6.0` |
+| GORM PostgreSQL Driver | `gorm.io/driver/postgres v1.6.0` |
+| GORM SQLite Driver | `gorm.io/driver/sqlite v1.6.0` |
+| XORM | `xorm.io/xorm v1.3.11` |
+| Bun | `github.com/uptrace/bun v1.2.18` |
+| MySQL driver | `github.com/go-sql-driver/mysql v1.10.0` |
+| PostgreSQL driver | `github.com/jackc/pgx/v5 v5.10.0` |
+| SQLite driver | `github.com/mattn/go-sqlite3 v1.14.34` |
+
+## Fairness Rules
+
+- SQLite: Oro, GORM, XORM, and Bun all use `mattn/go-sqlite3`.
+- MySQL: all libraries use `go-sql-driver/mysql`.
+- PostgreSQL: all libraries use `pgx`.
+- Oro and GORM both disable default write transactions for high-throughput path comparison.
+- Table shape, unique index, soft-delete field, and data size are kept equivalent.
+- Create, query, update, and delete benchmarks execute real database operations.
+- Each database is tested with `-count=10 -benchtime=1s -benchmem`.
+
+## Commands
+
+SQLite with `mattn/go-sqlite3`:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+MySQL:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=mysql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+PostgreSQL:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=pgsql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+## Scenarios
+
+| Scenario | Description |
+| --- | --- |
+| `Create` | Insert 1 `product` per operation |
+| `CreateMany100` | Insert 100 `product` rows per operation |
+| `FirstByCode` | Query 1 row by unique indexed `code` |
+| `WhereList` | Query 20 rows with `where price >= ? order by id limit 20` |
+| `UpdateByCode` | Update 1 row by unique indexed `code` |
+| `DeleteByCode` | Delete 1 row by unique indexed `code` |
+
+Read and update benchmarks seed data before timing. Delete benchmarks seed enough rows so each operation deletes a unique row.
+
+## SQLite
+
+SQLite uses the same CGO driver for all libraries: `mattn/go-sqlite3`.
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `9.17µs` | `9.44µs` | `6.15µs` | `8.15µs` |
+| CreateMany100 | `119.82µs` | `195.59µs` | `206.18µs` | `173.10µs` |
+| FirstByCode | `5.02µs` | `7.31µs` | `11.07µs` | `6.13µs` |
+| WhereList | `24.32µs` | `34.13µs` | `56.75µs` | `28.58µs` |
+| UpdateByCode | `3.97µs` | `5.72µs` | `4.16µs` | `3.31µs` |
+| DeleteByCode | `2.84µs` | `6.84µs` | `8.06µs` | `4.62µs` |
+
+### SQLite Allocations
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `4.5KB / 102` | `5.0KB / 66` | `3.5KB / 69` | `5.6KB / 35` |
+| CreateMany100 | `81.5KB / 1322` | `119.5KB / 1757` | `172.1KB / 3851` | `71.2KB / 1128` |
+| FirstByCode | `4.2KB / 68` | `4.6KB / 91` | `7.1KB / 220` | `6.0KB / 46` |
+| WhereList | `10.0KB / 200` | `13.6KB / 339` | `45.2KB / 1158` | `16.5KB / 184` |
+| UpdateByCode | `3.8KB / 49` | `4.5KB / 64` | `3.2KB / 78` | `5.0KB / 17` |
+| DeleteByCode | `2.1KB / 28` | `3.8KB / 64` | `5.2KB / 162` | `5.5KB / 21` |
+
+## MySQL
+
+MySQL uses `go-sql-driver/mysql`.
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `134.44µs` | `127.72µs` | `128.43µs` | `102.39µs` |
+| CreateMany100 | `634.42µs` | `868.68µs` | `861.11µs` | `813.34µs` |
+| FirstByCode | `38.50µs` | `73.49µs` | `79.83µs` | `41.75µs` |
+| WhereList | `60.96µs` | `103.45µs` | `123.31µs` | `67.11µs` |
+| UpdateByCode | `100.19µs` | `131.75µs` | `118.71µs` | `108.04µs` |
+| DeleteByCode | `113.57µs` | `160.96µs` | `148.68µs` | `121.98µs` |
+
+### MySQL Allocations
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `5.2KB / 102` | `4.2KB / 50` | `3.7KB / 74` | `5.1KB / 23` |
+| CreateMany100 | `63.4KB / 814` | `107.8KB / 1128` | `172.1KB / 3738` | `68.3KB / 1001` |
+| FirstByCode | `4.3KB / 60` | `4.8KB / 85` | `6.7KB / 188` | `6.0KB / 36` |
+| WhereList | `10.4KB / 231` | `12.8KB / 296` | `36.5KB / 937` | `15.5KB / 136` |
+| UpdateByCode | `3.7KB / 50` | `4.5KB / 65` | `2.9KB / 67` | `5.0KB / 18` |
+| DeleteByCode | `2.2KB / 30` | `3.8KB / 61` | `5.2KB / 161` | `5.5KB / 21` |
+
+## PostgreSQL
+
+PostgreSQL uses `pgx`.
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `61.56µs` | `62.71µs` | `62.65µs` | `113.80µs` |
+| CreateMany100 | `755.59µs` | `756.51µs` | `1.28ms` | `1.68ms` |
+| FirstByCode | `38.72µs` | `83.25µs` | `46.55µs` | `113.36µs` |
+| WhereList | `107.95µs` | `122.95µs` | `138.04µs` | `101.86µs` |
+| UpdateByCode | `57.62µs` | `104.80µs` | `58.54µs` | `62.78µs` |
+| DeleteByCode | `52.12µs` | `65.31µs` | `64.87µs` | `70.55µs` |
+
+### PostgreSQL Allocations
+
+| Scenario | Oro | GORM | XORM | Bun |
+| --- | ---: | ---: | ---: | ---: |
+| Create | `4.7KB / 93` | `4.9KB / 60` | `5.0KB / 123` | `6.6KB / 48` |
+| CreateMany100 | `146.0KB / 1461` | `152.7KB / 1866` | `302.4KB / 7511` | `96.7KB / 1110` |
+| FirstByCode | `4.6KB / 68` | `5.0KB / 88` | `7.5KB / 207` | `7.2KB / 61` |
+| WhereList | `9.2KB / 163` | `12.8KB / 299` | `36.3KB / 918` | `15.6KB / 142` |
+| UpdateByCode | `3.8KB / 48` | `4.3KB / 58` | `3.2KB / 83` | `4.9KB / 13` |
+| DeleteByCode | `2.2KB / 29` | `3.7KB / 58` | `5.3KB / 168` | `5.4KB / 16` |
+
+## Summary
+
+- Oro is in the first tier for batch insert, indexed reads, list queries, updates, and deletes across common Go ORM workloads.
+- Under the fair SQLite driver setup, Oro performs well on `CreateMany100`, `FirstByCode`, `WhereList`, and `DeleteByCode`.
+- On MySQL, Oro leads this run for batch insert, read, update, and delete medians; single-row `Create` is not the fastest.
+- On PostgreSQL, Oro is close to or ahead of the compared libraries for single-row create, batch insert, read, update, and delete; Bun is faster on `WhereList` in this run.
+- Oro keeps allocation counts low on batch write and query paths, which indicates the model scan plan, SQL compilation cache, and batch insert path are working as intended.
+
+## How to Read This Page
+
+- Compare relative trends on the same machine, database, and driver.
+- Prefer the 10-run median over the fastest single run.
+- Read `B/op` and `allocs/op` together with latency to understand ORM-layer allocation cost.
+- Always state the SQLite driver; pure-Go and CGO SQLite drivers have very different costs.
+- Treat these numbers as benchmark reference data, not a fixed production performance guarantee.

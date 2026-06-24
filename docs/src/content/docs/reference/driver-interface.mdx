@@ -1,0 +1,65 @@
+---
+title: Driver Interface
+description: Driver, Dialect, Inspector, Capabilities, and Logger interfaces.
+---
+
+Oro's driver boundary is designed for SQL adapters. The core ORM builds query ASTs and executes through a driver. The driver supplies database-specific behavior.
+
+## Driver responsibilities
+
+A driver handles:
+
+- opening and configuring a `database/sql` connection;
+- placeholder style and identifier quoting;
+- `RETURNING` / last insert ID behavior;
+- upsert syntax;
+- lock syntax;
+- schema inspection for sync;
+- database-specific error normalization.
+
+## Official adapters
+
+```go
+sqlite.Open("app.db")
+mysql.Open(mysqlDSN)
+pgsql.Open(pgDSN)
+```
+
+Applications still import the concrete SQL implementation:
+
+```go
+_ "modernc.org/sqlite"
+_ "github.com/go-sql-driver/mysql"
+_ "github.com/jackc/pgx/v5/stdlib"
+```
+
+## Capabilities
+
+Dialects expose capabilities so the ORM can choose safe SQL:
+
+- supports `RETURNING`;
+- supports savepoints;
+- supports `FOR UPDATE`, `NOWAIT`, `SKIP LOCKED`;
+- supports full join;
+- supports native JSON and full-text features;
+- supports schema alteration details.
+
+Unsupported features return `oro.ErrUnsupported` instead of silently generating invalid SQL.
+
+## Inspector
+
+Schema sync uses the inspector to read tables, columns, indexes, constraints, and snapshots. Driver implementations should be conservative: if a destructive or ambiguous change cannot be proven safe, report it for planning instead of applying it blindly.
+
+## Third-party adapters
+
+A third-party SQL adapter should expose a small `Open(...) oro.Driver` function and keep database-specific options typed.
+
+```go
+package acmedb
+
+func Open(dsn string, options ...Option) oro.Driver {
+    return &Driver{dsn: dsn, options: options}
+}
+```
+
+The adapter should not duplicate the ORM query builder. It should implement dialect, inspector, and connection behavior.

@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/duxweb/oro"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/duxweb/oro/internal/drivererr"
 )
 
 func translateError(err error) error {
@@ -28,12 +28,14 @@ func translateError(err error) error {
 }
 
 func classifyError(err error) error {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
+	code, ok := drivererr.StringField(err, "Code")
+	if !ok {
+		code, ok = drivererr.StringMethod(err, "SQLState")
+	}
+	if !ok {
 		return nil
 	}
-
-	switch pgErr.Code {
+	switch code {
 	case "23505":
 		return oro.ErrConflict
 	case "23502", "23503", "23514":
@@ -43,7 +45,7 @@ func classifyError(err error) error {
 	case "40001":
 		return oro.ErrSerializationFailure
 	default:
-		if len(pgErr.Code) >= 2 && pgErr.Code[:2] == "23" {
+		if len(code) >= 2 && code[:2] == "23" {
 			return oro.ErrConstraint
 		}
 		return nil

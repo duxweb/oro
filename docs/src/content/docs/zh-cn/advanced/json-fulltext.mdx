@@ -1,7 +1,9 @@
 ---
 title: JSON 与全文索引
-description: 使用统一表达式查询 JSON 字段和全文索引。
+description: 使用统一表达式查询 JSON 字段、JSONRaw 输出、全文索引定义、全文查询和方言差异。
 ---
+
+JSON 和全文检索是数据库差异较大的能力。Oro 提供统一 API，但不同驱动的底层能力仍然会影响可用性和性能。
 
 ## JSON 字段定义
 
@@ -19,7 +21,11 @@ func (Product) Define(s *oro.SchemaBuilder) {
 }
 ```
 
+`oro.JSONRaw` 适合保存原始 JSON 数据。也可以使用 `[]byte`、`string` 或应用层自定义类型，但 `JSONRaw` 在序列化时能避免二次转义。
+
 ## JSON 路径条件
+
+模型查询使用 Go 字段名：
 
 ```go
 rows, err := db.Use[Product]().Where(
@@ -27,38 +33,70 @@ rows, err := db.Use[Product]().Where(
 ).Get(ctx)
 ```
 
+布尔值：
+
 ```go
 rows, err := db.Use[Product]().Where(
     oro.JSON("Meta").Path("flags", "featured").Eq(true),
 ).Get(ctx)
 ```
 
-支持相等、不等、空值判断、存在判断，以及驱动支持时的 contains 类条件。
-
-## 模型和裸表差异
-
-模型查询使用 Go 字段名：
-
-```go
-db.Use[Product]().Where(oro.JSON("Meta").Path("color").Eq("blue"))
-```
-
 裸表查询使用数据库列名：
 
 ```go
-db.Table("products").Where(oro.JSON("meta").Path("color").Eq("blue"))
+rows, err := db.Table("products").Where(
+    oro.JSON("meta").Path("profile", "country").Eq("CN"),
+).Get(ctx)
 ```
 
+## JSON 条件方法
+
+| 方法 | 用途 |
+| --- | --- |
+| `Eq(value)` | 路径值相等 |
+| `NotEq(value)` | 路径值不等 |
+| `IsNull()` | 路径值为空 |
+| `IsNotNull()` | 路径值非空 |
+| `Exists()` | 路径存在 |
+| `Contains(value)` | JSON 包含，取决于驱动支持 |
+
+示例：
+
+```go
+products, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("tags").Contains("featured"),
+).Get(ctx)
+```
+
+## JSON 输出
+
+```go
+payload := oro.Serialize(product)
+```
+
+如果字段是 `oro.JSONRaw`，`Serialize` 会输出 `json.RawMessage`，避免把 JSON 当字符串输出。
+
 ## 全文索引定义
+
+字段级全文索引：
 
 ```go
 func (Post) Define(s *oro.SchemaBuilder) {
     s.Table("posts")
     s.Field("Title").String().FullText()
     s.Field("Body").Text()
+}
+```
+
+组合全文索引：
+
+```go
+func (Post) Define(s *oro.SchemaBuilder) {
     s.FullText("ft_posts_title_body", "Title", "Body")
 }
 ```
+
+组合索引字段使用 Go 字段名。
 
 ## 全文查询
 
@@ -68,15 +106,29 @@ posts, err := db.Use[Post]().Where(
 ).Get(ctx)
 ```
 
+裸表查询使用数据库列名：
+
+```go
+posts, err := db.Table("posts").Where(
+    oro.FullText("title", "body").Match("generic orm"),
+).Get(ctx)
+```
+
 ## 相关度分数
 
 ```go
 posts, err := db.Use[Post]().
-    Select("ID", "Title", oro.FullText("Title", "Body").Score("generic orm").As("score")).
+    Select(
+        "ID",
+        "Title",
+        oro.FullText("Title", "Body").Score("generic orm").As("score"),
+    ).
     Where(oro.FullText("Title", "Body").Match("generic orm")).
     OrderByDesc("score").
     Get(ctx)
 ```
+
+`Score(...).As(alias)` 用于把相关度作为选择字段输出。
 
 ## 方言说明
 
@@ -85,3 +137,13 @@ posts, err := db.Use[Post]().
 | SQLite | 依赖 SQLite 构建是否启用 JSON 函数 | 普通表全文索引 DDL 不统一，建议专门 FTS 表 |
 | MySQL | 支持 JSON 路径和 contains 类能力 | 依赖 engine/version 的原生全文索引 |
 | PostgreSQL | JSON/JSONB 风格提取 | 编译为 `to_tsvector` / `plainto_tsquery` 类语法 |
+
+如果当前驱动不支持某个能力，会返回 `oro.ErrUnsupported`。
+
+## 性能建议
+
+- JSON 路径查询要关注数据库是否能使用表达式索引；
+- 高频筛选字段不要盲目塞进 JSON，应该拆成普通列；
+- 全文检索要建全文索引，不要在大表上无索引 match；
+- SQLite 的全文检索建议使用独立 FTS 表和 Raw SQL；
+- 多语言分词、权重和排序通常需要数据库级定制，Oro 只提供基础统一表达。

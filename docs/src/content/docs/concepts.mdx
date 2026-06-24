@@ -1,0 +1,96 @@
+---
+title: Concepts
+description: Core model, query, relation, driver, and sync concepts.
+---
+
+Oro keeps the ORM surface small and explicit. The three query entries are intentionally separate:
+
+```go
+db.Use[Product]()      // model query, Go field names
+db.Table("products")   // table query, database column names
+db.Raw("select ...")   // raw SQL
+```
+
+This separation is the main design rule. Application code should usually use model queries. Dynamic tooling, admin builders, and generic services can use table queries. Raw SQL remains available for SQL that is clearer than a builder chain.
+
+## Models
+
+A model is an ordinary Go struct:
+
+```go
+type Product struct {
+    oro.Model
+    Code  string
+    Price uint
+}
+```
+
+`oro.Model` provides the conventional primary key and timestamp fields. You can still define your own fields and columns in `Define`.
+
+## Schema definition
+
+Oro does not use overloaded ORM tags for database structure. Schema metadata lives beside the model:
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Price").Uint().Default(0)
+}
+```
+
+If `Column(...)` is not set, the column name is generated from the Go field name using snake_case.
+
+## Field name rule
+
+| Entry | Field names |
+| --- | --- |
+| `Use[T]()` | Go struct fields, e.g. `CreatedAt` |
+| `Table(name)` | database columns, e.g. `created_at` |
+| `Raw(sql)` | whatever the SQL says |
+
+This avoids one of the common ORM ambiguities: the query entry determines whether a name is a Go field or a SQL column.
+
+## Writes
+
+Oro uses explicit write inputs:
+
+```go
+db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
+db.Use[Product]().Where("ID", id).Update(ctx, oro.Map{"Price": 100})
+```
+
+Updates use `oro.Map` instead of struct updates because Go cannot tell whether a zero value means “not provided” or “set this to zero”.
+
+## Reads
+
+Missing rows are not errors:
+
+- `First` and `Find` return `nil, nil` when no row exists.
+- `Get` returns an empty slice.
+- Only database, connection, scan, transaction, and constraint problems return an error.
+
+## Relations
+
+Relations are methods, not struct fields:
+
+```go
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").ForeignKey("ArticleID")
+}
+```
+
+This avoids import cycles when models live in separate packages. Loaded relation values are accessed through relation state helpers rather than embedded struct fields.
+
+## Drivers
+
+Oro is built on `database/sql`. Official driver packages provide dialect and schema adapters; applications still choose the concrete SQL driver with normal blank imports.
+
+```go
+import (
+    "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
+)
+```
+
+Third-party packages can implement `oro.Driver` for other SQL-compatible backends.

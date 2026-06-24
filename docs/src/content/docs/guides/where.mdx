@@ -91,6 +91,14 @@ paidUsers := oro.Query(
 users, err := db.Use[User]().WhereIn("ID", paidUsers).Get(ctx)
 ```
 
+`WhereIn` is for `IN (subquery)`. Value lists use field expressions:
+
+```go
+users, err := db.Use[User]().
+    Where(oro.Field("ID").In(1, 2, 3)).
+    Get(ctx)
+```
+
 ```go
 existsPaidOrder := oro.Query(
     db.Table("orders").WhereColumn("orders.user_id", "users.id").Where("status", "paid"),

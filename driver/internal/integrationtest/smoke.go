@@ -505,7 +505,11 @@ func runCRUDQueryWrite(t *testing.T, ctx context.Context, db *oro.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(many) != 2 || many[0].ID == 0 || many[1].ID == 0 {
+	manyIDs, err := many.IDs[uint64]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if many.RowsAffected != 2 || len(manyIDs) != 2 || manyIDs[0] == 0 || manyIDs[1] == 0 {
 		t.Fatalf("unexpected create many %#v", many)
 	}
 

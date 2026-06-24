@@ -1,0 +1,160 @@
+---
+title: Pagination
+description: Page, Items, Total, Pages, Chunk, Each, and Stream.
+---
+
+Oro paginators are lazy. `Paginate(size)` stores the query and page size but does not execute SQL until you call a terminal method.
+
+## Basic pagination
+
+```go
+pager := db.Use[Product]().
+    Where("Status", "active").
+    OrderByDesc("ID").
+    Paginate(20)
+
+page, err := pager.Page(ctx, 1)
+```
+
+`Page(ctx, n)` runs two queries:
+
+- `count(*)` for the total;
+- one `limit/offset` query for items.
+
+Returned shape:
+
+```go
+type Page[T any] struct {
+    Items []T   `json:"items"`
+    Total int64 `json:"total"`
+    Page  int   `json:"page"`
+    Size  int   `json:"size"`
+    Pages int   `json:"pages"`
+}
+```
+
+## Items only
+
+For “load more” APIs, avoid the total query:
+
+```go
+items, err := pager.Items(ctx, 1)
+```
+
+`Items` only executes the list query.
+
+## Total and pages
+
+```go
+total, err := pager.Total(ctx)
+pages, err := pager.Pages(ctx)
+```
+
+Both require a count query. Oro does not implicitly cache totals.
+
+## Page rules
+
+| Parameter | Rule |
+| --- | --- |
+| `size` | must be greater than 0 |
+| `page` | starts from 1 |
+| no rows | `Items` returns an empty slice and `Page.Total` is 0 |
+
+Invalid arguments return `oro.ErrInvalidArgument`.
+
+## Table pagination
+
+```go
+pager := db.Table("products").
+    Where("status", "active").
+    OrderByDesc("id").
+    Paginate(20)
+
+rows, err := pager.Items(ctx, 1)
+```
+
+Table pagination returns `[]oro.Map` by default.
+
+Map to a DTO:
+
+```go
+page, err := db.Table("products").
+    Select("id", "code", "price").
+    OrderByDesc("id").
+    MapTo[ProductView]().
+    Paginate(20).
+    Page(ctx, 1)
+```
+
+## Raw SQL pagination
+
+Raw queries do not have chained `Paginate`. Write the SQL explicitly or prefer `Table`/`Use` when possible.
+
+```go
+rows, err := db.Raw(
+    "select id, code from "+db.TableName("products")+" order by id desc limit ? offset ?",
+    20,
+    0,
+).Get(ctx)
+```
+
+Use `db.TableName("products")` when table prefixes are enabled.
+
+## Sorting
+
+Pagination should always have a stable order:
+
+```go
+pager := db.Use[Product]().OrderByDesc("ID").Paginate(20)
+```
+
+Without ordering, different databases may return different rows. Large offset pagination can also become slow; cursor pagination can be added later if the application needs it.
+
+## Chunk
+
+`Chunk` is for background jobs and exports.
+
+```go
+err := db.Use[Product]().
+    OrderBy("ID").
+    Chunk(ctx, 1000, func(items []*Product) error {
+        return nil
+    })
+```
+
+The callback stops the loop by returning an error.
+
+## Each
+
+`Each` processes one item at a time:
+
+```go
+err := db.Use[Product]().OrderBy("ID").Each(ctx, func(product *Product) error {
+    return nil
+})
+```
+
+Use `Chunk` when you need batch writes or batched external calls.
+
+## Stream
+
+`Stream` keeps the underlying rows open and is useful for large exports.
+
+```go
+stream, err := db.Use[Product]().Where("Status", "active").Stream(ctx)
+if err != nil {
+    return err
+}
+defer stream.Close()
+
+for stream.Next() {
+    product := stream.Value()
+    _ = product
+}
+
+if err := stream.Err(); err != nil {
+    return err
+}
+```
+
+Always close streams and check `Err` after iteration. A stream holds a connection until closed.

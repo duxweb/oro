@@ -1,0 +1,74 @@
+---
+title: Field Builder
+description: SchemaBuilder and FieldBuilder API reference.
+---
+
+`Define` receives a `SchemaBuilder`. Use it to set the table, connection, fields, indexes, relations, tenant, and shard metadata.
+
+## Model-level methods
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Connection("main")
+    s.Table("products")
+    s.Field("Code").String().Unique()
+}
+```
+
+Common model methods:
+
+| Method | Purpose |
+| --- | --- |
+| `Table(name)` | table name without global prefix |
+| `Connection(name)` | default model connection |
+| `Field(name)` | configure a model field |
+| `Index(name, fields...)` | create an index |
+| `Unique(name, fields...)` | create a unique index |
+| `FullText(name, fields...)` | create a full-text index |
+| `Tenant(fields...)` | model tenant fields |
+| `NoTenant()` | opt out of tenancy |
+| `Shard(table, fields...)` | shard rule |
+
+## Field types
+
+```go
+s.Field("Name").String().Size(120)
+s.Field("Body").Text()
+s.Field("Enabled").Bool()
+s.Field("Count").Int()
+s.Field("Total").UnsignedBigInt()
+s.Field("Price").Decimal(12, 2)
+s.Field("Meta").JSON()
+s.Field("CreatedAt").Timestamp()
+```
+
+## Field options
+
+```go
+s.Field("Code").String().Column("product_code").Unique().Comment("public product code")
+s.Field("Status").String().Default("active").Index()
+s.Field("DeletedAt").Timestamp().Nullable()
+s.Field("PasswordHash").String().Hidden()
+s.Field("CommentsCount").Virtual()
+```
+
+Common options:
+
+| Method | Purpose |
+| --- | --- |
+| `Column(name)` | database column override |
+| `Size(n)` | string length |
+| `Default(value)` | literal default |
+| `DefaultExpr(sql)` | database expression default |
+| `Nullable()` | allow NULL |
+| `Index()` | single-column index |
+| `Unique()` | single-column unique index |
+| `FullText()` | full-text index |
+| `Hidden()` | hide from default serialization |
+| `Virtual()` | not part of table creation |
+| `Comment(text)` | column comment where supported |
+| `OptimisticLock()` | version field for update checks |
+
+## Field names
+
+`Field("Code")` references the Go struct field. The default column is `code`. Use `Column(...)` only when the database column cannot be derived cleanly.

@@ -1,0 +1,46 @@
+---
+title: Relation Aggregates
+description: WithCount, WithExists, WithSum, WithAvg, WithMin, and WithMax.
+---
+
+Relation aggregates attach related counts or aggregate values to the main query result.
+
+## Count and exists
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    WithExists(Article{}.Cover()).
+    Get(ctx)
+```
+
+## Aggregate values
+
+```go
+articles, err := db.Use[Article]().
+    WithSum(Article{}.Comments(), "Score").
+    WithAvg(Article{}.Comments(), "Score").
+    WithMin(Article{}.Comments(), "CreatedAt").
+    WithMax(Article{}.Comments(), "CreatedAt").
+    Get(ctx)
+```
+
+## Optional callbacks
+
+```go
+articles, err := db.Use[Article]().
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+Callbacks constrain only the relation aggregate query.
+
+## Dynamic relation names
+
+```go
+articles, err := db.Use[Article]().WithCount("Comments").Get(ctx)
+```
+
+Static relation methods are preferred, but strings are supported for dynamic modules.

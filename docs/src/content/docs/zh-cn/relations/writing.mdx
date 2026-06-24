@@ -1,0 +1,178 @@
+---
+title: 关联写入
+description: Set、Unset、Replace、Add、Remove、Attach、Detach、Sync、Clear 和关系写入边界。
+---
+
+关系写入通过 `db.Relation(relation)` 进入。这样写入逻辑和关系定义共用同一份元数据，避免在业务代码里重复写外键字段。
+
+```go
+err := db.Relation(article.Comments()).Add(ctx, comment)
+```
+
+## 支持矩阵
+
+| 关系 | 支持操作 |
+| --- | --- |
+| `BelongsTo` | `Set`、`Unset` |
+| `HasOne` | `Set`、`Unset`、`Replace` |
+| `HasMany` | `Add`、`AddMany`、`Remove`、`RemoveMany`、`Clear` |
+| `ManyToMany` | `Attach`、`AttachMany`、`Detach`、`DetachMany`、`UpdateThrough`、`Sync`、`SyncWithoutDetach`、`Clear` |
+| `DynamicHasMany` | `Add`、`Remove`、`Clear` |
+| `DynamicManyToMany` | 多对多写入操作 |
+
+不支持的组合会返回 `oro.ErrUnsupported`。
+
+## BelongsTo
+
+`BelongsTo` 表示当前模型保存父级外键。
+
+```go
+err := db.Relation(comment.Article()).Set(ctx, article)
+err = db.Relation(comment.Article()).Unset(ctx)
+```
+
+`Set` 会更新当前模型的外键字段；`Unset` 会把外键清空。
+
+## HasOne
+
+```go
+err := db.Relation(article.Cover()).Set(ctx, image)
+err = db.Relation(article.Cover()).Unset(ctx)
+err = db.Relation(article.Cover()).Replace(ctx, newImage)
+```
+
+| 方法 | 含义 |
+| --- | --- |
+| `Set` | 设置目标侧外键指向当前模型 |
+| `Unset` | 解除当前模型已有目标的外键 |
+| `Replace` | 先解除旧关系，再设置新关系 |
+
+`Replace` 内部使用事务。
+
+## HasMany
+
+```go
+err := db.Relation(article.Comments()).Add(ctx, comment)
+err = db.Relation(article.Comments()).AddMany(ctx, []*Comment{comment1, comment2})
+err = db.Relation(article.Comments()).Remove(ctx, comment)
+err = db.Relation(article.Comments()).RemoveMany(ctx, []*Comment{comment1, comment2})
+err = db.Relation(article.Comments()).Clear(ctx)
+```
+
+这些操作本质上更新目标侧外键：
+
+- `Add`：把 comment 的 `ArticleID` 改为 article.ID；
+- `Remove`：把 comment 的 `ArticleID` 清空；
+- `Clear`：清空当前 article 下所有 comments 的外键。
+
+## ManyToMany
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag)
+err = db.Relation(article.Tags()).Detach(ctx, tag)
+err = db.Relation(article.Tags()).AttachMany(ctx, []*Tag{tag1, tag2})
+err = db.Relation(article.Tags()).DetachMany(ctx, []*Tag{tag1, tag2})
+```
+
+中间表字段使用 `oro.Map`。键名使用 Go 风格名称，内部按 snake_case 转成数据库列名：
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1})
+```
+
+批量附带中间表字段：
+
+```go
+err := db.Relation(article.Tags()).AttachMany(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag1, Data: oro.Map{"Sort": 1}},
+    {Model: tag2, Data: oro.Map{"Sort": 2}},
+})
+```
+
+## Sync
+
+`Sync` 会让中间表结果和传入列表一致。
+
+```go
+err := db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag1, Data: oro.Map{"Sort": 1}},
+    {Model: tag2, Data: oro.Map{"Sort": 2}},
+})
+```
+
+如果数据库中已有 tag3 关系，但传入列表没有 tag3，`Sync` 会删除 tag3 关系。
+
+需要保留未传入项时用：
+
+```go
+err := db.Relation(article.Tags()).SyncWithoutDetach(ctx, items)
+```
+
+## UpdateThrough
+
+```go
+err := db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 3})
+```
+
+`UpdateThrough` 用于更新中间表字段，不影响两端模型。
+
+## Clear
+
+```go
+err := db.Relation(article.Comments()).Clear(ctx)
+err = db.Relation(article.Tags()).Clear(ctx)
+```
+
+`HasMany.Clear` 清空目标外键；`ManyToMany.Clear` 删除当前来源模型的中间表记录。
+
+## 动态关系写入
+
+动态 HasMany：
+
+```go
+err := db.Relation(article.Images()).Add(ctx, image)
+err = db.Relation(article.Images()).Remove(ctx, image)
+err = db.Relation(article.Images()).Clear(ctx)
+```
+
+动态多对多会自动写入类型字段：
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag)
+```
+
+前提是关系定义里配置了 `SourceType` / `TypeField` / `TypeValue` 等动态关系元数据。
+
+## 事务建议
+
+关联写入通常涉及多条 SQL，建议放在事务中：
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    if err := tx.Relation(article.Tags()).Sync(ctx, items); err != nil {
+        return err
+    }
+    _, err := tx.Use[Article]().Where("ID", article.ID).Update(ctx, oro.Map{"UpdatedAt": time.Now()})
+    return err
+})
+```
+
+批量关系操作内部也会使用事务，但如果你还有其他写入，应把它们放进同一个上层事务。
+
+## Hook 和事件
+
+关系写入底层会走模型或表写入路径：
+
+- 更新目标模型外键的操作会触发目标模型更新 Hook/Event；
+- 中间表通过 `Table` 写入时，不触发模型 Hook；
+- 如果中间表需要 Hook，建议把中间表作为模型直接操作。
+
+## 边界说明
+
+| 场景 | 建议 |
+| --- | --- |
+| 只改外键关系 | 用关系写入 |
+| 同时修改目标模型字段 | 先 `Use[T]().Update`，再关系写入 |
+| 中间表有复杂业务 | 把中间表作为模型处理 |
+| 跨连接关系写入 | 谨慎使用，普通事务不能保证跨库原子性 |
+| 批量同步标签 | `Sync` / `SyncWithoutDetach` |

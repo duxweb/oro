@@ -6,6 +6,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 type syncProduct struct {
@@ -37,6 +38,17 @@ func (syncProductWithStock) Define(s *oro.SchemaBuilder) {
 type syncRenameProduct struct {
 	oro.Model
 	Code string
+}
+
+type syncConnectionProduct struct {
+	oro.Model
+	Code string
+}
+
+func (syncConnectionProduct) Define(s *oro.SchemaBuilder) {
+	s.Connection("model")
+	s.Table("sync_connection_products")
+	s.Field("Code").String()
 }
 
 var syncRenameProductCodeColumn = "old_code"
@@ -167,6 +179,45 @@ func TestSQLiteSyncCreatesIndexes(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected unique index violation")
+	}
+}
+
+func TestSQLiteSyncUsesModelConnectionAndAllowsManualOverride(t *testing.T) {
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+			"model":   {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if err := db.Register(syncConnectionProduct{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Use[syncConnectionProduct]().Create(ctx, &syncConnectionProduct{Code: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Connection("default").Table("sync_connection_products").First(ctx); err == nil {
+		t.Fatal("expected default connection to remain unsynced")
+	}
+
+	if err := db.Connection("default").Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Connection("default").Use[syncConnectionProduct]().Create(ctx, &syncConnectionProduct{Code: "manual"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

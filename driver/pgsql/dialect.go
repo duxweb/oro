@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/duxweb/oro"
+	"github.com/duxweb/oro/internal/queryutil"
 )
 
 type dialect struct{}
@@ -135,7 +136,9 @@ func (d dialect) CompileSchema(change oro.SchemaChange) ([]oro.CompiledSQL, erro
 		if err != nil {
 			return nil, err
 		}
-		return []oro.CompiledSQL{{SQL: "alter table " + d.QuoteIdent(change.Table.Name) + " add column " + sql}}, nil
+		statements := []oro.CompiledSQL{{SQL: "alter table " + d.QuoteIdent(change.Table.Name) + " add column " + sql}}
+		statements = append(statements, d.compileColumnComment(change.Table.Name, change.Column)...)
+		return statements, nil
 	case oro.SchemaCreateIndex:
 		return d.compileCreateIndex(change.Table.Name, change.Index)
 	case oro.SchemaRenameColumn:
@@ -264,6 +267,12 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr, start int) (string, []an
 		expr = scoreSQL
 		args = append(args, scoreArgs...)
 		placeholderIndex = nextIndex
+	} else if item.Expr == "__oro_aggregate__" {
+		aggregateSQL, err := d.compileAggregateSelect(item)
+		if err != nil {
+			return "", nil, start, err
+		}
+		expr = aggregateSQL
 	} else if !item.Raw {
 		expr = d.QuoteIdent(item.Expr)
 	}
@@ -271,6 +280,21 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr, start int) (string, []an
 		expr += " as " + d.QuoteIdent(item.Alias)
 	}
 	return expr, args, placeholderIndex, nil
+}
+
+func (d dialect) compileAggregateSelect(item oro.SelectExpr) (string, error) {
+	if len(item.Args) == 0 {
+		return "", &oro.Error{Op: "pgsql.select", Kind: oro.ErrInvalidArgument}
+	}
+	expr, ok := item.Args[0].(oro.AggregateExpr)
+	if !ok {
+		return "", &oro.Error{Op: "pgsql.select", Kind: oro.ErrInvalidArgument}
+	}
+	sql, err := queryutil.AggregateSelectSQL(expr.Func, expr.Field, d.QuoteIdent)
+	if err != nil {
+		return "", &oro.Error{Op: "pgsql.select", Kind: oro.ErrInvalidArgument}
+	}
+	return sql, nil
 }
 
 func (d dialect) compileSelectSource(stmt oro.SelectAST, start int) (string, []any, int, error) {
@@ -943,7 +967,11 @@ func (d dialect) compileCreateTable(table oro.TableSpec) ([]oro.CompiledSQL, err
 		}
 		columns = append(columns, sql)
 	}
-	return []oro.CompiledSQL{{SQL: "create table if not exists " + d.QuoteIdent(table.Name) + " (" + strings.Join(columns, ", ") + ")"}}, nil
+	statements := []oro.CompiledSQL{{SQL: "create table if not exists " + d.QuoteIdent(table.Name) + " (" + strings.Join(columns, ", ") + ")"}}
+	for _, column := range table.Columns {
+		statements = append(statements, d.compileColumnComment(table.Name, column)...)
+	}
+	return statements, nil
 }
 
 func (d dialect) compileColumn(column oro.ColumnSpec, allowPrimary bool) (string, error) {
@@ -964,11 +992,24 @@ func (d dialect) compileColumn(column oro.ColumnSpec, allowPrimary bool) (string
 	return strings.Join(parts, " "), nil
 }
 
+func (d dialect) compileColumnComment(table string, column oro.ColumnSpec) []oro.CompiledSQL {
+	if column.Comment == "" {
+		return nil
+	}
+	return []oro.CompiledSQL{{
+		SQL: "comment on column " + d.QuoteIdent(table+"."+column.ColumnName) + " is " + schemaString(column.Comment),
+	}}
+}
+
 func compileDefault(defaultValue *oro.DefaultSpec) string {
 	if defaultValue.Expr != "" {
 		return defaultValue.Expr
 	}
 	return oro.FormatDefaultValue(defaultValue.Value)
+}
+
+func schemaString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func (d dialect) compileCreateIndex(table string, index oro.IndexSpec) ([]oro.CompiledSQL, error) {

@@ -532,7 +532,59 @@ func (query *TableQuery) Upsert(ctx context.Context, values Map, options ...Writ
 	return rows[0], nil
 }
 
-func (query *TableQuery) CreateMany(ctx context.Context, values []Map, options ...WriteOption) ([]Map, error) {
+func (query *TableQuery) CreateMany(ctx context.Context, values []Map, options ...WriteOption) (*CreateResult, error) {
+	if query.allShards {
+		return nil, &Error{Op: "create", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
+	}
+	if len(values) == 0 {
+		return &CreateResult{}, nil
+	}
+
+	spec, err := tableShardSpec(query)
+	if err != nil {
+		return nil, err
+	}
+	writeOptions := applyWriteOptions(options)
+	result := &CreateResult{}
+	for _, chunk := range chunkMapsForCreate(values, createBatchSize(query.db.runtime.Config, writeOptions)) {
+		for _, value := range chunk {
+			if len(value) == 0 {
+				return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Table: query.spec.Table}
+			}
+		}
+		if !mapsHaveSameKeys(chunk) {
+			for _, value := range chunk {
+				created, err := query.Create(ctx, value, options...)
+				if err != nil {
+					return nil, err
+				}
+				if result.PrimaryKey == "" {
+					result.PrimaryKey, _ = tablePrimaryKey(ctx, query.db, spec)
+				}
+				if result.PrimaryKey != "" {
+					result.primaryIDs = appendPrimaryIDs(result.primaryIDs, []any{created[result.PrimaryKey]})
+				}
+				result.RowsAffected++
+			}
+			continue
+		}
+		created, err := createResultRows(ctx, query.db, WriteSpec{
+			QuerySpec: spec,
+			Values:    chunk,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if result.PrimaryKey == "" {
+			result.PrimaryKey = created.PrimaryKey
+		}
+		result.primaryIDs = appendPrimaryIDs(result.primaryIDs, created.primaryIDs)
+		result.RowsAffected += created.RowsAffected
+	}
+	return result, nil
+}
+
+func (query *TableQuery) CreateManyResult(ctx context.Context, values []Map, options ...WriteOption) ([]Map, error) {
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
 	}

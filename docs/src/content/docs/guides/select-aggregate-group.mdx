@@ -1,0 +1,98 @@
+---
+title: Select & Aggregate
+description: Select fields, raw expressions, aliases, aggregate expressions, GroupBy, Having, and relation aggregates.
+---
+
+`Select` accepts plain fields, field aliases, aggregate expressions, raw expressions, and relation aggregate expressions.
+
+## Select fields
+
+```go
+products, err := db.Use[Product]().Select("ID", "Code", "Price").Get(ctx)
+```
+
+Model queries use Go field names. Table queries use database column names:
+
+```go
+rows, err := db.Table("products").Select("id", "code", "price").Get(ctx)
+```
+
+## Aliases and raw expressions
+
+```go
+rows, err := db.Table("orders").As("o").
+    Select(
+        oro.As("o.status", "status"),
+        oro.Raw("max(o.created_at) as last_created_at"),
+    ).
+    Get(ctx)
+```
+
+Use `oro.Raw` for trusted SQL expressions only.
+
+## Aggregate expressions
+
+```go
+rows, err := db.Table("orders").
+    Select(
+        "status",
+        oro.Count("*").As("total"),
+        oro.Sum("amount").As("amount_sum"),
+        oro.Avg("amount").As("amount_avg"),
+        oro.Min("amount").As("amount_min"),
+        oro.Max("amount").As("amount_max"),
+    ).
+    GroupBy("status").
+    Get(ctx)
+```
+
+Aggregate field names follow the query entry rule: Go fields for `Use[T]`, database columns for `Table`.
+
+## Terminal aggregates
+
+```go
+count, err := db.Use[Product]().Count(ctx)
+exists, err := db.Use[Product]().Where("Code", "P001").Exists(ctx)
+sum, err := db.Use[Order]().Sum(ctx, "Amount")
+avg, err := db.Use[Order]().Avg(ctx, "Amount")
+min, err := db.Use[Order]().Min[uint](ctx, "Amount")
+max, err := db.Use[Order]().Max[uint](ctx, "Amount")
+```
+
+`Min[T]` and `Max[T]` return `oro.Null[T]` because aggregate results can be NULL.
+
+## GroupBy and Having
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Count("*").As("total")).
+    GroupBy("status").
+    HavingRaw("count(*) > ?", 10).
+    Get(ctx)
+```
+
+Structured having methods:
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Count("*").As("total")).
+    GroupBy("status").
+    Having("status", "paid").
+    Get(ctx)
+```
+
+Use `HavingRaw` for aggregate aliases or database-specific expressions.
+
+## Relation aggregates
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    WithExists(Article{}.Cover()).
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+Relation aggregates are added to virtual fields or relation state depending on the query shape.

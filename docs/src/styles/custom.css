@@ -8,6 +8,32 @@
 :root {
   --sl-font: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
   --sl-font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
+  --dux-shell-width: 90rem;
+
+  /* ----- Type scale: min 12 / body 14 / titles 16 → 24 → 32 (8px steps) ----- */
+  --dux-fs-xs: 0.75rem;    /* 12 */
+  --dux-fs-sm: 0.875rem;   /* 14 — body */
+  --dux-fs-md: 1rem;       /* 16 — small title */
+  --dux-fs-lg: 1.5rem;     /* 24 — section title */
+  --dux-fs-xl: 2rem;       /* 32 — page title */
+  --dux-fs-2xl: 2.5rem;    /* 40 — hero */
+
+  --sl-text-2xs: var(--dux-fs-xs);
+  --sl-text-xs: var(--dux-fs-xs);
+  --sl-text-sm: var(--dux-fs-sm);
+  --sl-text-base: var(--dux-fs-sm);
+  --sl-text-lg: var(--dux-fs-md);
+  --sl-text-xl: 1.125rem;
+  --sl-text-2xl: 1.25rem;
+  --sl-text-3xl: var(--dux-fs-lg);
+  --sl-text-4xl: 1.75rem;
+  --sl-text-5xl: var(--dux-fs-xl);
+  --sl-text-6xl: var(--dux-fs-2xl);
+  --sl-text-h1: var(--dux-fs-xl);
+  --sl-text-h2: var(--dux-fs-lg);
+  --sl-text-h3: var(--dux-fs-md);
+  --sl-text-h4: var(--dux-fs-sm);
+  --sl-text-h5: var(--dux-fs-sm);
 
   --dux-ink: #0a0a0a;
   --dux-ink-2: #1a1a1a;
@@ -17,8 +43,27 @@
   --dux-line: rgba(10, 10, 10, 0.10);
   --dux-line-strong: rgba(10, 10, 10, 0.18);
   --dux-accent: #16a34a;
+  --dux-primary-bg: var(--dux-accent);
+  --dux-primary-text: #ffffff;
   --dux-active-bg: #ffffff;
-  --dux-active-shadow: 0 1px 2px rgba(10, 10, 10, 0.07);
+  --dux-active-shadow: none;
+
+  --dux-inline-code-bg: #ffffff;
+  --dux-inline-code-text: #242932;
+  --dux-inline-code-line: transparent;
+  --dux-inline-code-comment: #7b8491;
+  --dux-inline-code-string: #15803d;
+  --dux-inline-code-key: #7c3aed;
+  --dux-inline-code-fn: #0a0a0a;
+  --dux-cta-bg: var(--color-green-50);
+  --dux-cta-ink: var(--color-green-950);
+  --dux-cta-muted: color-mix(in srgb, var(--color-green-950) 62%, transparent);
+  --dux-cta-primary-bg: var(--dux-accent);
+  --dux-cta-primary-text: #ffffff;
+  --dux-cta-ghost-border: color-mix(in srgb, var(--color-green-950) 18%, transparent);
+  --dux-cta-ghost-text: var(--color-green-950);
+  --dux-cta-ghost-hover: var(--color-green-950);
+  --dux-doc-link-hover-bg: var(--color-green-50);
 
   /* code window stays dark in both themes — high-contrast, intentional */
   --dux-code-bg: #15181f;
@@ -45,9 +90,28 @@
   --dux-line: rgba(255, 255, 255, 0.10);
   --dux-line-strong: rgba(255, 255, 255, 0.20);
   --dux-accent: #4ade80;
+  --dux-primary-bg: var(--color-green-600);
+  --dux-primary-text: #ffffff;
   --dux-active-bg: rgba(255, 255, 255, 0.09);
   --dux-active-shadow: none;
   --dux-term-title: #d6dce4; /* terminal title — dark mode: lighter */
+
+  --dux-inline-code-bg: #15181f;
+  --dux-inline-code-text: #c9d1d9;
+  --dux-inline-code-line: rgba(255, 255, 255, 0.08);
+  --dux-inline-code-comment: #6e7681;
+  --dux-inline-code-string: #86efac;
+  --dux-inline-code-key: #86efac;
+  --dux-inline-code-fn: #eef1f6;
+  --dux-cta-bg: color-mix(in srgb, var(--color-green-950) 42%, var(--dux-bg));
+  --dux-cta-ink: #ffffff;
+  --dux-cta-muted: rgba(255, 255, 255, 0.68);
+  --dux-cta-primary-bg: #ffffff;
+  --dux-cta-primary-text: #0f172a;
+  --dux-cta-ghost-border: rgba(255, 255, 255, 0.28);
+  --dux-cta-ghost-text: #ffffff;
+  --dux-cta-ghost-hover: #ffffff;
+  --dux-doc-link-hover-bg: color-mix(in srgb, var(--dux-surface) 94%, var(--dux-accent));
 
   --dux-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 50px -24px rgba(0, 0, 0, 0.8);
 
@@ -116,8 +180,124 @@ body {
   color: var(--dux-muted);
 }
 
-.header :is(starlight-theme-select, starlight-lang-select) select:hover {
+.dux-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.dux-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dux-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--dux-fs-sm);
+  line-height: 1;
+  padding: 0.45rem 0.55rem;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.dux-menu__trigger:hover,
+.dux-menu[data-open="true"] .dux-menu__trigger {
+  background: color-mix(in srgb, var(--dux-ink) 7%, transparent);
   color: var(--dux-ink);
+}
+
+.dux-menu__icon {
+  display: inline-flex;
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.dux-menu__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.dux-menu__label {
+  max-width: 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dux-menu__caret {
+  color: currentColor;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.dux-menu__panel {
+  position: absolute;
+  z-index: 60;
+  inset-block-start: calc(100% + 0.45rem);
+  inset-inline-end: 0;
+  display: grid;
+  gap: 0.15rem;
+  min-width: 9.5rem;
+  border: 1px solid var(--dux-line);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--dux-bg) 96%, var(--dux-surface));
+  box-shadow: var(--dux-shadow);
+  padding: 0.35rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-0.25rem);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.dux-menu[data-open="true"] .dux-menu__panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.dux-menu__panel :is(a, button) {
+  display: grid;
+  grid-template-columns: 0.8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.58rem;
+  background: transparent;
+  color: var(--dux-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--dux-fs-sm);
+  line-height: 1;
+  padding: 0.58rem 0.65rem;
+  text-align: start;
+  text-decoration: none;
+}
+
+.dux-menu__panel :is(a, button):hover {
+  background: color-mix(in srgb, var(--dux-ink) 7%, transparent);
+  color: var(--dux-ink);
+}
+
+.dux-menu__panel :is(a, button)[aria-checked="true"] {
+  color: var(--dux-accent);
+}
+
+.dux-menu__mark {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.dux-menu__panel :is(a, button)[aria-checked="true"] .dux-menu__mark {
+  background: currentColor;
+}
+
+.mobile-preferences .dux-menu__panel {
+  inset-inline: auto 0;
 }
 
 /* ---------- Shared button ---------- */
@@ -127,21 +307,21 @@ body {
   gap: 0.5rem;
   border-radius: 999px;
   padding: 0.62rem 1.25rem;
-  font-size: 0.95rem;
+  font-size: var(--dux-fs-sm);
   font-weight: 600;
   line-height: 1;
   text-decoration: none;
   border: 1px solid transparent;
-  transition: transform 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: opacity 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .dux-btn--primary {
-  background: var(--dux-ink);
-  color: var(--dux-bg);
+  background: var(--dux-primary-bg);
+  color: var(--dux-primary-text);
 }
 
 .dux-btn--primary:hover {
-  transform: translateY(-1px);
+  opacity: 0.9;
 }
 
 .dux-btn__arrow {
@@ -159,7 +339,6 @@ body {
 
 .dux-btn--ghost:hover {
   border-color: var(--dux-ink);
-  transform: translateY(-1px);
 }
 
 /* ---------- Syntax token colors ---------- */
@@ -180,6 +359,101 @@ body {
   border: 1px solid var(--dux-code-line);
 }
 
+/* Feature pillars */
+.dux-pillars {
+  display: grid;
+  align-items: start;
+  gap: 1rem;
+  margin-top: 2.25rem;
+}
+
+@media (min-width: 48rem) {
+  .dux-pillars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.dux-pillar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 1.5rem;
+  border-radius: 1.25rem;
+  background: var(--dux-surface);
+}
+
+.dux-pillar__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.dux-pillar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--dux-accent) 14%, transparent);
+  color: var(--dux-accent);
+}
+
+.dux-pillar__svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.dux-pillar h3 {
+  margin: 0;
+  color: var(--dux-ink);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.dux-pillar__desc {
+  margin: 0 0 1.4rem;
+  color: var(--dux-muted);
+  font-size: 0.9rem;
+  line-height: 1.68;
+}
+
+.dux-mini-code {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--dux-inline-code-line);
+  border-radius: 0.75rem;
+  background: var(--dux-inline-code-bg);
+  color: var(--dux-inline-code-text);
+  min-width: 0;
+}
+
+.dux-mini-code pre {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+  overflow-x: auto;
+  margin: 0;
+  padding: 0.82rem 0.95rem;
+}
+
+.dux-mini-code code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.dux-mini-code .tok-com { color: var(--dux-inline-code-comment); }
+.dux-mini-code .tok-str { color: var(--dux-inline-code-string); }
+.dux-mini-code .tok-key { color: var(--dux-inline-code-key); }
+.dux-mini-code .tok-fn { color: var(--dux-inline-code-fn); font-weight: 500; }
+
 .dux-hero-win .tok-com,
 .dux-code-dark .tok-com { color: #6e7681; }
 .dux-hero-win .tok-str,
@@ -196,7 +470,6 @@ body {
   border-radius: 0.8rem;
   border: 1px solid var(--dux-code-line);
   background: var(--dux-code-bg);
-  box-shadow: var(--dux-shadow);
 }
 
 .terminal-shell__bar {
@@ -259,8 +532,8 @@ body {
 .dux-section-head .eyebrow {
   display: block;
   font-family: var(--sl-font-mono);
-  font-size: 0.76rem;
-  font-weight: 500;
+  font-size: var(--dux-fs-sm);
+  font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dux-accent);
@@ -268,9 +541,9 @@ body {
 }
 
 .sl-markdown-content .dux-section-head h2 {
-  font-size: clamp(1.8rem, 3.4vw, 2.6rem);
-  letter-spacing: -0.04em;
-  line-height: 1.1;
+  font-size: var(--dux-fs-lg);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
   margin: 0;
   border: 0;
   padding: 0;
@@ -279,7 +552,7 @@ body {
 
 .dux-section-head p {
   color: var(--dux-muted);
-  font-size: 1.02rem;
+  font-size: var(--dux-fs-sm);
   line-height: 1.6;
   margin-top: 0.85rem;
   max-width: 40rem;
@@ -289,75 +562,180 @@ body {
   margin-top: 2rem;
 }
 
-/* Why band */
-.dux-why {
+/* Showcase */
+.dux-showcase {
   display: grid;
-  gap: 1.5rem;
-  margin-top: 2.25rem;
+  gap: 2rem;
+  align-items: center;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border-radius: 1.75rem;
+  background: var(--dux-surface);
 }
 
-@media (min-width: 52rem) {
-  .dux-why {
-    grid-template-columns: repeat(3, 1fr);
+@media (min-width: 60rem) {
+  .dux-showcase {
+    grid-template-columns: minmax(0, 0.95fr) minmax(24rem, 1.05fr);
   }
 }
 
-.dux-why article {
-  background: var(--dux-surface);
-  border-radius: 1rem;
-  padding: 1.5rem 1.4rem;
-}
-
-.dux-why article::before {
-  content: "";
+.dux-showcase .eyebrow {
   display: block;
-  width: 2rem;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--dux-ink);
-  margin-bottom: 1rem;
-}
-
-.dux-why h3 {
-  font-size: 1.02rem;
-  margin: 0 0 0.5rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--dux-ink);
-}
-
-.dux-why p {
-  color: var(--dux-muted);
-  font-size: 0.93rem;
-  line-height: 1.62;
-  margin: 0;
-}
-
-.dux-why code {
+  margin-bottom: 0.75rem;
+  color: var(--dux-accent);
   font-family: var(--sl-font-mono);
-  font-size: 0.85em;
+  font-size: var(--dux-fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-/* CTA — bold dark finishing band */
+.dux-showcase h2 {
+  margin: 0;
+  color: var(--dux-ink);
+  font-size: var(--dux-fs-lg);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.dux-showcase p {
+  margin: 1rem 0 0;
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.7;
+}
+
+.dux-showcase ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dux-showcase li {
+  color: var(--dux-ink);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.55;
+}
+
+.dux-showcase li::before {
+  content: "→";
+  margin-right: 0.55rem;
+  color: var(--dux-accent);
+}
+
+.dux-showcase-code {
+  overflow-x: auto;
+  margin: 0;
+  padding: 1.2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--dux-inline-code-line);
+  background: var(--dux-inline-code-bg);
+  color: var(--dux-inline-code-text);
+}
+
+.dux-showcase-code code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.82rem;
+  line-height: 1.8;
+  white-space: pre;
+}
+
+.dux-showcase-code .tok-com { color: var(--dux-inline-code-comment); }
+.dux-showcase-code .tok-str { color: var(--dux-inline-code-string); }
+.dux-showcase-code .tok-key { color: var(--dux-inline-code-key); }
+.dux-showcase-code .tok-fn { color: var(--dux-inline-code-fn); font-weight: 500; }
+
+/* Doc links */
+.dux-doc-links {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 56rem) {
+  .dux-doc-links {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.dux-doc-links a {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0.65rem;
+  min-height: 9rem;
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--dux-surface) 72%, transparent);
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.dux-doc-links a::after {
+  content: "→";
+  position: absolute;
+  right: 1.25rem;
+  top: 1.15rem;
+  color: var(--dux-muted);
+  font-size: 1rem;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.dux-doc-links a:hover {
+  background: var(--dux-doc-link-hover-bg);
+  transform: translateY(-1px);
+}
+
+:root[data-theme="dark"] .dux-doc-links a:hover {
+  background: color-mix(in srgb, var(--dux-surface) 94%, var(--dux-accent));
+}
+
+.dux-doc-links a:hover::after {
+  color: var(--dux-accent);
+  transform: translateX(3px);
+}
+
+.dux-doc-links em {
+  color: var(--dux-accent);
+  font-family: var(--sl-font-mono);
+  font-size: var(--dux-fs-xs);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dux-doc-links strong {
+  color: var(--dux-ink);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.dux-doc-links span {
+  display: block;
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.6;
+}
+
+.dux-doc-links a:hover strong {
+  color: var(--dux-accent);
+}
+
+/* CTA */
 .dux-cta {
   position: relative;
   overflow: hidden;
   margin-top: clamp(3.5rem, 7vw, 6rem);
   border: 0;
   border-radius: 1.75rem;
-  background: #0c0d12;
+  background: var(--dux-cta-bg);
   padding: clamp(3rem, 7vw, 5rem) clamp(1.5rem, 5vw, 3rem);
   text-align: center;
 }
 
-/* soft accent glow, kept subtle */
 .dux-cta::before {
-  content: "";
-  position: absolute;
-  inset: -40% 30% auto;
-  height: 22rem;
-  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.30), transparent);
-  pointer-events: none;
+  display: none;
 }
 
 .dux-cta > * {
@@ -369,14 +747,15 @@ body {
   padding: 0;
   margin: 0 auto 0.7rem;
   max-width: 24ch;
-  font-size: clamp(1.7rem, 3.4vw, 2.5rem);
-  letter-spacing: -0.04em;
-  line-height: 1.12;
-  color: #ffffff;
+  font-size: var(--dux-fs-xl);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--dux-cta-ink);
 }
 
 .dux-cta p {
-  color: rgba(255, 255, 255, 0.66);
+  color: var(--dux-cta-muted);
+  font-size: var(--dux-fs-sm);
   margin: 0 auto 1.9rem;
   max-width: 34rem;
   line-height: 1.6;
@@ -389,30 +768,88 @@ body {
   justify-content: center;
 }
 
-.dux-cta code {
-  font-family: var(--sl-font-mono);
-  font-size: 0.9em;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border: 0;
-  border-radius: 0.35rem;
-  padding: 0.08em 0.4em;
-}
-
-/* invert buttons on the dark band */
 .dux-cta .dux-btn--primary {
-  background: #ffffff;
-  color: #0c0d12;
+  background: var(--dux-cta-primary-bg);
+  color: var(--dux-cta-primary-text);
 }
 
 .dux-cta .dux-btn--ghost {
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #ffffff;
+  border-color: var(--dux-cta-ghost-border);
+  color: var(--dux-cta-ghost-text);
 }
 
 .dux-cta .dux-btn--ghost:hover {
-  border-color: #ffffff;
-  color: #ffffff;
+  border-color: var(--dux-cta-ghost-hover);
+  color: var(--dux-cta-ghost-hover);
+}
+
+/* Footer */
+.dux-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  margin-top: clamp(3.5rem, 7vw, 6rem);
+  padding-block: 1.6rem 2.2rem;
+  border-top: 1px solid var(--dux-line);
+}
+
+.dux-footer__brand {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dux-footer__logo {
+  color: var(--dux-ink);
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.dux-footer__tagline,
+.dux-footer__copy {
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.55;
+}
+
+.dux-footer__copy {
+  margin: 0;
+  font-size: var(--dux-fs-xs);
+}
+
+.dux-footer__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.15rem;
+}
+
+.dux-footer__nav a {
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1;
+  text-decoration: none;
+  transition: color 0.14s ease;
+}
+
+.dux-footer__nav a:hover {
+  color: var(--dux-ink);
+}
+
+@media (min-width: 48rem) {
+  .dux-footer {
+    grid-template-columns: minmax(16rem, 1fr) auto;
+    align-items: start;
+  }
+
+  .dux-footer__nav {
+    justify-content: flex-end;
+    padding-top: 0.1rem;
+  }
+
+  .dux-footer__copy {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Hide Starlight's prev/next pager on landing pages (those with a hero) */
@@ -436,7 +873,7 @@ body {
 }
 
 /* inline code: filled chip, no border */
-.sl-markdown-content code:not(:where(.expressive-code *, .dux-code-dark)) {
+.sl-markdown-content code:not(:where(.expressive-code *, .dux-code-dark, .dux-mini-code *, .dux-showcase-code *)) {
   background: var(--dux-surface);
   color: var(--dux-ink);
   border: 0;
@@ -445,18 +882,18 @@ body {
   font-size: 0.85em;
 }
 
-/* cards & link cards: filled blocks, no border, lift on hover */
+/* cards & link cards: flat filled blocks; hover = faint accent tint + accent border */
 .sl-markdown-content :is(.card, .sl-link-card, a.sl-link-card) {
-  border: 0 !important;
+  border: 1px solid var(--dux-line) !important;
   border-radius: 1rem;
   background: var(--dux-surface);
   box-shadow: none;
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  transition: background 0.16s ease, border-color 0.16s ease;
 }
 
 .sl-markdown-content :is(.card, .sl-link-card, a.sl-link-card):hover {
-  transform: translateY(-2px);
-  box-shadow: var(--dux-shadow);
+  border-color: var(--dux-accent) !important;
+  background: color-mix(in srgb, var(--dux-accent) 8%, var(--dux-surface));
 }
 
 .sl-markdown-content .card .icon {
@@ -687,19 +1124,20 @@ header.header {
   border-bottom: 1px solid var(--dux-line) !important;
 }
 
-/* All shell rules below are scoped to doc pages only ([data-has-sidebar]).
-   The splash homepage has no sidebar attribute, so it stays untouched. */
 @media (min-width: 50rem) {
-  [data-has-sidebar] header.header > .header {
-    max-width: 90rem;
+  header.header > .header {
+    max-width: var(--dux-shell-width);
     margin-inline: auto;
     width: 100%;
   }
+}
 
+/* Docs shell uses the same centered width as the global header. */
+@media (min-width: 50rem) {
   [data-has-sidebar] .page {
     display: grid !important;
     grid-template-columns: var(--sl-sidebar-width) minmax(0, 1fr);
-    max-width: 90rem;
+    max-width: var(--dux-shell-width);
     margin-inline: auto;
   }
 

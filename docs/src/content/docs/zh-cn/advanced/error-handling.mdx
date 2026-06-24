@@ -1,0 +1,202 @@
+---
+title: 错误处理
+description: 标准错误类型、查不到返回规则、约束错误、死锁重试和错误上下文。
+---
+
+Oro 错误遵循 Go 标准的 `errors.Is` / `errors.As`：错误直接返回，不依赖全局状态，也不需要读取链式对象里的隐藏错误。
+
+## 查不到不是错误
+
+```go
+product, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+if err != nil {
+    return err
+}
+if product == nil {
+    return nil
+}
+```
+
+Oro 明确规定：
+
+| 方法 | 查不到时返回 |
+| --- | --- |
+| `First` | `nil, nil` |
+| `Find` | `nil, nil` |
+| `Get` | 空切片 |
+| `Exists` | `false, nil` |
+| `One[T]()` | 已加载但无数据时返回 `nil, nil` |
+
+查不到不应该成为异常流程。只有 SQL、连接、扫描、约束、事务等问题才返回 error。
+
+## errors.Is 判断
+
+```go
+created, err := db.Use[Product]().Create(ctx, product)
+if errors.Is(err, oro.ErrConflict) {
+    return domain.ErrProductCodeExists
+}
+if err != nil {
+    return err
+}
+_ = created
+```
+
+常见错误：
+
+| 错误 | 含义 |
+| --- | --- |
+| `ErrInvalidArgument` | API 参数不合法 |
+| `ErrInvalidQuery` | 查询结构不合法 |
+| `ErrUnknownField` | 未知字段 |
+| `ErrUnknownRelation` | 未知关系 |
+| `ErrRelationNotLoaded` | 读取未预加载关系 |
+| `ErrScan` | 扫描或类型转换失败 |
+| `ErrUnsupported` | 当前方言或场景不支持 |
+| `ErrClosed` | DB 已关闭 |
+
+## 写入错误
+
+| 错误 | 场景 |
+| --- | --- |
+| `ErrUnsafeUpdate` | 无条件更新 |
+| `ErrUnsafeDelete` | 无条件删除 |
+| `ErrConflict` | 唯一冲突、冲突写入 |
+| `ErrConstraint` | NOT NULL、外键、检查约束等 |
+| `ErrStaleData` | 乐观锁版本不匹配 |
+
+示例：
+
+```go
+rows, err := db.Use[Product]().Update(ctx, oro.Map{"Status": "archived"})
+if errors.Is(err, oro.ErrUnsafeUpdate) {
+    // 缺少 Where，拒绝整表更新
+}
+_ = rows
+```
+
+## 事务和并发错误
+
+| 错误 | 场景 |
+| --- | --- |
+| `ErrDeadlock` | 数据库死锁 |
+| `ErrSerializationFailure` | 事务序列化失败 |
+| `ErrTransactionRequired` | 操作要求事务 |
+| `ErrTransactionConnection` | 事务连接不匹配 |
+
+事务重试：
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    _, err := tx.Use[Order]().Create(ctx, order)
+    return err
+}, oro.TxAttempts(3))
+```
+
+也可以全局配置：
+
+```go
+db, err := oro.Open(oro.Config{
+    Retry: oro.RetryConfig{
+        TxDeadlockAttempts: 3,
+    },
+})
+```
+
+## 多连接、租户和分片错误
+
+| 错误 | 场景 |
+| --- | --- |
+| `ErrUnknownConnection` | 连接名称不存在 |
+| `ErrCrossConnectionQuery` | 不支持的跨连接查询 |
+| `ErrTenantRequired` | 缺少租户值 |
+| `ErrUnknownTenant` | 租户路由失败 |
+| `ErrShardRequired` | 缺少分片值 |
+| `ErrShardNotFound` | 分片不存在 |
+| `ErrShardConflict` | 分片值冲突 |
+| `ErrCrossShardJoin` | 不支持的跨分片 join |
+| `ErrCrossShardTransaction` | 单事务跨分片 |
+
+这类错误通常表示调用入口缺少上下文，例如没有设置 `db.Tenant(...)` 或 `Shard(...)`。
+
+## 结构同步错误
+
+```go
+if err := db.Sync(ctx); err != nil {
+    if errors.Is(err, oro.ErrUnsafeSchemaChange) {
+        return fmt.Errorf("schema change requires manual review: %w", err)
+    }
+    return err
+}
+```
+
+| 错误 | 场景 |
+| --- | --- |
+| `ErrUnsafeSchemaChange` | 删除字段、危险类型变更、nullable 收紧等 |
+| `ErrAmbiguousSchemaChange` | 无法明确判断字段重命名 |
+
+## 获取详细上下文
+
+```go
+var ormErr *oro.Error
+if errors.As(err, &ormErr) {
+    slog.Error("database error",
+        "op", ormErr.Op,
+        "model", ormErr.Model,
+        "table", ormErr.Table,
+        "field", ormErr.Field,
+        "relation", ormErr.Relation,
+        "cause", ormErr.Cause,
+    )
+}
+```
+
+`oro.Error` 结构：
+
+```go
+type Error struct {
+    Op       string
+    Kind     error
+    Model    string
+    Table    string
+    Field    string
+    Relation string
+    SQL      string
+    Args     []any
+    Cause    error
+}
+```
+
+## 驱动错误转换
+
+官方 MySQL 和 PostgreSQL 驱动会把常见错误码转换成 Oro 标准错误：
+
+- 唯一冲突 -> `ErrConflict`；
+- 约束错误 -> `ErrConstraint`；
+- 死锁 -> `ErrDeadlock`；
+- 序列化失败 -> `ErrSerializationFailure`。
+
+第三方驱动应在 `TranslateError` 中做同样转换。
+
+## Hook 和事件错误
+
+Hook 返回错误会包装为 `ErrHook`：
+
+```go
+if errors.Is(err, oro.ErrHook) {
+    // 模型 Hook 拒绝了操作
+}
+```
+
+事件处理器返回错误会包装为 `ErrEvent`。原始错误在 `Cause` 中。
+
+## 推荐处理方式
+
+| 场景 | 推荐 |
+| --- | --- |
+| API 查详情 | `nil` 转 404，不看 error |
+| 唯一冲突 | `errors.Is(err, oro.ErrConflict)` 转业务错误 |
+| 死锁/序列化失败 | 使用事务重试 |
+| 同步危险变更 | 停止启动或进入人工处理流程 |
+| 日志 | `errors.As` 取 `*oro.Error` 上下文 |
+| 不认识的错误 | 原样向上返回，保留 wrap 链 |

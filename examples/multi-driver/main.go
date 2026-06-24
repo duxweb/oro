@@ -7,6 +7,7 @@ import (
 	"github.com/duxweb/oro/driver/mysql"
 	"github.com/duxweb/oro/driver/pgsql"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 func main() {

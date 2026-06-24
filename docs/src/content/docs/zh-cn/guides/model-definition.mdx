@@ -80,14 +80,14 @@ db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
 db.Use[Product]().Update(ctx, oro.Map{"Price": 120}, oro.Omit("UpdatedAt"))
 ```
 
-`Only` 表示只写这些字段；`Omit` 表示排除这些字段，让数据库默认值或原值生效。
+`Only` 表示只写这些字段。`Omit` 表示排除这些字段：创建时可让数据库默认值生效，更新时表示不修改该字段。
 
 ## 索引
 
 ```go
-s.Field("Code").Unique()
-s.Field("Status").Index()
-s.Field("Title").FullText()
+s.Field("Code").String().Unique()
+s.Field("Status").String().Index()
+s.Field("Title").String().FullText()
 
 s.Index("idx_posts_status", "Status")
 s.Unique("uk_posts_slug", "Slug")
@@ -97,7 +97,7 @@ s.FullText("ft_posts_title_body", "Title", "Body")
 ## Hidden 和 Virtual
 
 ```go
-s.Field("PasswordHash").Hidden()
+s.Field("PasswordHash").String().Hidden()
 s.Field("CommentsCount").Virtual()
 ```
 

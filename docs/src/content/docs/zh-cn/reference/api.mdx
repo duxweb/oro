@@ -47,7 +47,8 @@ db.Raw("select ...")   // 原生 SQL
 | `Find(ctx, id)` | 主键查一条或 `nil` |
 | `Get(ctx)` | 切片 |
 | `Create(ctx, value)` | 创建后的行，包含返回主键 |
-| `CreateMany(ctx, values)` | 创建后的多行 |
+| `CreateMany(ctx, values)` | 写入结果，包含影响行数和主键 ID |
+| `CreateManyResult(ctx, values)` | 创建后的多行 |
 | `Update(ctx, Map)` | 影响行数 |
 | `Delete(ctx)` | 影响行数 |
 | `Upsert(ctx, value)` | 插入或更新后的行 |

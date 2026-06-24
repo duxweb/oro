@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/duxweb/oro"
+	"github.com/duxweb/oro/internal/queryutil"
 )
 
 type dialect struct{}
@@ -257,6 +258,12 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		}
 		expr = scoreSQL
 		args = append(args, scoreArgs...)
+	} else if item.Expr == "__oro_aggregate__" {
+		aggregateSQL, err := d.compileAggregateSelect(item)
+		if err != nil {
+			return "", nil, err
+		}
+		expr = aggregateSQL
 	} else if !item.Raw {
 		expr = d.QuoteIdent(item.Expr)
 	}
@@ -264,6 +271,21 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		expr += " as " + d.QuoteIdent(item.Alias)
 	}
 	return expr, args, nil
+}
+
+func (d dialect) compileAggregateSelect(item oro.SelectExpr) (string, error) {
+	if len(item.Args) == 0 {
+		return "", &oro.Error{Op: "mysql.select", Kind: oro.ErrInvalidArgument}
+	}
+	expr, ok := item.Args[0].(oro.AggregateExpr)
+	if !ok {
+		return "", &oro.Error{Op: "mysql.select", Kind: oro.ErrInvalidArgument}
+	}
+	sql, err := queryutil.AggregateSelectSQL(expr.Func, expr.Field, d.QuoteIdent)
+	if err != nil {
+		return "", &oro.Error{Op: "mysql.select", Kind: oro.ErrInvalidArgument}
+	}
+	return sql, nil
 }
 
 func (d dialect) compileSelectSource(stmt oro.SelectAST) (string, []any, error) {
@@ -885,6 +907,9 @@ func (d dialect) compileColumn(column oro.ColumnSpec, allowPrimary bool) (string
 	if column.Default != nil {
 		parts = append(parts, "default "+compileDefault(column.Default))
 	}
+	if column.Comment != "" {
+		parts = append(parts, "comment "+schemaString(column.Comment))
+	}
 	return strings.Join(parts, " "), nil
 }
 
@@ -893,6 +918,10 @@ func compileDefault(defaultValue *oro.DefaultSpec) string {
 		return defaultValue.Expr
 	}
 	return oro.FormatDefaultValue(defaultValue.Value)
+}
+
+func schemaString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func (d dialect) compileCreateIndex(table string, index oro.IndexSpec) ([]oro.CompiledSQL, error) {

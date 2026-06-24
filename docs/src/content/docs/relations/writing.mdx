@@ -1,0 +1,41 @@
+---
+title: Relation Writing
+description: Attach, detach, sync, update through tables, and relation write boundaries.
+---
+
+Relation writes are explicit through `db.Relation(...)`.
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag)
+err = db.Relation(article.Tags()).Detach(ctx, tag)
+```
+
+## Attach with pivot values
+
+```go
+err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{
+    "position": 10,
+})
+```
+
+For table queries, pivot values use database column names. For pivot models, use model fields.
+
+## Sync
+
+```go
+err := db.Relation(article.Tags()).Sync(ctx, []*Tag{tagA, tagB})
+```
+
+`Sync` makes the join table match the provided set.
+
+## Update pivot row
+
+```go
+err := db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{
+    "position": 20,
+})
+```
+
+## Boundaries
+
+Relation writes do not hide ordinary model writes. Create related models first, then attach them through the relation operator.

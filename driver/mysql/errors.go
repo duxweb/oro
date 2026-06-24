@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/duxweb/oro"
-	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/duxweb/oro/internal/drivererr"
 )
 
 func translateError(err error) error {
@@ -28,12 +28,12 @@ func translateError(err error) error {
 }
 
 func classifyError(err error) error {
-	var mysqlErr *mysqlDriver.MySQLError
-	if !errors.As(err, &mysqlErr) {
+	number, ok := drivererr.UintField(err, "Number")
+	if !ok {
 		return nil
 	}
 
-	switch mysqlErr.Number {
+	switch number {
 	case 1062:
 		return oro.ErrConflict
 	case 1048, 1216, 1217, 1364, 1406, 1451, 1452, 3819:

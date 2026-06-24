@@ -1,0 +1,67 @@
+---
+title: Error Handling
+description: Standard errors and recommended error handling.
+---
+
+Oro distinguishes “no row” from real failures. Missing data is represented by nil values or empty slices, not by an error.
+
+## Not found
+
+```go
+product, err := db.Use[Product]().Find(ctx, id)
+if err != nil {
+    return err
+}
+if product == nil {
+    return nil
+}
+```
+
+`First` and `Find` return `nil, nil` when no row exists. `Get` returns an empty slice.
+
+## Standard errors
+
+Use `errors.Is` for checks:
+
+```go
+if errors.Is(err, oro.ErrDuplicateKey) {
+    return conflict()
+}
+```
+
+Common errors:
+
+| Error | Meaning |
+| --- | --- |
+| `ErrInvalidArgument` | invalid method arguments |
+| `ErrUnsafeUpdate` | update without conditions |
+| `ErrUnsafeDelete` | delete without conditions |
+| `ErrDuplicateKey` | unique constraint violation |
+| `ErrForeignKey` | foreign-key constraint violation |
+| `ErrStaleData` | optimistic-lock mismatch |
+| `ErrNoConnection` | missing or unavailable connection |
+| `ErrUnsupported` | unsupported dialect feature |
+
+## Driver errors
+
+Drivers normalize common constraint errors where possible. The original error is preserved through wrapping, so logs still contain database-specific detail.
+
+## Context errors
+
+Timeouts and cancellations come from the context layer:
+
+```go
+ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+defer cancel()
+
+rows, err := db.Use[Product]().Get(ctx)
+```
+
+Handle `context.DeadlineExceeded` and `context.Canceled` with `errors.Is`.
+
+## Recommended pattern
+
+- Treat missing rows as normal control flow.
+- Use `errors.Is` for domain-level ORM errors.
+- Log wrapped database errors for diagnostics.
+- Keep raw SQL errors at the boundary where the SQL is authored.

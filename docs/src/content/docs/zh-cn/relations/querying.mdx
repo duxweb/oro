@@ -1,0 +1,270 @@
+---
+title: 关联查询
+description: 通过 For、WhereHas、WhereDoesntHave、OrWhereHas 和关系回调查询关联数据。
+---
+
+关联查询分三类：
+
+- `For`：从一个已知模型实例出发，查询它的关系目标；
+- `WhereHas`：主模型必须存在符合条件的关系；
+- `WhereDoesntHave`：主模型必须不存在符合条件的关系。
+
+Oro 使用关系方法和泛型模型表达关联条件，尽量减少字符串关系名和隐式约定。
+
+## For 查询关系目标
+
+`For` 根据关系定义自动补齐目标侧查询条件。
+
+```go
+comments, err := db.Use[Comment]().
+    For(article.Comments()).
+    OrderByDesc("ID").
+    Get(ctx)
+```
+
+等价于“查询属于这个 article 的 comments”，但不用在业务代码里重复写外键条件。
+
+一对一：
+
+```go
+cover, err := db.Use[Image]().For(article.Cover()).First(ctx)
+```
+
+反向关系：
+
+```go
+article, err := db.Use[Article]().For(cover.Article()).First(ctx)
+```
+
+多对多：
+
+```go
+tags, err := db.Use[Tag]().For(article.Tags()).Get(ctx)
+```
+
+## For 和 With 的区别
+
+| 方法 | 用途 | 结果 |
+| --- | --- | --- |
+| `With` | 查文章时顺便加载评论 | 返回文章，评论挂在关系状态里 |
+| `For` | 已有一篇文章，单独查询它的评论 | 返回评论列表 |
+
+```go
+// With：主查询是 Article
+articles, err := db.Use[Article]().With(Article{}.Comments()).Get(ctx)
+
+// For：主查询是 Comment
+comments, err := db.Use[Comment]().For(article.Comments()).Get(ctx)
+```
+
+## WhereHas
+
+`WhereHas` 用关系存在性过滤主模型。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+表示：只返回至少有一条 approved comment 的文章。
+
+没有条件时可以省略回调：
+
+```go
+articles, err := db.Use[Article]().WhereHas(Article{}.Comments()).Get(ctx)
+```
+
+## OrWhereHas
+
+```go
+articles, err := db.Use[Article]().
+    Where("Status", "published").
+    OrWhereHas(Article{}.Tags(), func(q *oro.RelationQuery) {
+        q.Where("Name", "featured")
+    }).
+    Get(ctx)
+```
+
+`OrWhereHas` 会把关系存在条件作为 OR 条件追加。复杂条件建议配合 `WhereGroup` 明确括号。
+
+## WhereDoesntHave
+
+```go
+articles, err := db.Use[Article]().
+    WhereDoesntHave(Article{}.Comments()).
+    Get(ctx)
+```
+
+表示：没有任何评论的文章。
+
+回调可选：
+
+```go
+articles, err := db.Use[Article]().
+    WhereDoesntHave(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+表示：不存在 approved comments 的文章。注意这不等于“所有评论都不是 approved”，而是“不存在满足该条件的关系”。
+
+## OrWhereDoesntHave
+
+```go
+articles, err := db.Use[Article]().
+    Where("Status", "draft").
+    OrWhereDoesntHave(Article{}.Tags()).
+    Get(ctx)
+```
+
+适合“状态满足 A 或不存在 B 关系”的筛选。
+
+## 数量条件
+
+`RelationQuery.Count(op, value)` 给关系存在条件加数量约束。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Count(">=", 3)
+    }).
+    Get(ctx)
+```
+
+支持操作符：
+
+```txt
+= != > >= < <=
+```
+
+示例：
+
+```go
+// 至少 3 条评论
+q.Count(">=", 3)
+
+// 正好 1 个封面记录
+q.Count("=", 1)
+
+// 少于 2 个标签
+q.Count("<", 2)
+```
+
+## 关系回调条件
+
+`WhereHas` 和 `WhereDoesntHave` 的回调使用 `RelationQuery`。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.WhereGroup(func(w *oro.WhereBuilder) {
+            w.Where("Status", "approved").OrWhere("Pinned", true)
+        }).OrderByDesc("ID")
+    }).
+    Get(ctx)
+```
+
+在存在性过滤里，`OrderBy` 通常不影响结果，只在某些数据库编译或配合 limit 时有意义。优先把过滤逻辑写在 `Where` 中。
+
+## 嵌套关系过滤
+
+关系回调里也可以继续使用 `WhereHas`。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.WhereHas(Comment{}.Author(), func(author *oro.RelationQuery) {
+            author.Where("Status", "active")
+        })
+    }).
+    Get(ctx)
+```
+
+表示：文章存在评论，且评论作者是 active。
+
+## 字符串关系
+
+关系参数可以是关系方法，也可以是字符串：
+
+```go
+articles, err := db.Use[Article]().WhereHas("Comments", func(q *oro.RelationQuery) {
+    q.Where("Status", "approved")
+}).Get(ctx)
+```
+
+建议：
+
+- 普通代码优先用关系方法：`Article{}.Comments()`；
+- 动态模块、插件、配置化筛选可以用字符串；
+- 字符串关系需要等到运行时才发现拼写错误。
+
+## 多对多关系过滤
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Tags(), func(q *oro.RelationQuery) {
+        q.Where("Name", "go")
+    }).
+    Get(ctx)
+```
+
+Oro 会通过中间表构造存在性子查询，不需要手写 join。
+
+## 动态关系过滤
+
+动态关系也支持 `WhereHas`。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Images(), func(q *oro.RelationQuery) {
+        q.Where("Kind", "cover")
+    }).
+    Get(ctx)
+```
+
+动态关系会自动带上类型字段条件，避免不同模型的附件混在一起。
+
+## 和预加载组合
+
+`WhereHas` 只过滤主查询，不会把关系数据加载出来。如果 API 还需要输出关系，需要再加 `With`。
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    With(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+过滤关系和加载关系是两件事。Oro 不会因为 `WhereHas` 自动预加载数据。
+
+## 跨连接和分片
+
+- `For` 会根据关系目标模型和当前查询解析连接；
+- 跨连接关系通常拆成多次查询；
+- 分片关系需要提供 `Shard` 值，或显式 `AllShards`；
+- 单事务内不允许隐式跨连接/跨分片写入。
+
+```go
+comments, err := db.Use[Comment]().
+    For(article.Comments()).
+    Shard(oro.Map{"TenantID": article.TenantID}).
+    Get(ctx)
+```
+
+## 选择方式
+
+| 需求 | 推荐 |
+| --- | --- |
+| 查询某个实例的关系目标 | `For(relation)` |
+| 主模型必须有某类关系 | `WhereHas(relation)` |
+| 主模型必须没有某类关系 | `WhereDoesntHave(relation)` |
+| 主模型需要输出关系数据 | `With(relation)` |
+| 既过滤又输出关系 | `WhereHas` + `With` |

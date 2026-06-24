@@ -1,0 +1,140 @@
+---
+title: 选择与聚合
+description: Select、Raw 表达式、GroupBy、Having、Count、Sum、Avg、Min、Max 和关系聚合。
+---
+
+`Select` 只保留一个入口：字段名、聚合表达式和 `oro.Raw(...)` 都放在同一个方法里。
+
+字段名规则保持统一：
+
+| 入口 | `Select` / `Where` / `GroupBy` / `Having` / `OrderBy` 字段名 |
+| --- | --- |
+| `db.Use[T]()` | Go 字段名，如 `CreatedAt`、`Price` |
+| `db.Table(name)` | 数据库列名，如 `created_at`、`price` |
+| `db.Raw(sql)` / `oro.Raw(sql)` | 手写 SQL，自己决定 |
+
+`oro.Count`、`oro.Sum`、`oro.Avg`、`oro.Min`、`oro.Max` 在模型查询里也遵循 Go 字段名规则。
+
+## 选择字段
+
+```go
+products, err := db.Use[Product]().Select("ID", "Code", "Price").Get(ctx)
+```
+
+裸表查询使用数据库列名：
+
+```go
+rows, err := db.Table("products").Select("id", "code", "price").Get(ctx)
+```
+
+## Raw 表达式
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Raw("sum(total) as revenue")).
+    GroupBy("status").
+    Get(ctx)
+```
+
+Raw 选择表达式统一写成 `Select(oro.Raw(...))`，不再额外拆一个并行 API。
+
+## 聚合表达式
+
+```go
+rows, err := db.Use[Order]().
+    Select("Status", oro.Count("*").As("total"), oro.Sum("Total").As("revenue")).
+    GroupBy("Status").
+    Get(ctx)
+```
+
+可用聚合表达式：
+
+| 表达式 | SQL 语义 |
+| --- | --- |
+| `oro.Count(field)` | `count(field)` |
+| `oro.Sum(field)` | `sum(field)` |
+| `oro.Avg(field)` | `avg(field)` |
+| `oro.Min(field)` | `min(field)` |
+| `oro.Max(field)` | `max(field)` |
+| `.As(alias)` | 设置结果别名 |
+
+模型查询中 `oro.Sum("Total")` 使用 Go 字段名；裸表查询中 `oro.Sum("total")` 使用数据库列名。`oro.Count("*")` 是特殊写法，表示 `count(*)`。
+
+## GroupBy 和 Having
+
+```go
+rows, err := db.Use[Order]().
+    Select("Status", oro.Count("*").As("total")).
+    GroupBy("Status").
+    HavingRaw("count(*) > ?", 10).
+    Get(ctx)
+```
+
+`Having` 的参数规则和 `Where` 类似，但作用在分组结果上。结构化 `Having` 的字段名仍遵循入口规则；按聚合表达式或聚合别名过滤时用 `HavingRaw` 更明确：
+
+```go
+Having("Status", "paid")        // 模型查询：Go 字段名
+Having("status", "paid")        // 裸表查询：数据库列名
+HavingRaw("count(*) > ?", 10)    // 聚合表达式
+HavingColumn("paid_total", ">", "refunded_total")
+```
+
+子查询场景使用 `HavingIn` / `HavingExists`：
+
+```go
+vipStatuses := oro.Query(
+    db.Table("vip_statuses").Select("status"),
+)
+
+rows, err := db.Table("orders").
+    Select("status", oro.Count("*").As("total")).
+    GroupBy("status").
+    HavingIn("status", vipStatuses).
+    Get(ctx)
+```
+
+## 终结聚合方法
+
+```go
+count, err := db.Use[Order]().Where("Status", "paid").Count(ctx)
+exists, err := db.Use[Order]().Where("Status", "paid").Exists(ctx)
+sum, err := db.Use[Order]().Sum(ctx, "Total")
+avg, err := db.Use[Order]().Avg(ctx, "Total")
+min, err := db.Use[Order]().Min[uint](ctx, "Total")
+max, err := db.Use[Order]().Max[uint](ctx, "Total")
+```
+
+| 方法 | 返回 |
+| --- | --- |
+| `Count` | `int64` |
+| `Exists` | `bool` |
+| `Sum` / `Avg` | `oro.Decimal` |
+| `Min[T]` / `Max[T]` | `oro.Null[T]` |
+
+`Min` 和 `Max` 使用 `Null[T]`，因为空集合没有最小/最大值。
+
+## 关系聚合
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    WithExists(Article{}.Cover()).
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+模型中用虚拟字段接收结果：
+
+```go
+type Article struct {
+    oro.Model
+    Title         string
+    CommentsCount int64
+}
+
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Field("CommentsCount").Virtual()
+}
+```

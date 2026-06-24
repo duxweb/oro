@@ -1,0 +1,104 @@
+---
+title: Table & Raw
+description: Direct table queries, raw SQL, Map, MapTo, table prefixes, and execution boundaries.
+---
+
+`Table` and `Raw` are explicit escape hatches for dynamic code and SQL-heavy cases.
+
+## Table queries
+
+```go
+rows, err := db.Table("products").
+    Where("price", ">=", 100).
+    OrderByDesc("id").
+    Get(ctx)
+```
+
+`Table` uses database column names and returns `[]oro.Map`.
+
+## Table writes
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+})
+
+rows, err := db.Table("products").
+    Where("status", "draft").
+    Update(ctx, oro.Map{"status": "active"})
+```
+
+Table writes do not run model hooks.
+
+## MapTo
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+Mapping uses field names and snake_case conversion. It does not require `db` tags.
+
+`Table(...).MapTo[T]()` supports `First`, `Get`, `Stream`, `Chunk`, `Each`, `Paginate`, `Create`, `CreateManyResult`, and `UpsertMany`.
+
+## Raw queries
+
+```go
+rows, err := db.Raw(
+    "select id, code from "+db.TableName("products")+" where price >= ?",
+    100,
+).Get(ctx)
+```
+
+Raw returns `oro.Map` by default:
+
+```go
+row, err := db.Raw("select count(*) as total from "+db.TableName("products")).First(ctx)
+```
+
+Map raw results to a DTO:
+
+```go
+items, err := db.Raw("select id, code from "+db.TableName("products")).MapTo[ProductView]().Get(ctx)
+```
+
+## Raw exec
+
+```go
+result, err := db.Raw(
+    "update "+db.TableName("products")+" set status = ? where id = ?",
+    "active",
+    id,
+).Exec(ctx)
+```
+
+Raw SQL does not run model hooks or events.
+
+## Table prefixes
+
+Configured prefixes are applied by the ORM builder. Raw SQL is your responsibility:
+
+```go
+sql := "select * from " + db.TableName("products") + " where code = ?"
+```
+
+Use `TableName` whenever you compose raw SQL that references a configured table.
+
+## When to choose each entry
+
+| Need | Entry |
+| --- | --- |
+| typed business CRUD | `Use[T]()` |
+| dynamic table name or admin builder | `Table(name)` |
+| SQL that is clearer by hand | `Raw(sql, args...)` |
+| custom DTO from table rows | `Table(...).MapTo[T]()` |
+| custom DTO from raw SQL | `Raw(...).MapTo[T]()` |

@@ -289,8 +289,12 @@ func (query *TypedTableQuery[T]) Upsert(ctx context.Context, values Map, options
 	return mapDTO[T](query.query.db, row)
 }
 
-func (query *TypedTableQuery[T]) CreateMany(ctx context.Context, values []Map, options ...WriteOption) ([]*T, error) {
-	rows, err := query.query.CreateMany(ctx, values, options...)
+func (query *TypedTableQuery[T]) CreateMany(ctx context.Context, values []Map, options ...WriteOption) (*CreateResult, error) {
+	return query.query.CreateMany(ctx, values, options...)
+}
+
+func (query *TypedTableQuery[T]) CreateManyResult(ctx context.Context, values []Map, options ...WriteOption) ([]*T, error) {
+	rows, err := query.query.CreateManyResult(ctx, values, options...)
 	if err != nil {
 		return nil, err
 	}

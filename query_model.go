@@ -702,7 +702,56 @@ func (query *ModelQuery[T]) Restore(ctx context.Context) (int64, error) {
 	return query.restoreInTransaction(ctx, spec, schema, values)
 }
 
-func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {
+func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options ...WriteOption) (*CreateResult, error) {
+	if query.allShards {
+		return nil, &Error{Op: "create", Kind: ErrShardRequired}
+	}
+	if len(models) == 0 {
+		return &CreateResult{}, nil
+	}
+	spec, schema, err := modelInsertSpec(query)
+	if err != nil {
+		return nil, err
+	}
+	if !query.canBatchCreate(models) {
+		created, err := query.createManyOneByOne(ctx, spec, models, options...)
+		if err != nil {
+			return nil, err
+		}
+		ids, err := primaryValuesFromModels(schema, created)
+		if err != nil {
+			return nil, err
+		}
+		return createResultFromIDs(primaryResultKey(schema), ids, int64(len(created))), nil
+	}
+	writeOptions := applyWriteOptions(options)
+	var result *CreateResult
+	err = query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
+		createdResult, ok, err := txQuery.createManyBatchFast(ctx, spec, schema, models, writeOptions)
+		if err != nil || ok {
+			result = createdResult
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		return result, nil
+	}
+	created, err := query.createManyBatch(ctx, spec, schema, models, options...)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := primaryValuesFromModels(schema, created)
+	if err != nil {
+		return nil, err
+	}
+	return createResultFromIDs(primaryResultKey(schema), ids, int64(len(created))), nil
+}
+
+func (query *ModelQuery[T]) CreateManyResult(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
 	}
@@ -742,6 +791,13 @@ func (query *ModelQuery[T]) createManyBatch(ctx context.Context, spec QuerySpec,
 	createdModels := make([]*T, len(models))
 	err := query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
 		tx := txQuery.db
+		if _, ok, err := txQuery.createManyBatchFast(ctx, spec, schema, models, writeOptions); ok || err != nil {
+			if err != nil {
+				return err
+			}
+			copy(createdModels, models)
+			return nil
+		}
 		rows := make([]Map, 0, len(models))
 		for _, model := range models {
 			if model == nil {

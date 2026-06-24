@@ -25,10 +25,14 @@ import (
     "github.com/duxweb/oro/driver/sqlite"
     "github.com/duxweb/oro/driver/mysql"
     "github.com/duxweb/oro/driver/pgsql"
+
+    _ "github.com/go-sql-driver/mysql"
+    _ "github.com/jackc/pgx/v5/stdlib"
+    _ "modernc.org/sqlite" // or _ "github.com/mattn/go-sqlite3"
 )
 ```
 
-Drivers are thin adapters over `database/sql`. If a driver exposes a compatible `*sql.DB` path through the Oro driver interface, the ORM layer does not need to know whether SQLite is CGO or pure Go.
+Drivers are thin adapters over `database/sql`. Oro does not register concrete SQL drivers by itself; applications choose the concrete driver with normal blank imports, or pass an existing `*sql.DB` through `Wrap`.
 
 ## SQLite
 

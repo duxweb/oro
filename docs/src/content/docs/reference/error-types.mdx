@@ -1,0 +1,53 @@
+---
+title: Error Types
+description: Oro error types and errors.Is usage.
+---
+
+Use `errors.Is` with Oro standard errors. Database-specific errors are wrapped so the original detail remains available for logs.
+
+```go
+if errors.Is(err, oro.ErrDuplicateKey) {
+    return conflict()
+}
+```
+
+## Common errors
+
+| Error | Meaning |
+| --- | --- |
+| `ErrInvalidArgument` | invalid input to an ORM method |
+| `ErrUnsafeUpdate` | update without conditions |
+| `ErrUnsafeDelete` | delete without conditions |
+| `ErrDuplicateKey` | unique constraint violation |
+| `ErrForeignKey` | foreign key violation |
+| `ErrStaleData` | optimistic lock mismatch |
+| `ErrNoConnection` | missing connection or driver |
+| `ErrUnsupported` | feature not supported by the dialect |
+
+## Not found
+
+Oro does not use an error for missing rows:
+
+```go
+item, err := db.Use[Product]().First(ctx)
+if err != nil {
+    return err
+}
+if item == nil {
+    return nil
+}
+```
+
+## Context errors
+
+Timeouts and cancellations are standard context errors:
+
+```go
+if errors.Is(err, context.DeadlineExceeded) {
+    return timeout()
+}
+```
+
+## Constraint errors
+
+Drivers normalize common constraint errors. For custom business handling, check the standard error first and log the wrapped error for database detail.

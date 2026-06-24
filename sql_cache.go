@@ -223,6 +223,15 @@ func deleteSQLCacheKey(dialect string, stmt DeleteAST) (string, []any, bool) {
 
 func hasRawSelectOrOrder(selects []SelectExpr, orders []OrderExpr) bool {
 	for _, item := range selects {
+		if item.Expr == "__oro_aggregate__" {
+			if len(item.Args) != 1 {
+				return true
+			}
+			if _, ok := item.Args[0].(AggregateExpr); !ok {
+				return true
+			}
+			continue
+		}
 		if item.Raw || item.Source != nil || item.Expr == "__oro_relation_exists__" || item.Expr == "__oro_fulltext_score__" {
 			return true
 		}
@@ -239,6 +248,15 @@ func appendSelectShape(builder *strings.Builder, selects []SelectExpr) {
 	for _, item := range selects {
 		builder.WriteByte('|')
 		builder.WriteString(item.Expr)
+		if item.Expr == "__oro_aggregate__" && len(item.Args) == 1 {
+			if expr, ok := item.Args[0].(AggregateExpr); ok {
+				builder.WriteByte('(')
+				builder.WriteString(expr.Func)
+				builder.WriteByte(':')
+				builder.WriteString(expr.Field)
+				builder.WriteByte(')')
+			}
+		}
 		builder.WriteByte(':')
 		builder.WriteString(item.Alias)
 	}

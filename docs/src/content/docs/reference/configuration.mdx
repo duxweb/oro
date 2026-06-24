@@ -125,10 +125,12 @@ db.Tenant(oro.Map{"TenantID": 1, "AppID": 10})
 Shards: map[string]oro.ShardConfig{
     "orders": {
         Connections: []string{"orders_0", "orders_1"},
-        Strategy:    oro.ModShard("TenantID", 2),
+        Strategy:    oro.ModShard("TenantID"),
     },
 }
 ```
+
+`ModShard` uses the number of configured `Connections` as the shard count.
 
 Models opt into shard groups in `Define`:
 

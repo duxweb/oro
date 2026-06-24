@@ -1,0 +1,72 @@
+---
+title: Relation Querying
+description: Query through relations and filter by relation existence.
+---
+
+Relation querying has three common forms:
+
+- `For`: query the target side for one source model;
+- `WhereHas`: keep source rows that have matching related rows;
+- `WhereDoesntHave`: keep source rows that do not have matching related rows.
+
+## For
+
+```go
+comments, err := db.Use[Comment]().
+    For(article.Comments()).
+    OrderByDesc("ID").
+    Get(ctx)
+```
+
+`For` applies the relation's foreign-key condition automatically.
+
+One-to-one:
+
+```go
+cover, err := db.Use[Image]().For(article.Cover()).First(ctx)
+```
+
+Many-to-many:
+
+```go
+tags, err := db.Use[Tag]().For(article.Tags()).Get(ctx)
+```
+
+## WhereHas
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+The callback is optional:
+
+```go
+articles, err := db.Use[Article]().WhereHas(Article{}.Comments()).Get(ctx)
+```
+
+## OrWhereHas
+
+```go
+articles, err := db.Use[Article]().
+    Where("Status", "published").
+    OrWhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Pinned", true)
+    }).
+    Get(ctx)
+```
+
+## WhereDoesntHave
+
+```go
+articles, err := db.Use[Article]().
+    WhereDoesntHave(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+The callback is optional when any related row should be excluded.

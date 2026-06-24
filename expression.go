@@ -125,7 +125,7 @@ func selectExprs(items []any) ([]SelectExpr, error) {
 		case RawExpr:
 			exprs = append(exprs, SelectExpr{Expr: typedItem.SQL, Raw: true, Args: typedItem.Args})
 		case AggregateExpr:
-			exprs = append(exprs, SelectExpr{Expr: aggregateSQL(typedItem.Func, typedItem.Field), Alias: typedItem.Alias, Raw: true})
+			exprs = append(exprs, SelectExpr{Expr: "__oro_aggregate__", Alias: typedItem.Alias, Args: []any{typedItem}})
 		case RelationAggregateExpr:
 			exprs = append(exprs, SelectExpr{Expr: "__oro_relation_aggregate__", Alias: typedItem.Alias, Raw: true, Args: []any{typedItem}})
 		case FullTextExpr:

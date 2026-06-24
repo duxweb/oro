@@ -76,10 +76,12 @@ Tenant: &oro.TenantConfig{
 Shards: map[string]oro.ShardConfig{
     "orders": {
         Connections: []string{"orders_0", "orders_1"},
-        Strategy:    oro.ModShard("TenantID", 2),
+        Strategy:    oro.ModShard("TenantID"),
     },
 }
 ```
+
+`ModShard` 根据字段值对 `Connections` 长度取模；分片数量由连接列表决定。
 
 ## 模型分片
 

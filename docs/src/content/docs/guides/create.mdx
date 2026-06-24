@@ -1,0 +1,121 @@
+---
+title: Create
+description: Model creation, batch creation, table writes, defaults, Only/Omit, and returned primary keys.
+---
+
+Oro has two creation paths: model creation and table creation. Model creation uses Go field names and model metadata. Table creation uses database column names and `oro.Map`.
+
+## Create one model
+
+```go
+product, err := db.Use[Product]().Create(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+})
+```
+
+`Create` returns the created model. Oro fills the primary key, automatic timestamp fields, and any database defaults that the driver can safely return.
+
+## Create one table row
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+})
+```
+
+`Table` uses database column names and returns `oro.Map`.
+
+## Batch create
+
+```go
+result, err := db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
+if err != nil {
+    return err
+}
+
+ids, err := result.IDs[uint64]()
+```
+
+`CreateMany` returns a lightweight write result:
+
+| Field / method | Meaning |
+| --- | --- |
+| `RowsAffected` | written row count |
+| `PrimaryKey` | primary-key field name |
+| `IDs[T]()` | inserted primary keys |
+| `FirstID[T]()` | first inserted primary key |
+| `IDCount()` | number of IDs filled |
+
+This keeps batch inserts fast because Oro does not query complete rows back by default.
+
+## Return complete rows
+
+```go
+created, err := db.Use[Product]().CreateManyResult(ctx, products)
+```
+
+Use `CreateManyResult` only when the application really needs values changed by database triggers or defaults. For ordinary imports, prefer `CreateMany`.
+
+## Only and Omit
+
+Go structs cannot distinguish “not provided” from “provided as zero”. Oro does not guess.
+
+```go
+product := &Product{Code: "P001"}
+_, err := db.Use[Product]().Create(ctx, product, oro.Only("Code"))
+```
+
+```go
+_, err := db.Use[Product]().Create(ctx, product, oro.Omit("CreatedAt", "UpdatedAt"))
+```
+
+- `Only` writes only the named fields.
+- `Omit` excludes the named fields.
+- Fields not written are left to database defaults or ORM automatic values.
+
+## Defaults
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Price").Uint().Default(0)
+    s.Field("Status").String().Default("active")
+}
+```
+
+If you want a database default to run, do not include that field in the insert. Use `Only` or `Omit` to make the decision explicit.
+
+## Batch create table rows
+
+```go
+rows := []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+}
+
+result, err := db.Table("products").CreateMany(ctx, rows)
+ids, err := result.IDs[uint64]()
+```
+
+Return complete rows:
+
+```go
+created, err := db.Table("products").CreateManyResult(ctx, rows)
+```
+
+Map returned rows to a DTO:
+
+```go
+views, err := db.Table("products").MapTo[ProductView]().CreateManyResult(ctx, rows)
+```
+
+## Hooks and events
+
+Model creation runs model hooks and global events. Table creation does not run model hooks.
+
+```go
+_, err := db.Use[Product]().SkipHooks().SkipEvents().Create(ctx, product)
+```
+
+Skip hooks only for trusted import scripts or internal maintenance paths.

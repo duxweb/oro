@@ -1,0 +1,73 @@
+---
+title: Multi Driver & Connections
+description: Multiple database connections, default connection, read replicas, table prefix, and cross-connection relation loading.
+---
+
+Oro supports multiple named connections from the start. A query uses the default connection unless the model or query selects another one.
+
+## Configure connections
+
+```go
+db, err := oro.Open(oro.Config{
+    Default: "main",
+    TablePrefix: "app_",
+    Connections: map[string]oro.ConnectionConfig{
+        "main":  {Driver: sqlite.Open("app.db")},
+        "mysql": {Driver: mysql.Open(mysqlDSN)},
+        "pgsql": {Driver: pgsql.Open(pgDSN)},
+    },
+})
+```
+
+`Default` is used when a query does not specify a connection.
+
+## Model default connection
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Connection("orders")
+    s.Table("orders")
+}
+```
+
+`db.Use[Order]()` uses the model connection automatically.
+
+## Query connection override
+
+```go
+orders, err := db.Connection("archive").Use[Order]().Get(ctx)
+```
+
+The override is scoped to the returned DB value.
+
+## Read replicas
+
+```go
+Connections: map[string]oro.ConnectionConfig{
+    "main": {
+        Driver: sqlite.Open("primary.db"),
+        Reads: []oro.Driver{
+            sqlite.Open("replica-1.db"),
+            sqlite.Open("replica-2.db"),
+        },
+    },
+}
+```
+
+Reads can use replicas. Writes use the primary connection. Use `UsePrimary()` when a read must see just-written data.
+
+## Cross-connection preloading
+
+`With` can load relations across model connections. Each relation query uses the related model's configured connection unless overridden.
+
+This keeps module boundaries clean, but cross-database consistency is still the application's responsibility.
+
+## Table prefix
+
+Builder-generated table names include the configured prefix. Raw SQL does not:
+
+```go
+rows, err := db.Raw("select * from "+db.TableName("products")).Get(ctx)
+```
+
+Use `db.TableName` in raw SQL.

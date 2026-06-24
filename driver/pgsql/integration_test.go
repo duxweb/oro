@@ -6,6 +6,7 @@ import (
 
 	"github.com/duxweb/oro/driver/internal/integrationtest"
 	"github.com/duxweb/oro/driver/pgsql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestPostgreSQLIntegrationEntry(t *testing.T) {

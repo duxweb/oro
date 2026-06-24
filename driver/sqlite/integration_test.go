@@ -6,6 +6,7 @@ import (
 
 	"github.com/duxweb/oro/driver/internal/integrationtest"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 func TestSQLiteDriverMatrix(t *testing.T) {

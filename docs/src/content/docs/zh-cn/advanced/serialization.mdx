@@ -1,0 +1,196 @@
+---
+title: 序列化输出
+description: JSON 输出、Serialize、Hidden 字段、Virtual 字段、关系输出、Null/JSONRaw 和 API DTO 推荐做法。
+---
+
+Oro 不接管 Go 标准 JSON 规则。普通字段的 JSON 名称仍然由 `json` tag 或标准库规则决定。
+
+Oro 额外提供 `Serialize`，用于处理 ORM 相关能力：隐藏字段、基础模型字段、已预加载关系、`oro.Null[T]` 和 `oro.JSONRaw`。
+
+## 普通 JSON 输出
+
+```go
+type Product struct {
+    oro.Model
+    Code  string `json:"code"`
+    Price uint   `json:"price"`
+}
+```
+
+```go
+product, err := db.Use[Product]().First(ctx)
+if err != nil {
+    return err
+}
+
+json.NewEncoder(w).Encode(product)
+```
+
+这完全走 Go 标准库。适合简单场景。
+
+## 使用 Serialize
+
+```go
+payload := oro.Serialize(product)
+json.NewEncoder(w).Encode(payload)
+```
+
+`Serialize` 返回 `oro.Map`、切片或基础值，适合 API 输出前做 ORM 相关处理。
+
+```go
+products, err := db.Use[Product]().Get(ctx)
+payload := oro.Serialize(products)
+```
+
+## Hidden 字段
+
+字段定义：
+
+```go
+func (User) Define(s *oro.SchemaBuilder) {
+    s.Field("PasswordHash").String().Hidden()
+    s.Field("Token").String().Hidden()
+}
+```
+
+`Hidden` 字段在 `oro.Serialize` 中默认不输出。
+
+```go
+payload := oro.Serialize(user)
+```
+
+需要内部场景显示隐藏字段：
+
+```go
+payload := oro.Serialize(user, oro.ShowHidden())
+```
+
+`Hidden` 不影响数据库查询。如果查询时需要隐藏字段，仍然可以选择：
+
+```go
+user, err := db.Use[User]().SelectHidden("PasswordHash").Where("Email", email).First(ctx)
+```
+
+## Virtual 字段
+
+```go
+type Article struct {
+    oro.Model
+    Title         string `json:"title"`
+    CommentsCount int64  `json:"comments_count"`
+}
+
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Field("CommentsCount").Virtual()
+}
+```
+
+虚拟字段不参与建表，适合接收聚合、Raw select、DTO 扩展字段。
+
+```go
+articles, err := db.Use[Article]().WithCount(Article{}.Comments()).Get(ctx)
+payload := oro.Serialize(articles)
+```
+
+## 关系输出
+
+关系不放在结构体字段里，预加载后由 `Serialize` 输出已加载关系。
+
+```go
+article, err := db.Use[Article]().
+    With(Article{}.Cover()).
+    With(Article{}.Comments()).
+    First(ctx)
+
+payload := oro.Serialize(article)
+```
+
+`Serialize` 只输出已加载关系，不会主动发 SQL。
+
+如果关系没有预加载：
+
+- `Serialize` 不输出该关系；
+- 手动调用 `article.Cover().One[Image]()` 会返回 `ErrRelationNotLoaded`。
+
+## 关系 JSON 名称
+
+关系可以设置 JSON 输出名：
+
+```go
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID").
+        JSONName("cover_image")
+}
+```
+
+如果不设置 `JSONName`，默认使用关系名的 snake_case，例如 `Comments` 输出为 `comments`。
+
+## Null 输出
+
+`oro.Null[T]` 用于 nullable 字段。
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[int] `json:"stock"`
+}
+```
+
+`Serialize` 会把有效值输出为具体值，无效值输出为 `nil`。
+
+```go
+product.Stock = oro.NullOf(10)   // 输出 10
+product.Stock = oro.NullZero[int]() // 输出 null
+```
+
+## JSONRaw 输出
+
+```go
+type Product struct {
+    oro.Model
+    Meta oro.JSONRaw `json:"meta"`
+}
+```
+
+`Serialize` 会把 `JSONRaw` 输出为 `json.RawMessage`，避免二次字符串转义。
+
+## 循环保护
+
+关系可能形成循环，例如文章预加载评论，评论又预加载文章。`Serialize` 会做循环保护，遇到已访问对象时输出 `nil`，避免无限递归。
+
+这也是 Oro 不建议把关系直接放进结构体字段的原因之一。
+
+## API DTO 推荐
+
+简单接口可以直接 `Serialize`：
+
+```go
+payload := oro.Serialize(article)
+```
+
+复杂接口建议组装 DTO：
+
+```go
+type ArticleOutput struct {
+    ID       uint64          `json:"id"`
+    Title    string          `json:"title"`
+    Cover    *ImageOutput    `json:"cover,omitempty"`
+    Comments []CommentOutput `json:"comments"`
+}
+```
+
+推荐边界：
+
+| 场景 | 建议 |
+| --- | --- |
+| 管理后台快速输出 | `oro.Serialize` |
+| Public API | DTO |
+| 字段权限复杂 | DTO 或应用层 presenter |
+| 需要隐藏敏感字段 | `Hidden` + `Serialize` |
+| 关系深度复杂 | DTO 明确控制层级 |
+
+## 为什么不强制 Output 方法
+
+JSON 名称、API 字段裁剪、权限和版本兼容通常是应用层职责。Oro 提供 `Hidden`、`Virtual`、关系读取和 `Serialize`，但不强迫所有模型通过一个黑盒 `Output()`。

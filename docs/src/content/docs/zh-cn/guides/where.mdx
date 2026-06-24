@@ -3,6 +3,8 @@ title: 查询条件
 description: 简单字段条件、表达式对象、分组回调、条件回调和子查询。
 ---
 
+这一页只讲“条件怎么写”。完整方法清单放在 [条件表达式参考](/zh-cn/reference/conditions/)，Join 放在 [查询构建器](/zh-cn/reference/query-builder/#join)。
+
 ## 简单条件
 
 ```go
@@ -12,6 +14,28 @@ db.Table("products").Where("price", ">=", 100)
 ```
 
 模型查询用 Go 字段名；裸表查询用数据库列名。
+
+`Where` 不接收回调函数。回调只用于 `WhereGroup`、`OrWhereGroup` 和 `WhereWhen`，这样一眼就能看出哪里会生成括号。
+
+| 写法 | 用途 |
+| --- | --- |
+| `Where("Code", "P001")` | 简单字段条件 |
+| `Where("Price", ">=", 100)` | 字段 + 操作符 |
+| `Where(oro.Field("Price").Gte(100))` | 字段表达式 |
+| `Where(cond1, cond2)` | 多个条件，默认 AND |
+| `WhereGroup(func(w) {...})` | AND 括号分组 |
+| `OrWhereGroup(func(w) {...})` | OR 括号分组 |
+| `WhereWhen(ok, func(w) {...})` | 条件成立时追加括号分组 |
+
+回调式条件只保留三种入口：
+
+| 入口 | 语义 |
+| --- | --- |
+| `WhereGroup(func(w *oro.WhereBuilder) {...})` | 追加 `AND (...)` |
+| `OrWhereGroup(func(w *oro.WhereBuilder) {...})` | 追加 `OR (...)` |
+| `WhereWhen(ok, func(w *oro.WhereBuilder) {...})` | `ok` 为 true 时追加 `AND (...)` |
+
+Oro 故意不支持把回调直接传给 `Where` 或 `OrWhere`，因为 `Where` / `OrWhere` 只表示普通条件；只要出现回调，就必须通过 `Group` 或 `When` 明确表达括号语义。
 
 ## 字段表达式
 
@@ -30,6 +54,10 @@ db.Use[Product]().Where(
 )
 ```
 
+字段表达式适合比较语义比较强的条件，例如 `Gte`、`Between`、`IsNull`、`EqCol`。普通等值条件仍然建议直接写 `Where("Code", "P001")`。
+
+`oro.Field("Code").` 后面的完整方法表见 [Field 表达式完整方法](/zh-cn/reference/conditions/#field-表达式完整方法)。
+
 ## 分组
 
 ```go
@@ -43,6 +71,69 @@ products, err := db.Use[Product]().
 
 `WhereGroup` 和 `OrWhereGroup` 只接受回调，括号语义明确。
 
+上面的 SQL 语义是：
+
+```sql
+tenant_id = ? and (status = ? or status = ?)
+```
+
+## OR 分组
+
+`OrWhereGroup` 表示在当前查询后追加一个 `OR (...)`。
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    OrWhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Status", "draft").
+            Where("Visible", true)
+    }).
+    Get(ctx)
+```
+
+SQL 语义：
+
+```sql
+status = ? or (status = ? and visible = ?)
+```
+
+注意：`OrWhere("Status", "draft").Where("Visible", true)` 和 `OrWhereGroup(...)` 不一样。需要括号时必须使用 group。
+
+## 多层嵌套
+
+`WhereBuilder` 里也可以继续写 `WhereGroup` / `OrWhereGroup`，用于多层括号。
+
+```go
+products, err := db.Use[Product]().
+    Where("TenantID", tenantID).
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Status", "active").
+            OrWhereGroup(func(or *oro.WhereBuilder) {
+                or.Where("Status", "draft").
+                    WhereGroup(func(nested *oro.WhereBuilder) {
+                        nested.Where("OwnerID", userID).
+                            OrWhere("Visibility", "public")
+                    })
+            })
+    }).
+    Get(ctx)
+```
+
+SQL 语义：
+
+```sql
+tenant_id = ?
+and (
+  status = ?
+  or (
+    status = ?
+    and (owner_id = ? or visibility = ?)
+  )
+)
+```
+
+原则很简单：只要业务条件里出现“这一坨条件要被括起来”，就用 `WhereGroup` 或 `OrWhereGroup`。
+
 ## 条件回调
 
 ```go
@@ -54,6 +145,47 @@ query = query.WhereWhen(filter.OnlyAvailable, func(w *oro.WhereBuilder) {
 
 `WhereWhen` 的含义是：条件为真时追加这一组条件。
 
+`WhereWhen` 始终接收回调，避免把“是否追加”和“追加什么条件”混在一个参数列表里。
+
+复杂筛选可以按条件逐步追加：
+
+```go
+query := db.Use[Product]().Where("TenantID", tenantID)
+
+query = query.WhereWhen(keyword != "", func(w *oro.WhereBuilder) {
+    like := "%" + keyword + "%"
+    w.Where("Code", "like", like).
+        OrWhere("Name", "like", like)
+})
+
+query = query.WhereWhen(minPrice > 0 || maxPrice > 0, func(w *oro.WhereBuilder) {
+    if minPrice > 0 {
+        w.Where("Price", ">=", minPrice)
+    }
+    if maxPrice > 0 {
+        w.Where("Price", "<=", maxPrice)
+    }
+})
+
+products, err := query.Get(ctx)
+```
+
+`WhereWhen` 生成的是一组 `AND (...)` 条件。需要 OR 条件回调时，用 `OrWhereGroup` 明确表达。
+
+## WhereBuilder 支持的方法
+
+回调里的 `w` 是 `*oro.WhereBuilder`，可用方法和主查询保持一致，但只负责条件：
+
+| 方法 | 用途 |
+| --- | --- |
+| `Where` / `OrWhere` | 字段条件或条件对象 |
+| `WhereGroup` / `OrWhereGroup` | 多层括号 |
+| `WhereWhen` | 条件成立时追加分组 |
+| `WhereColumn` / `OrWhereColumn` | 列与列比较 |
+| `WhereIn` / `OrWhereIn` | `IN (subquery)` |
+| `WhereExists` / `OrWhereExists` | `EXISTS (subquery)` |
+| `WhereRaw` / `OrWhereRaw` | 原生条件片段 |
+
 ## 子查询
 
 ```go
@@ -64,12 +196,31 @@ paidUsers := oro.Query(
 users, err := db.Use[User]().WhereIn("ID", paidUsers).Get(ctx)
 ```
 
+`WhereIn` 只用于 `IN (subquery)`。普通值列表使用字段表达式：
+
+```go
+users, err := db.Use[User]().
+    Where(oro.Field("ID").In(1, 2, 3)).
+    Get(ctx)
+```
+
 ```go
 existsPaidOrder := oro.Query(
     db.Table("orders").WhereColumn("orders.user_id", "users.id").Where("status", "paid"),
 )
 
 users, err := db.Table("users").WhereExists(existsPaidOrder).Get(ctx)
+```
+
+在分组里也可以使用子查询：
+
+```go
+users, err := db.Table("users").
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.WhereIn("id", paidUsers).
+            OrWhereExists(existsPaidOrder)
+    }).
+    Get(ctx)
 ```
 
 ## 关联过滤
@@ -81,3 +232,35 @@ articles, err := db.Use[Article]().WhereHas(Article{}.Comments(), func(q *oro.Re
 
 articles, err = db.Use[Article]().WhereDoesntHave(Article{}.Comments()).Get(ctx)
 ```
+
+`WhereHas` / `WhereDoesntHave` 的第二个参数是可选回调。回调里使用 `RelationQuery`，可以继续写 `Where`、`WhereGroup`、`WhereHas` 和数量条件：
+
+```go
+articles, err := db.Use[Article]().
+    WhereHas(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.WhereGroup(func(w *oro.WhereBuilder) {
+            w.Where("Status", "approved").
+                OrWhere("Pinned", true)
+        }).Count(">=", 3)
+    }).
+    Get(ctx)
+```
+
+更多关系过滤见 [关联查询](/zh-cn/relations/querying/)。
+
+## 和 Join 的关系
+
+`Where` 是主查询过滤条件。Join 的 `ON` 条件在 `Join(..., func(j *oro.Join) {...})` 里写：
+
+```go
+rows, err := db.Table("orders").As("o").
+    LeftJoin("users", func(j *oro.Join) {
+        j.As("u").
+            OnColumn("u.id", "o.user_id").
+            Where("u.status", "active")
+    }).
+    Where("o.status", "paid").
+    Get(ctx)
+```
+
+Join 的详细语法放在 [查询构建器 Join 章节](/zh-cn/reference/query-builder/#join)，避免把条件页变成所有查询能力的大杂烩。

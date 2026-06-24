@@ -1,0 +1,146 @@
+---
+title: Update & Delete
+description: Conditional updates, atomic increments, soft delete, restore, force delete, optimistic locking, and safety rules.
+---
+
+Oro has one update entry: `Update(ctx, oro.Map{...})`. There is no `Save`, because “save this struct by primary key” and “update rows matching this condition” should not be ambiguous.
+
+## Conditional update
+
+```go
+affected, err := db.Use[Product]().
+    Where("Code", "P001").
+    Update(ctx, oro.Map{"Price": 120})
+```
+
+Model queries use Go field names inside `oro.Map`. Table queries use database column names:
+
+```go
+affected, err := db.Table("products").
+    Where("code", "P001").
+    Update(ctx, oro.Map{"price": 120})
+```
+
+The return value is the affected row count.
+
+## Why updates use Map
+
+A Go struct cannot say whether `Price: 0` means “set price to zero” or “the caller did not provide price”. Oro uses `oro.Map` so every updated field is explicit.
+
+## Atomic increments
+
+```go
+_, err := db.Use[Product]().Where("ID", id).Update(ctx, oro.Map{
+    "Stock": oro.Decrement(1),
+    "Sold":  oro.Increment(1),
+})
+```
+
+Table queries use column names:
+
+```go
+_, err := db.Table("products").Where("id", id).Update(ctx, oro.Map{
+    "stock": oro.Decrement(1),
+})
+```
+
+## Raw expressions
+
+```go
+_, err := db.Table("products").Where("id", id).Update(ctx, oro.Map{
+    "updated_at": oro.Raw("CURRENT_TIMESTAMP"),
+})
+```
+
+Use raw expressions only for trusted SQL fragments.
+
+## Only and Omit
+
+```go
+_, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120, "UpdatedAt": time.Now()}, oro.Only("Price"))
+```
+
+```go
+_, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120}, oro.Omit("UpdatedAt"))
+```
+
+## Optimistic lock
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Version").UnsignedBigInt().Default(1).OptimisticLock()
+}
+```
+
+```go
+rows, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{"Price": 120}, oro.CheckVersion(version))
+```
+
+A version mismatch returns `oro.ErrStaleData`.
+
+## Upsert
+
+```go
+saved, err := db.Use[Product]().Upsert(ctx, product,
+    oro.ConflictBy("Code").Update("Price", "Stock"),
+)
+```
+
+Table upsert:
+
+```go
+row, err := db.Table("products").Upsert(ctx, oro.Map{
+    "code":  "P001",
+    "price": 120,
+}, oro.ConflictBy("code").Update("price"))
+```
+
+`ConflictBy` uses Go field names for models and database column names for table queries.
+
+## Delete
+
+```go
+affected, err := db.Use[Product]().Where("ID", id).Delete(ctx)
+```
+
+If the model has a soft-delete field, `Delete` writes the deleted timestamp. Otherwise it physically deletes the row.
+
+Table deletes are physical deletes:
+
+```go
+affected, err := db.Table("products").Where("id", id).Delete(ctx)
+```
+
+## Soft delete
+
+```go
+product, err := db.Use[Product]().WithDeleted().Find(ctx, id)
+products, err := db.Use[Product]().OnlyDeleted().Get(ctx)
+```
+
+Restore:
+
+```go
+_, err := db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
+```
+
+Force physical delete:
+
+```go
+_, err := db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+## Safety guard
+
+Oro rejects unconditional update and delete operations:
+
+- `oro.ErrUnsafeUpdate`
+- `oro.ErrUnsafeDelete`
+
+For full-table maintenance, write the scope explicitly or use controlled raw SQL.

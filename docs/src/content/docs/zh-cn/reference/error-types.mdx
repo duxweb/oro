@@ -1,0 +1,127 @@
+---
+title: 错误类型
+description: Oro 标准错误、errors.Is 判断、错误上下文和常见处理策略。
+---
+
+Oro 返回的错误通常是 `*oro.Error`，并支持 `errors.Is` 判断标准错误类型。
+
+```go
+product, err := db.Use[Product]().Create(ctx, product)
+if errors.Is(err, oro.ErrConflict) {
+    return domain.ErrCodeExists
+}
+if err != nil {
+    return err
+}
+```
+
+## Error 结构
+
+```go
+type Error struct {
+    Op       string
+    Kind     error
+    Model    string
+    Table    string
+    Field    string
+    Relation string
+    SQL      string
+    Args     []any
+    Cause    error
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `Op` | 操作名称，例如 `create`、`query`、`sync` |
+| `Kind` | Oro 标准错误类型 |
+| `Model` | 模型名 |
+| `Table` | 表名 |
+| `Field` | 字段名 |
+| `Relation` | 关系名 |
+| `SQL` / `Args` | SQL 上下文 |
+| `Cause` | 原始底层错误 |
+
+## 参数和查询错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrInvalidArgument` | 参数无效 |
+| `ErrInvalidQuery` | 查询结构无效 |
+| `ErrUnknownField` | 未知字段 |
+| `ErrUnknownRelation` | 未知关系 |
+| `ErrRelationNotLoaded` | 读取未预加载关系 |
+| `ErrScan` | 扫描或类型转换失败 |
+| `ErrUnsupported` | 当前驱动或场景不支持 |
+| `ErrClosed` | DB 已关闭 |
+
+## 写入安全错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrUnsafeUpdate` | 无条件更新 |
+| `ErrUnsafeDelete` | 无条件删除 |
+| `ErrConflict` | 唯一冲突或 upsert 冲突 |
+| `ErrConstraint` | 外键、检查等约束错误 |
+| `ErrStaleData` | 乐观锁版本不匹配 |
+
+## 事务和并发错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrTransactionRequired` | 当前操作必须在事务中执行 |
+| `ErrTransactionConnection` | 事务连接不匹配 |
+| `ErrDeadlock` | 数据库死锁 |
+| `ErrSerializationFailure` | 序列化失败，可重试事务 |
+
+事务重试可用 `TxAttempts` 或全局 `Retry.TxDeadlockAttempts`。
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    // ...
+    return nil
+}, oro.TxAttempts(3))
+```
+
+## 多连接、租户和分片错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrUnknownConnection` | 连接不存在 |
+| `ErrCrossConnectionQuery` | 不支持的跨连接查询 |
+| `ErrTenantRequired` | 缺少租户值 |
+| `ErrUnknownTenant` | 租户无法路由 |
+| `ErrShardRequired` | 缺少分片值 |
+| `ErrShardNotFound` | 找不到分片 |
+| `ErrShardConflict` | 分片值冲突 |
+| `ErrCrossShardJoin` | 不支持的跨分片 Join |
+| `ErrCrossShardTransaction` | 单事务跨分片 |
+
+## 缓存和同步错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrCacheStoreRequired` | 未配置缓存存储 |
+| `ErrCacheKeyRequired` | 缺少缓存 key |
+| `ErrOrderRequired` | 跨分片 First/分页等需要排序 |
+| `ErrUnsafeSchemaChange` | 检测到危险结构变更 |
+| `ErrAmbiguousSchemaChange` | 结构变更歧义，例如字段重命名无法确定 |
+
+## Hook 和事件错误
+
+| 错误 | 说明 |
+| --- | --- |
+| `ErrHook` | 模型 Hook 返回错误 |
+| `ErrEvent` | 全局事件处理器返回错误 |
+
+Hook/Event 的原始错误保存在 `Cause` 中，可以用 `errors.Unwrap` 或 `errors.As` 获取。
+
+## 查不到不是错误
+
+Oro 明确规定：
+
+- `First` / `Find` 查不到返回 `nil, nil`；
+- `Get` 查不到返回空切片；
+- `Exists` 查不到返回 `false, nil`。
+
+不要用错误判断“没有数据”。

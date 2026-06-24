@@ -1,0 +1,116 @@
+---
+title: 驱动适配器
+description: 官方驱动边界、第三方驱动开发、Dialect、Inspector 和 database/sql 包装。
+---
+
+Oro 当前是关系型 SQL ORM。驱动体系面向 `database/sql` 和 SQL/类 SQL 数据库。
+
+## 官方驱动做什么
+
+官方驱动包包括三部分：
+
+| 部分 | 职责 |
+| --- | --- |
+| `Driver` | 打开连接、返回方言、返回结构检查器、错误转换 |
+| `Dialect` | 把 Oro AST 编译成具体 SQL |
+| `Inspector` | 读取当前数据库表结构，用于自动同步 |
+
+官方驱动不主动注册具体 SQL driver：
+
+```go
+import (
+    "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
+)
+```
+
+## 第三方驱动能做什么
+
+第三方可以独立开发 Oracle、SQL Server、ClickHouse、DuckDB、CockroachDB 等 SQL 数据库驱动。
+
+```go
+package oracle
+
+func Open(dsn string, options ...Option) oro.Driver {
+    return driver{driverName: "oracle", dsn: dsn, owned: true}
+}
+
+func Wrap(db *sql.DB, options ...Option) oro.Driver {
+    return driver{db: db, owned: false}
+}
+```
+
+## Driver 接口
+
+```go
+type Driver interface {
+    Name() string
+    Open(ctx context.Context) (*sql.DB, error)
+    Dialect() oro.Dialect
+    Inspector(db *sql.DB) oro.Inspector
+    TranslateError(err error) error
+    Owned() bool
+}
+```
+
+## Dialect 接口
+
+```go
+type Dialect interface {
+    Name() string
+    Capabilities() oro.Capabilities
+    QuoteIdent(name string) string
+    Placeholder(index int) string
+    DataType(column oro.ColumnSpec) (string, error)
+    NormalizeType(dbType string) (oro.ColumnType, error)
+    Compile(stmt oro.Statement) (oro.CompiledSQL, error)
+    CompileSchema(change oro.SchemaChange) ([]oro.CompiledSQL, error)
+}
+```
+
+Oro 内部负责链式 API 到 AST；第三方方言负责 AST 到目标 SQL。
+
+```txt
+Use/Where/Select/Join
+        ↓
+Oro Query AST
+        ↓
+Dialect.Compile
+        ↓
+目标数据库 SQL
+        ↓
+database/sql 执行
+```
+
+## Inspector 接口
+
+```go
+type Inspector interface {
+    Tables(ctx context.Context) ([]oro.TableInfo, error)
+    Table(ctx context.Context, name string) (*oro.TableSpec, error)
+    Indexes(ctx context.Context, table string) ([]oro.IndexSpec, error)
+    Constraints(ctx context.Context, table string) ([]oro.ConstraintSpec, error)
+}
+```
+
+`Sync()` 依赖 Inspector。若第三方驱动不支持自动同步，可以返回不支持错误；完整 SQL 驱动建议实现它。
+
+## MongoDB 适合吗
+
+不适合直接放进当前 `oro.Driver`。MongoDB 是文档数据库，不是 `database/sql` 关系型 SQL 数据库。除非第三方提供非常完整的 SQL 兼容层，否则语义会很别扭。MongoDB 更适合独立 ODM。
+
+## 错误转换
+
+```go
+func (driver) TranslateError(err error) error {
+    // 把唯一冲突、约束、死锁、序列化失败转换为 oro.ErrConflict 等
+    return err
+}
+```
+
+建议至少识别：
+
+- 唯一冲突：`oro.ErrConflict`；
+- 约束错误：`oro.ErrConstraint`；
+- 死锁：`oro.ErrDeadlock`；
+- 序列化失败：`oro.ErrSerializationFailure`。

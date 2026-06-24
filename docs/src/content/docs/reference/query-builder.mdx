@@ -1,0 +1,159 @@
+---
+title: Query Builder
+description: Model, table, raw, join, subquery, and terminal method reference.
+---
+
+Oro has three query entries:
+
+```go
+db.Use[Product]()
+db.Table("products")
+db.Raw("select * from products where id = ?", id)
+```
+
+Model queries use Go field names. Table and Raw queries use database column names or SQL expressions.
+
+## Model query
+
+```go
+product, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+```
+
+Common methods:
+
+| Method | Purpose |
+| --- | --- |
+| `Where` / `OrWhere` | field conditions or condition objects |
+| `WhereGroup` / `OrWhereGroup` | parenthesized groups |
+| `WhereWhen` | conditional group |
+| `WhereRaw` | raw condition fragment |
+| `WhereColumn` | column comparison |
+| `WhereIn` / `WhereExists` | subquery conditions |
+| `Select` | fields, expressions, aggregates |
+| `With` | preload relations |
+| `For` | query through a relation |
+| `As` | main table alias |
+| `Join` / `LeftJoin` / `RightJoin` / `FullJoin` | joins |
+| `CrossJoin` / `JoinRaw` | special join forms |
+| `OrderBy` / `OrderByDesc` / `OrderByRaw` | ordering |
+| `GroupBy` / `Having` / `HavingRaw` | grouping |
+| `Limit` / `Offset` | paging primitives |
+| `LockForUpdate` / `LockForShare` | row locks |
+| `WithDeleted` / `OnlyDeleted` | soft-delete visibility |
+| `Cache` / `CacheKey` / `CacheTags` | query result cache |
+| `Timeout` | query-local timeout |
+| `SkipHooks` / `SkipEvents` | skip model hooks or global events |
+
+## Table query
+
+```go
+rows, err := db.Table("products").Where("price", ">=", 100).Get(ctx)
+```
+
+`Table` returns `oro.Map` by default. Use `MapTo[T]()` for DTOs:
+
+```go
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+## Raw query
+
+```go
+rows, err := db.Raw("select * from "+db.TableName("products")+" where code = ?", code).Get(ctx)
+```
+
+Raw supports `First`, `Get`, `MapTo[T]`, `Stream`, `Exec`, `Cache`, `CacheKey`, `CacheTags`, and `Timeout`.
+
+Raw SQL does not automatically apply table prefixes. Use `db.TableName`.
+
+## Select
+
+```go
+rows, err := db.Table("orders").
+    Select(
+        "status",
+        oro.Count("*").As("total"),
+        oro.Sum("amount").As("amount_sum"),
+        oro.Raw("max(created_at) as last_created_at"),
+    ).
+    GroupBy("status").
+    Get(ctx)
+```
+
+Model `Select` uses Go fields:
+
+```go
+products, err := db.Use[Product]().Select("ID", "Code", "Price").Get(ctx)
+```
+
+Use `oro.As(field, alias)` for aliases.
+
+## Group and Having
+
+```go
+rows, err := db.Table("orders").
+    Select("status", oro.Count("*").As("total")).
+    GroupBy("status").
+    HavingRaw("count(*) > ?", 10).
+    Get(ctx)
+```
+
+Having methods include `Having`, `HavingColumn`, `HavingIn`, `HavingExists`, and `HavingRaw`.
+
+## Join
+
+Join conditions are expressed with a callback:
+
+```go
+rows, err := db.Table("orders").As("o").
+    LeftJoin("users", func(j *oro.Join) {
+        j.As("u").OnColumn("u.id", "o.user_id")
+    }).
+    Where("o.status", "paid").
+    Get(ctx)
+```
+
+Join source can be a table name or `oro.Query(...).As(alias)`.
+
+```go
+latestOrders := db.Table("orders").
+    Select("user_id", oro.Raw("max(id) as last_order_id")).
+    GroupBy("user_id")
+
+rows, err := db.Table("users").As("u").
+    LeftJoin(oro.Query(latestOrders).As("lo"), func(j *oro.Join) {
+        j.OnColumn("lo.user_id", "u.id")
+    }).
+    Get(ctx)
+```
+
+## Subqueries
+
+```go
+paidOrders := db.Table("orders").Select("user_id").Where("status", "paid")
+
+users, err := db.Table("users").WhereIn("id", oro.Query(paidOrders)).Get(ctx)
+rows, err := db.From(oro.Query(paidOrders).As("po")).Get(ctx)
+```
+
+## Terminal methods
+
+| Method | Return |
+| --- | --- |
+| `First(ctx)` | one row or `nil` |
+| `Find(ctx, id)` | primary-key lookup, model queries only |
+| `Get(ctx)` | slice |
+| `Count(ctx)` | `int64` |
+| `Exists(ctx)` | `bool` |
+| `Sum` / `Avg` | decimal result |
+| `Min[T]` / `Max[T]` | `oro.Null[T]` |
+| `Stream(ctx)` | streaming iterator |
+| `Chunk(ctx, size, fn)` | chunked read |
+| `Each(ctx, fn)` | row-by-row read |
+| `Paginate(size)` | paginator |
+| `Create` / `CreateMany` / `CreateManyResult` | writes |
+| `Upsert` / `UpsertMany` | conflict writes |
+| `Update` / `Delete` | mutation |

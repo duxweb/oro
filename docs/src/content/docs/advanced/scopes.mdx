@@ -1,0 +1,58 @@
+---
+title: Scopes
+description: Reusable query scopes and the difference between scopes and where clauses.
+---
+
+A scope is a named query rule. It can contain where clauses, joins, ordering, preloads, tenant logic, or any other builder changes.
+
+A `Where` is a condition. A scope is a reusable query policy.
+
+## Define a scope
+
+```go
+func ActiveProducts(q *oro.ModelQuery[Product]) *oro.ModelQuery[Product] {
+    return q.Where("Status", "active")
+}
+```
+
+Use it:
+
+```go
+products, err := db.Use[Product]().Scope(ActiveProducts).Get(ctx)
+```
+
+## Multiple scopes
+
+```go
+products, err := db.Use[Product]().
+    Scope(ActiveProducts).
+    Scope(VisibleTo(user)).
+    OrderByDesc("ID").
+    Get(ctx)
+```
+
+Scopes are applied in order.
+
+## Parameterized scopes
+
+```go
+func VisibleTo(user User) oro.Scope[Product] {
+    return func(q *oro.ModelQuery[Product]) *oro.ModelQuery[Product] {
+        return q.WhereGroup(func(w *oro.WhereBuilder) {
+            w.Where("OwnerID", user.ID).OrWhere("Visibility", "public")
+        })
+    }
+}
+```
+
+## When to use scopes
+
+Use scopes for:
+
+- user visibility rules;
+- tenant-aware filters;
+- reusable dashboard filters;
+- default sorting policies;
+- common preload sets.
+
+Do not wrap every `Where` in a scope. Inline conditions are clearer for one-off query code.

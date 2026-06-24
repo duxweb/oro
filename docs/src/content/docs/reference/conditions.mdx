@@ -1,0 +1,135 @@
+---
+title: Conditions
+description: Field, JSON, full-text, group, and subquery condition reference.
+---
+
+Oro conditions are designed to be readable at the call site while preserving SQL expressiveness.
+
+## Where forms
+
+```go
+Where("Price", 100)             // Price = 100
+Where("Price", ">=", 100)      // Price >= 100
+Where(oro.Field("Price").Gte(100))
+```
+
+`Where` does not accept callback functions. Use `WhereGroup`, `OrWhereGroup`, or `WhereWhen` for callbacks.
+
+Model queries use Go field names. Table queries use database column names.
+
+## Field expressions
+
+```go
+query.Where(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Price").Gte(100),
+)
+```
+
+Value comparison methods:
+
+| Method | SQL |
+| --- | --- |
+| `Eq(value)` | `=` |
+| `NotEq(value)` | `!=` |
+| `Gt(value)` | `>` |
+| `Gte(value)` | `>=` |
+| `Lt(value)` | `<` |
+| `Lte(value)` | `<=` |
+| `Like(value)` | `LIKE` |
+| `NotLike(value)` | `NOT LIKE` |
+| `In(values...)` | `IN` |
+| `NotIn(values...)` | `NOT IN` |
+| `Between(start, end)` | `BETWEEN` |
+| `IsNull()` | `IS NULL` |
+| `IsNotNull()` | `IS NOT NULL` |
+
+Column comparison methods:
+
+| Method | SQL |
+| --- | --- |
+| `EqCol(right)` | `left = right` |
+| `NotEqCol(right)` | `left != right` |
+| `GtCol(right)` | `left > right` |
+| `GteCol(right)` | `left >= right` |
+| `LtCol(right)` | `left < right` |
+| `LteCol(right)` | `left <= right` |
+
+## Groups
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Price", ">=", 100).
+            OrWhere("Code", "like", "VIP%")
+    }).
+    Get(ctx)
+```
+
+OR group:
+
+```go
+query.OrWhereGroup(func(w *oro.WhereBuilder) {
+    w.Where("Status", "draft").Where("Price", 0)
+})
+```
+
+Conditional group:
+
+```go
+query.WhereWhen(keyword != "", func(w *oro.WhereBuilder) {
+    w.Where("Code", "like", keyword+"%")
+})
+```
+
+## Condition object helpers
+
+```go
+activeOrDraft := oro.Or(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Status").Eq("draft"),
+)
+
+products, err := db.Use[Product]().Where(activeOrDraft).Get(ctx)
+```
+
+Helpers include:
+
+| Function | Purpose |
+| --- | --- |
+| `oro.And(...)` | AND group |
+| `oro.Or(...)` | OR group |
+| `oro.Not(condition)` | NOT condition |
+| `oro.Exists(oro.Query(query))` | EXISTS subquery |
+| `oro.RawCondition(sql, args...)` | raw condition |
+
+## JSON conditions
+
+```go
+products, err := db.Use[Product]().
+    Where(oro.JSON("Meta").Path("color").Eq("red")).
+    Get(ctx)
+```
+
+JSON support depends on database capabilities. The dialect compiles path expressions.
+
+## Full-text conditions
+
+```go
+posts, err := db.Use[Post]().
+    Where(oro.FullText("Title", "Body").Match("orm")).
+    Get(ctx)
+```
+
+Create matching full-text indexes in `Define` where the database supports them.
+
+## Subqueries
+
+```go
+activeUsers := oro.Query(db.Table("users").Select("id").Where("status", "active"))
+
+orders, err := db.Table("orders").WhereIn("user_id", activeUsers).Get(ctx)
+```
+
+`WhereExists` and `OrWhereExists` are available on the query and where builder.

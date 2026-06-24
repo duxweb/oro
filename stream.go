@@ -217,6 +217,9 @@ func streamQueryPrepared(ctx context.Context, db *DB, spec QuerySpec) (*rowStrea
 }
 
 func streamRaw(ctx context.Context, db *DB, raw RawSpec, timeout time.Duration) (*rowStream, error) {
+	if err := validateRawSQL(db, raw.SQL); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, db.session.connection)
 	if err != nil {
 		return nil, err

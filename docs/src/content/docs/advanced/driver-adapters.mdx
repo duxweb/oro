@@ -1,0 +1,56 @@
+---
+title: Driver Adapters
+description: Driver, Dialect, Inspector, Capabilities, and Logger interfaces.
+---
+
+Oro driver packages are adapters around `database/sql`. They provide dialect behavior, schema inspection, error mapping, and connection configuration. They do not register concrete SQL drivers by themselves.
+
+## Official adapters
+
+```go
+import (
+    "github.com/duxweb/oro/driver/mysql"
+    "github.com/duxweb/oro/driver/pgsql"
+    "github.com/duxweb/oro/driver/sqlite"
+
+    _ "github.com/go-sql-driver/mysql"
+    _ "github.com/jackc/pgx/v5/stdlib"
+    _ "modernc.org/sqlite"
+)
+```
+
+## Driver boundary
+
+A driver supplies:
+
+- connection opening through `database/sql`;
+- a dialect for SQL placeholders, quoting, returning, locks, and upsert syntax;
+- an inspector for schema sync;
+- capability flags;
+- database-specific error normalization.
+
+## Third-party SQL adapters
+
+Third-party packages can implement `oro.Driver` and expose their own `Open(...)` function:
+
+```go
+func Open(dsn string, options ...Option) oro.Driver {
+    return &Driver{dsn: dsn, options: options}
+}
+```
+
+The ORM core handles query building and execution. The adapter handles database-specific syntax and schema metadata.
+
+## Non-SQL databases
+
+A MongoDB-style adapter is not just a dialect swap because query semantics, joins, transactions, schema sync, and scanning differ significantly. Oro's public `Driver` interface is intended for SQL-compatible backends.
+
+## DSN and options
+
+Official adapters accept a DSN string plus typed options. This matches common Go database drivers while leaving room for adapter-specific configuration.
+
+```go
+sqlite.Open("app.db")
+mysql.Open("user:pass@tcp(localhost:3306)/app?parseTime=true")
+pgsql.Open("postgres://root@localhost:5432/app?sslmode=disable")
+```

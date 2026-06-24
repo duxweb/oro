@@ -1,17 +1,25 @@
 ---
 title: Hooks 与事件
-description: 模型生命周期 Hook、全局事件订阅和 SQL 事件。
+description: 模型生命周期 Hook、全局事件订阅、SQL 事件、事务事件和跳过策略。
 ---
 
-Hook 是模型方法，事件是注册在 `DB` 上的全局订阅。
+Oro 同时提供模型 Hook 和全局事件。
+
+- Hook 写在模型上，适合模型内部不变量和字段整理；
+- 事件注册在 `DB` 上，适合日志、审计、缓存失效、领域事件发布等横切逻辑。
+
+Oro 明确区分“模型行为”和“全局订阅”：Hook 贴近模型，事件贴近基础设施。
 
 ## 模型 Hook
+
+Hook 是模型上的方法。只有模型查询会触发 Hook，例如 `db.Use[Product]().Create(...)`。
 
 ```go
 func (p *Product) BeforeCreate(ctx context.Context, h *oro.Hook) error {
     if p.Code == "" {
         return errors.New("code is required")
     }
+    p.Code = strings.TrimSpace(p.Code)
     return nil
 }
 
@@ -20,40 +28,187 @@ func (p *Product) AfterCreate(ctx context.Context, h *oro.Hook) error {
 }
 ```
 
-Hook 只在模型操作中执行，例如 `db.Use[Product]().Create(...)`。`Table` 和 `Raw` 不执行模型 Hook。
+`Table` 和 `Raw` 不执行模型 Hook，因为它们没有模型实例。
 
-常见用途：校验模型不变量、填充计算字段、标准化值、写入后触发副作用。
+## 支持的 Hook
+
+| Hook | 触发时机 |
+| --- | --- |
+| `BeforeCreate(ctx, hook)` | 模型创建前 |
+| `AfterCreate(ctx, hook)` | 模型创建后 |
+| `BeforeUpdate(ctx, hook)` | 模型更新前 |
+| `AfterUpdate(ctx, hook)` | 模型更新后 |
+| `BeforeDelete(ctx, hook)` | 模型删除前 |
+| `AfterDelete(ctx, hook)` | 模型删除后 |
+| `BeforeRestore(ctx, hook)` | 软删除恢复前 |
+| `AfterRestore(ctx, hook)` | 软删除恢复后 |
+| `AfterFind(ctx, hook)` | 模型查询并扫描后 |
+
+Hook 返回错误时，当前操作中止，并包装为 `oro.ErrHook`。
+
+## Hook 上下文
+
+```go
+type Hook struct {
+    DB           *oro.DB
+    Operation    string
+    Values       oro.Map
+    RowsAffected int64
+    SoftDelete   bool
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `DB` | 当前数据库会话，事务内就是事务 DB |
+| `Operation` | 当前操作名称 |
+| `Values` | 更新、删除、恢复等操作值 |
+| `RowsAffected` | 已影响行数，通常在 after hook 可用 |
+| `SoftDelete` | 当前删除是否为软删除 |
+
+## 推荐用途
+
+适合放在 Hook 里的逻辑：
+
+- 字段 trim、大小写标准化；
+- 校验模型内部不变量；
+- 自动填充派生字段；
+- 创建后补充同事务内的模型相关数据；
+- 查询后做轻量转换。
+
+不建议放在 Hook 里的逻辑：
+
+- 大量外部 HTTP 调用；
+- 复杂消息发布；
+- 和模型无关的审计逻辑；
+- 需要全局开关的横切行为。
+
+这些更适合全局事件或应用服务层。
 
 ## 跳过 Hook
 
 ```go
-_, err := db.Use[Product]().SkipHooks().Create(ctx, product)
+_, err := db.Use[Product]().
+    SkipHooks().
+    Create(ctx, product)
 ```
 
-适合导入、修复脚本或可信内部路径。
+适合导入脚本、数据修复、可信内部任务。业务入口默认不建议跳过 Hook。
 
 ## 全局事件
 
+事件通过 `db.On` 订阅。
+
 ```go
-db.On(oro.EventAfterCreate, func(ctx context.Context, event oro.Event) error {
+off := db.On(oro.AfterCreate, func(ctx context.Context, event *oro.Event) error {
+    // 审计、缓存失效、发送领域事件
     return nil
 })
+defer off()
 ```
 
-事件适合把行为挂在模型包外部，例如缓存失效、审计或领域事件发布。
+`db.On` 返回取消订阅函数。测试或短生命周期任务中建议调用 `off()`。
+
+## 支持的事件
+
+| 事件 | 说明 |
+| --- | --- |
+| `BeforeCreate` / `AfterCreate` | 创建前后 |
+| `BeforeUpdate` / `AfterUpdate` | 更新前后 |
+| `BeforeDelete` / `AfterDelete` | 删除前后 |
+| `BeforeRestore` / `AfterRestore` | 恢复前后 |
+| `AfterFind` | 查询后 |
+| `BeforeSQL` / `AfterSQL` | SQL 执行前后 |
+| `AfterCacheHit` / `AfterCacheMiss` | 查询缓存命中/未命中 |
+| `AfterCommit` / `AfterRollback` | 事务提交/回滚后 |
+
+## Event 结构
+
+```go
+type Event struct {
+    Name      oro.EventName
+    DB        *oro.DB
+    ModelName string
+    Table     string
+    Model     any
+
+    Operation    string
+    Values       oro.Map
+    RowsAffected int64
+    SoftDelete   bool
+
+    SQL      string
+    Args     []any
+    Duration time.Duration
+    Err      error
+}
+```
+
+事件处理器返回错误时，ORM 会返回 `oro.ErrEvent`。
 
 ## 跳过事件
 
 ```go
-_, err := db.Use[Product]().SkipEvents().Update(ctx, oro.Map{"Price": 120})
+_, err := db.Use[Product]().
+    SkipEvents().
+    Update(ctx, oro.Map{"Price": 120})
 ```
 
-## SQL 事件
+`SkipEvents` 不跳过模型 Hook。需要同时跳过时显式写两个：
 
 ```go
-db.On(oro.EventSQL, func(ctx context.Context, event oro.Event) error {
-    return nil
+_, err := db.Use[Product]().
+    SkipHooks().
+    SkipEvents().
+    Create(ctx, product)
+```
+
+## SQL 日志优先用 Logger
+
+虽然 Oro 有 `BeforeSQL` / `AfterSQL` 事件，但 SQL 日志更推荐使用 `Config.Logger`。
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger:   logger,
+    LogLevel: oro.LogLevelInfo,
 })
 ```
 
-日志建议优先通过配置里的 `Logger` 接口适配 `slog`、zap、zerolog 或自定义日志库。
+事件适合审计、指标、trace 和缓存失效；日志接口适合统一格式化和接入日志系统。
+
+## 事务事件
+
+```go
+err := db.Transaction(ctx, func(tx *oro.DB) error {
+    _, err := tx.Use[Product]().Create(ctx, product)
+    return err
+})
+```
+
+事务提交后触发 `AfterCommit`，回滚后触发 `AfterRollback`。这类事件适合做事务完成后的后置处理。
+
+## 执行顺序
+
+单条模型创建的大致顺序：
+
+```txt
+BeforeCreate hook
+BeforeCreate event
+SQL insert
+AfterCreate hook
+AfterCreate event
+```
+
+SQL 事件围绕具体 SQL 执行触发。事务事件在事务结束后触发。
+
+## 实战建议
+
+| 需求 | 推荐 |
+| --- | --- |
+| 模型字段整理 | Hook |
+| 模型内部校验 | Hook |
+| 审计日志 | Event |
+| 缓存失效 | Event |
+| SQL 日志 | Logger |
+| Trace/metrics | Event 或 Logger |
+| 导入脚本提速 | `SkipHooks` / `SkipEvents` |

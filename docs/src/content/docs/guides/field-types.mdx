@@ -1,0 +1,136 @@
+---
+title: Field Types
+description: Field types, defaults, nullable values, indexes, virtual fields, and hidden fields.
+---
+
+Field types are declared in `Define`. The Go struct describes business data; the schema builder describes database metadata.
+
+## Scalar types
+
+```go
+s.Field("Name").String().Size(120)
+s.Field("Description").Text()
+s.Field("Enabled").Bool().Default(true)
+s.Field("Quantity").Int()
+s.Field("Views").BigInt()
+s.Field("Price").Decimal(12, 2).Default(0)
+s.Field("Ratio").Float()
+s.Field("Payload").Binary()
+```
+
+Common numeric fields:
+
+```go
+s.Field("Age").Int()
+s.Field("Stock").Uint()
+s.Field("Count").BigInt()
+s.Field("Total").UnsignedBigInt()
+```
+
+## Time types
+
+```go
+s.Field("CreatedAt").Timestamp()
+s.Field("Birthday").Date()
+s.Field("SendAt").Time()
+```
+
+`oro.Model` already includes conventional primary key and timestamps. Custom models can still declare additional time fields.
+
+## JSON and arrays
+
+```go
+s.Field("Meta").JSON().Nullable()
+s.Field("Tags").StringArray()
+s.Field("Scores").IntArray()
+```
+
+Array support differs by database. Dialects map to the best native capability and may fall back to JSON or text where needed.
+
+## Semantic types
+
+```go
+s.Field("Email").Email()
+s.Field("URL").URL()
+s.Field("IP").IP()
+s.Field("MAC").MAC()
+s.Field("Phone").Phone()
+s.Field("Slug").Slug()
+s.Field("Color").Color()
+s.Field("Location").Point()
+```
+
+Semantic types make schema definitions readable. The final database type is still chosen by the dialect.
+
+## Enum
+
+```go
+s.Field("Status").Enum("draft", "published", "archived").Default("draft")
+```
+
+Enums document legal values for sync and schema inspection. Databases without native enum support can map them to strings plus constraints or to conservative strings.
+
+## Nullable
+
+```go
+s.Field("DeletedAt").Timestamp().Nullable()
+s.Field("Stock").Uint().Nullable()
+```
+
+For Go values, prefer `oro.Null[T]` when you want convenient JSON and database null handling:
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[uint]
+}
+```
+
+## Defaults
+
+```go
+s.Field("Price").Uint().Default(0)
+s.Field("Status").String().Default("active")
+s.Field("CreatedAt").Timestamp().DefaultExpr("CURRENT_TIMESTAMP")
+```
+
+`Default` is a literal value. `DefaultExpr` is a database expression and depends on dialect support.
+
+## Indexes and unique constraints
+
+```go
+s.Field("Code").String().Unique()
+s.Field("Status").String().Index()
+
+s.Index("idx_orders_status", "Status")
+s.Unique("uk_products_code", "Code")
+```
+
+Field-level indexes are good for single-column cases. Model-level indexes are clearer for composite indexes and explicit naming.
+
+## Full-text indexes
+
+```go
+s.Field("Title").String().FullText()
+s.Field("Body").Text()
+s.FullText("ft_posts_title_body", "Title", "Body")
+```
+
+MySQL, PostgreSQL, and SQLite have different full-text syntax and limits. Oro keeps one schema definition and lets the dialect compile it.
+
+## Hidden and Virtual
+
+```go
+s.Field("PasswordHash").String().Hidden()
+s.Field("CommentsCount").Virtual()
+```
+
+`Hidden` excludes a field from default serialization. `Virtual` receives aggregate or computed values and does not participate in table creation.
+
+## Column override
+
+```go
+s.Field("PasswordHash").Column("password_hash").String()
+```
+
+Without `Column`, Oro uses snake_case. Use `Column` only when the database column cannot be naturally derived from the Go field name.

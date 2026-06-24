@@ -5,117 +5,92 @@ template: splash
 prev: false
 next: false
 hero:
-  title: The ORM that reads like you think
-  tagline: "A humane, generic-first ORM for Go — queries read like plain intent."
+  title: Your code is the query
+  tagline: "A generic-first ORM for Go — semantic conditions, transparent SQL, zero codegen."
   actions:
     - text: Get Started
-      link: /quick-start/
+      link: quick-start/
       variant: primary
     - text: GitHub
       link: https://github.com/duxweb/oro
       variant: minimal
 ---
 
-import { LinkCard } from '@astrojs/starlight/components';
 import Pillars from '../../components/Pillars.astro';
+import ShowcaseCode from '../../components/ShowcaseCode.astro';
 import LanguageRedirect from '../../components/LanguageRedirect.astro';
 
 <LanguageRedirect />
 
 <div class="dux-section">
   <div class="dux-section-head">
-    <span class="eyebrow">What makes it different</span>
-    <h2>Four promises, end to end</h2>
-    <p>Most ORMs trade clarity for convenience. Dux keeps the convenience and gives the clarity back.</p>
+    <span class="eyebrow">Core Design</span>
+    <h2>Make ORM code feel like Go code</h2>
+    <p>Readable queries, no generated models, relations without import cycles, and result types with clear boundaries.</p>
   </div>
 
   <Pillars items={[
     {
       icon: 'semantics',
-      title: 'Humane semantics',
-      desc: 'Semantic conditions instead of string operators. A query reads like the sentence you would say out loud — and the next engineer reads it the same way.',
-      code: 'db.Use[Product]().Where(Field("Price").Gte(100))',
+      title: 'Readable queries',
+      desc: 'Fields, comparisons, and grouped conditions have explicit methods. Query intent stays visible without hiding logic in SQL strings.',
+      code: `db.Use[Product]().Where(oro.Field("Price").Gte(100))
+db.Use[Product]().Where(oro.Field("Code").Like("A%"))`,
     },
     {
       icon: 'no-gen',
-      title: 'No code generation',
-      desc: 'go get and you are done. No generator to run, no generated client to commit, no build step that silently drifts from your source of truth.',
-      code: 'db.Use[Product]()  // typed, zero generated files',
+      title: 'No generator',
+      desc: 'Models are ordinary Go structs and queries use the generic model entry. There is no generated client or extra build step.',
+      code: `db.Register(Product{})
+db.Use[Product]().Create(ctx, product)`,
     },
     {
       icon: 'no-cycle',
-      title: 'No import cycles',
-      desc: 'Relations are plain methods, not embedded pointers. Models live in separate packages and reference each other without deadlocking the Go compiler.',
-      code: 'article.Cover().One[Image]()  // relation as a method',
+      title: 'No relation cycles',
+      desc: 'Relations live in methods instead of embedded struct fields. Models can split across packages without forcing import cycles.',
+      code: `article.Cover().One[Image]()
+db.Use[Article]().With(Article{}.Cover())`,
     },
     {
       icon: 'no-blackbox',
-      title: 'Never a black box',
-      desc: 'Every query, hook and event is observable. You always see the exact SQL it runs — no hidden magic, no surprise N+1, no behavior you cannot explain.',
-      code: 'db.Debug().Use[Product]().Get(ctx)  // prints real SQL',
+      title: 'Clear type boundaries',
+      desc: 'Model queries return concrete types, dynamic writes use Map, and raw SQL goes through Raw. Flexible paths still have clear boundaries.',
+      code: `db.Use[Product]().First(ctx)  // *Product
+db.Table("products").First(ctx) // oro.Map`,
     },
   ]} />
 </div>
 
 <div class="dux-section">
-  <div class="dux-section-head">
-    <span class="eyebrow">Why another ORM</span>
-    <h2>The good parts, without the ceremony</h2>
-    <p>Each mainstream ORM gets something right. Dux keeps those wins and removes the friction Go developers actually feel.</p>
-  </div>
-
-  <div class="dux-why">
-    <article>
-      <h3>Smaller than GORM</h3>
-      <p>GORM is broad and battle-tested, but its API carries history around zero values, tags and implicit behavior. Dux keeps the surface small enough to hold in your head.</p>
-    </article>
-    <article>
-      <h3>Readable like Eloquent</h3>
-      <p>Laravel Eloquent reads beautifully. Oro keeps that fluency with generics — without forcing a migration file for every early schema tweak.</p>
-    </article>
-    <article>
-      <h3>No generated client</h3>
-      <p>Many Node ORMs rely on generated clients or runtime <code>any</code>. Dux is type-safe through Go generics, with nothing to regenerate.</p>
-    </article>
-  </div>
-</div>
-
-<div class="dux-section">
-  <div class="dux-section-head">
-    <span class="eyebrow">In one screen</span>
-    <h2>Define, sync, query</h2>
-    <p>The whole loop — model, schema sync, typed CRUD — without leaving Go or running a tool.</p>
-  </div>
-
-```go
-type Product struct {
-    oro.Model
-    Code  string
-    Price uint
-}
-
-func (Product) Define(s *oro.SchemaBuilder) {
+  <div class="dux-showcase not-content">
+    <div>
+      <span class="eyebrow">Design Tradeoffs</span>
+      <h2>Keep ORM boundaries visible in code</h2>
+      <p>Oro does not hide complexity behind generators or pack schema settings into tag strings. Models, tables, and raw SQL are separate entries: use models for business code, tables for dynamic flows, and Raw for complex queries.</p>
+      <ul>
+        <li>Schema lives in `Define`, not in overloaded tags.</li>
+        <li>Writes are explicit, so zero values are not guessed.</li>
+        <li>Relations live in methods, reducing import-cycle pressure.</li>
+      </ul>
+    </div>
+    <ShowcaseCode code={`func (Product) Define(s *oro.SchemaBuilder) {
     s.Table("products")
     s.Field("Code").String().Unique()
     s.Field("Price").Uint().Default(0)
 }
 
-// register + sync the schema from the definition above
-db.Register(Product{})
-db.Sync(ctx)
-
-// typed, readable CRUD with semantic conditions
-product, _ := db.Use[Product]().Create(ctx, &Product{Code: "P001", Price: 100})
-found, _ := db.Use[Product]().Where(oro.Field("Code").Eq("P001")).First(ctx)
-```
+db.Use[Product]()      // *Product / []Product
+db.Table("products")  // oro.Map
+db.Raw("select ...")  // Map or MapTo[T]()`} />
+  </div>
 </div>
 
 <div class="dux-cta">
-  <h2>Ready in a single <code>go get</code></h2>
+  <h2>Ready in a single go get</h2>
   <p>Open a database, register a model, sync the schema and run your first typed query in minutes.</p>
   <div class="dux-cta__actions">
-    <a class="dux-btn dux-btn--primary" href="/quick-start/"><span>Quick Start</span><span aria-hidden="true" class="dux-btn__arrow">→</span></a>
-    <a class="dux-btn dux-btn--ghost" href="/reference/api/"><span>Browse the API</span></a>
+    <a class="dux-btn dux-btn--primary" href="quick-start/"><span>Quick Start</span><span aria-hidden="true" class="dux-btn__arrow">→</span></a>
+    <a class="dux-btn dux-btn--ghost" href="reference/api/"><span>Browse the API</span></a>
   </div>
 </div>
 
@@ -123,23 +98,26 @@ found, _ := db.Use[Product]().Where(oro.Field("Code").Eq("P001")).First(ctx)
   <div class="dux-section-head">
     <span class="eyebrow">Docs</span>
     <h2>Start here</h2>
+    <p>Read these in order to understand Oro quickly: run the first query, define a model, then learn condition composition.</p>
   </div>
 
-<LinkCard title="Quick Start" href="/quick-start/" description="Open SQLite, register a model, sync schema and run typed CRUD." />
-<LinkCard title="Model Definition" href="/guides/model-definition/" description="Define columns, indexes, hidden fields, nullable values and model-level options." />
-<LinkCard title="Where Conditions" href="/guides/where/" description="Use field conditions, callback groups, conditional filters and subqueries." />
+  <div class="dux-doc-links not-content">
+    <a href="quick-start/"><em>01</em><strong>Quick Start</strong><span>Open SQLite, register a model, sync schema and run typed CRUD.</span></a>
+    <a href="guides/model-definition/"><em>02</em><strong>Model Definition</strong><span>Define columns, indexes, hidden fields, nullable values and model-level options.</span></a>
+    <a href="guides/where/"><em>03</em><strong>Where Conditions</strong><span>Use field conditions, callback groups, conditional filters and subqueries.</span></a>
+  </div>
 </div>
 
-<footer class="not-content mt-[clamp(3.5rem,7vw,6rem)] flex flex-wrap items-center justify-between gap-x-8 gap-y-4 border-t border-line pt-8">
-  <div class="flex flex-col gap-1">
-    <span class="font-bold tracking-[-0.02em] text-ink">Oro</span>
-    <span class="text-[0.85rem] text-muted">A humane, generic-first ORM for Go.</span>
+<footer class="dux-footer not-content">
+  <div class="dux-footer__brand">
+    <span class="dux-footer__logo">Oro</span>
+    <span class="dux-footer__tagline">A humane, generic-first ORM for Go.</span>
   </div>
-  <nav class="flex flex-wrap gap-5" aria-label="Footer">
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/quick-start/">Quick Start</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/guides/model-definition/">Guides</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/reference/api/">API</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="https://github.com/duxweb/oro">GitHub</a>
+  <nav class="dux-footer__nav" aria-label="Footer">
+    <a href="quick-start/">Quick Start</a>
+    <a href="guides/model-definition/">Guides</a>
+    <a href="reference/api/">API</a>
+    <a href="https://github.com/duxweb/oro">GitHub</a>
   </nav>
-  <p class="m-0 mt-1 w-full text-[0.8rem] text-muted">© 2026 Oro · Released under the MIT License.</p>
+  <p class="dux-footer__copy">© 2026 Oro · Released under the MIT License.</p>
 </footer>

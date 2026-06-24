@@ -1,37 +1,60 @@
-# Oro
+<p align="center">
+  <h1 align="center">Oro</h1>
+</p>
 
-**A generic-first ORM for Go, designed for direct syntax, explicit schemas, and clean multi-driver architecture.**
+<p align="center">
+  <b>A humane, generic-first ORM for Go.</b><br/>
+  No code generation, no tag-heavy schema strings, no hidden association magic — just typed model queries, explicit schemas, relation methods, automatic sync, and a clean multi-driver architecture.
+</p>
 
-Oro keeps the public API small:
+<p align="center">
+  <a href="https://duxweb.github.io/oro/">Website</a> &middot;
+  <a href="https://duxweb.github.io/oro/quick-start/">Docs</a> &middot;
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#benchmarks">Benchmarks</a> &middot;
+  <a href="https://github.com/duxweb/oro/issues">Feedback</a>
+</p>
 
-```go
-db.Use[Product]()    // model query
-db.Table("products") // table query
-db.Raw("select ...") // raw SQL
-```
+<p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-It avoids code generation, avoids tag-heavy schema definitions, and uses Go generics where they make the API easier to read.
+<p align="center">
+  <a href="https://github.com/duxweb/oro/actions/workflows/pages.yml"><img alt="Docs" src="https://github.com/duxweb/oro/actions/workflows/pages.yml/badge.svg"></a>
+  <a href="https://pkg.go.dev/github.com/duxweb/oro"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/duxweb/oro.svg"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
+  <img alt="Go" src="https://img.shields.io/badge/go-1.27+-00ADD8.svg">
+</p>
 
-> Current status: **pre-1.0 / release candidate quality**. The core ORM, sync engine, drivers, relations, transactions, table prefix handling, and integration test matrix are implemented. The project currently targets `go1.27rc1` because it relies on method-level generics.
+---
 
 ## Why Oro
 
-Most ORMs optimize for one side of the tradeoff:
+Most Go ORMs force at least one heavy tradeoff: struct tags that become mini-languages, code generation as the center of the workflow, surprising zero-value writes, or relation fields that make package boundaries painful. Oro is built around a smaller set of visible rules.
 
-- GORM is powerful, but its struct tags, zero-value behavior, and association model can become difficult to reason about.
-- Laravel Eloquent is extremely readable, but PHP's dynamic model does not translate directly into Go.
-- SeaORM is explicit and type-oriented, but Rust entity workflows commonly involve generated entities.
-- Ent is strongly typed, but schema/code generation is central to the workflow.
-- Prisma and TypeORM provide excellent DX in Node.js, but rely on schema files, decorators, or runtime-heavy metadata.
+| Common ORM friction | Oro's answer |
+| :--- | :--- |
+| Schema metadata hidden in tags | A model-local `Define` method with a typed schema builder. |
+| Generated clients and entity packages | Plain Go structs and direct generic query entries. |
+| Zero-value updates are ambiguous | Updates use `oro.Map`; writes say exactly which fields change. |
+| Associations create import cycles | Relations are methods returning `oro.Relation`, not embedded struct fields. |
+| Dynamic table code loses structure | `db.Table(...).MapTo[T]()` maps rows into DTOs without `db` tags. |
+| Raw SQL ignores table prefixes | `db.TableName(...)` exposes the current prefixed table name. |
+| Multi-DB support is bolted on later | Named connections, model connections, read replicas, and drivers are first-class. |
 
-Oro takes the parts that work well for application code:
+Oro keeps the public entrypoints intentionally small:
 
-- model methods for relationships, inspired by Eloquent
-- explicit schema builders, similar in spirit to Laravel migrations, but colocated with the Go model
-- generic query entrypoints, shaped for Go
-- automatic sync like GORM, with safer diff rules
-- relation loading style close to SeaORM's typed relation access
-- multi-driver and multi-connection architecture from the start
+```go
+db.Use[Product]()      // model query, Go field names
+db.Table("products")   // table query, database column names
+db.Raw("select ...")   // raw SQL
+```
+
+## Status
+
+Oro is a **pre-1.0 public preview candidate**. The core ORM, schema sync, SQLite/MySQL/PostgreSQL adapters, relation loading, transactions, pagination, table prefix handling, hooks/events, cache, tenancy, sharding, examples, benchmarks, and documentation site are implemented.
+
+The project targets **Go 1.27+** because the API is designed around method-level generics. The current module may use a Go 1.27 release-candidate version until the stable toolchain is available in all environments.
 
 ## Install
 
@@ -39,7 +62,7 @@ Oro takes the parts that work well for application code:
 go get github.com/duxweb/oro
 ```
 
-Choose one or more drivers:
+Pick the adapter package and the concrete `database/sql` driver you want:
 
 ```go
 import (
@@ -47,8 +70,14 @@ import (
     "github.com/duxweb/oro/driver/mysql"
     "github.com/duxweb/oro/driver/pgsql"
     "github.com/duxweb/oro/driver/sqlite"
+
+    _ "github.com/go-sql-driver/mysql"
+    _ "github.com/jackc/pgx/v5/stdlib"
+    _ "modernc.org/sqlite" // or _ "github.com/mattn/go-sqlite3"
 )
 ```
+
+Oro adapters wrap `database/sql`; they do not force a concrete SQL driver. Applications choose the real driver with normal blank imports.
 
 ## Quick Start
 
@@ -61,6 +90,7 @@ import (
 
     oro "github.com/duxweb/oro"
     "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
 )
 
 type Product struct {
@@ -104,6 +134,7 @@ func main() {
     }
 
     found, err := db.Use[Product]().
+        Where(oro.Field("Price").Gte(100)).
         Where("Code", "P001").
         First(ctx)
     if err != nil {
@@ -114,36 +145,9 @@ func main() {
 }
 ```
 
-## Core API
-
-| Entry | Purpose | Return shape |
-| --- | --- | --- |
-| `db.Use[T]()` | Model query | `*T`, `[]*T`, typed aggregates |
-| `db.Table("name")` | Direct table query | `oro.Map`, `[]oro.Map` |
-| `db.Raw(sql, args...)` | Raw SQL query | `oro.Map`, typed by `MapTo[T]()` |
-| `db.From(oro.Query(...))` | Subquery source | table query |
-| `db.Connection("name")` | Select connection | scoped DB clone |
-| `db.Tenant(oro.Map{...})` | Apply tenant values | scoped DB clone |
-
-Table queries can be mapped into DTOs without tags:
-
-```go
-type ProductView struct {
-    ID    uint64
-    Code  string
-    Price uint
-}
-
-view, err := db.Table("products").
-    Select("id", "code", "price").
-    MapTo[ProductView]().
-    Where("code", "P001").
-    First(ctx)
-```
-
 ## Model Definition
 
-Oro uses a model-local `Define` method instead of ORM tags:
+Oro uses `Define` instead of ORM tags:
 
 ```go
 type User struct {
@@ -162,7 +166,7 @@ func (User) Define(s *oro.SchemaBuilder) {
 }
 ```
 
-Field names use Go struct fields. Columns default to snake case unless `Column(...)` is set.
+Field names are Go struct fields. Columns default to snake_case unless `Column(...)` is set.
 
 ```go
 s.Field("Name").String().Size(120)
@@ -179,118 +183,80 @@ s.FullText("ft_posts_title_body", "Title", "Body")
 
 ## Schema Sync
 
-Register models, then sync:
+Register models and let Oro sync the structure:
 
 ```go
 err := db.Register(User{}, Product{}, Order{})
 err = db.Sync(ctx)
 ```
 
-Sync is designed for application-driven schemas:
+Sync is designed for application-owned schemas:
 
-- creates missing tables, columns, indexes, and supported constraints
-- updates safe compatible field metadata where supported by the driver
-- keeps a schema snapshot for diff decisions
-- detects unambiguous field renames internally
-- does not perform destructive drops by default
-- keeps foreign key enforcement opt-in through explicit field and relation design
+- creates missing tables, columns, indexes, and supported constraints;
+- updates safe compatible field metadata where the driver supports it;
+- keeps schema snapshots for diff decisions;
+- detects unambiguous renames internally;
+- does not perform destructive drops by default;
+- keeps foreign-key enforcement opt-in.
 
-## CRUD
+## Querying
 
 ```go
-created, err := db.Use[Product]().Create(ctx, &Product{
-    Code:  "P001",
-    Price: 100,
-})
-
-rows, err := db.Use[Product]().
+products, err := db.Use[Product]().
     Where("Price", ">=", 100).
-    OrderBy("ID").
+    Where(oro.Field("Code").Like("P%")).
+    OrderByDesc("ID").
     Get(ctx)
-
-count, err := db.Use[Product]().
-    Where("Price", ">=", 100).
-    Count(ctx)
-
-affected, err := db.Use[Product]().
-    Where("Code", "P001").
-    Update(ctx, oro.Map{"Price": oro.Increment(20)})
-
-deleted, err := db.Use[Product]().
-    Where("Code", "P001").
-    Delete(ctx)
 ```
 
-Table writes use the same verbs and return the inserted row when supported:
+Nested conditions use explicit group methods:
 
 ```go
-row, err := db.Table("products").Create(ctx, oro.Map{
-    "code":  "P002",
-    "price": 200,
-})
-
-updated, err := db.Table("products").
-    Where("code", "P002").
-    Update(ctx, oro.Map{"price": 240})
-```
-
-Write options are explicit:
-
-```go
-db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
-db.Use[Product]().Create(ctx, product, oro.Omit("CreatedAt"))
-db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
-```
-
-## Conditions
-
-Use simple field conditions for common cases:
-
-```go
-db.Use[Product]().
-    Where("Price", ">=", 100).
+products, err := db.Use[Product]().
     Where("Status", "active").
-    Where("Code", "in", []string{"P001", "P002"})
-```
-
-Use condition objects when that reads better:
-
-```go
-db.Use[Product]().
-    Where(oro.Field("Price").Gte(100)).
-    Where(oro.Field("DeletedAt").IsNull()).
-    Where(oro.JSON("Meta").Path("color").Eq("red")).
-    Where(oro.FullText("Title", "Body").Match("orm"))
-```
-
-Use groups and conditional groups for nested logic:
-
-```go
-db.Use[Product]().
     WhereGroup(func(w *oro.WhereBuilder) {
-        w.Where("Status", "active").
-            OrWhere("Status", "draft")
+        w.Where("Price", ">=", 100).
+            OrWhere("Code", "like", "VIP%")
     }).
     WhereWhen(onlyAvailable, func(w *oro.WhereBuilder) {
         w.Where("Stock", ">", 0)
-    })
-```
-
-Subqueries are first-class:
-
-```go
-activeUsers := oro.Query(
-    db.Table("users").Select("id").Where("status", "active"),
-)
-
-orders, err := db.Table("orders").
-    WhereIn("user_id", activeUsers).
+    }).
     Get(ctx)
 ```
 
-## Relations
+Missing rows are not errors:
 
-Relations are methods. Models do not need embedded relation fields, which keeps package boundaries cleaner and helps avoid Go import cycles.
+- `First` and `Find` return `nil, nil` when no row exists.
+- `Get` returns an empty slice.
+
+## Table, Raw, and DTO Mapping
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Where("price", ">=", 100).
+    Get(ctx)
+```
+
+Raw SQL is explicit and still benefits from mapping:
+
+```go
+rows, err := db.Raw(
+    "select * from "+db.TableName("products")+" where price >= ?",
+    100,
+).MapTo[ProductView]().Get(ctx)
+```
+
+## Relations Without Import Cycles
+
+Relations are methods. Models do not need embedded relation fields.
 
 ```go
 type Article struct {
@@ -303,12 +269,6 @@ func (Article) Define(s *oro.SchemaBuilder) {
     s.Field("Title").String()
 }
 
-func (article Article) Cover() oro.Relation {
-    return oro.HasOne(article, "Cover", "Image").
-        ForeignKey("ArticleID").
-        ReferenceKey("ID")
-}
-
 func (article Article) Comments() oro.Relation {
     return oro.HasMany(article, "Comments", "Comment").
         ForeignKey("ArticleID").
@@ -316,29 +276,19 @@ func (article Article) Comments() oro.Relation {
 }
 ```
 
-Preload and read relations:
+Preload and read relation values:
 
 ```go
 article, err := db.Use[Article]().
-    With(Article{}.Cover()).
     With(Article{}.Comments(), func(q *oro.RelationQuery) {
         q.Where("Status", "approved").OrderByDesc("ID")
     }).
     First(ctx)
 
-cover, err := article.Cover().One[Image]()
 comments, err := article.Comments().Many[Comment]()
 ```
 
-Nested and dynamic relation loading can use strings where a static method is not practical:
-
-```go
-article, err := db.Use[Article]().
-    With("Comments.User.Profile").
-    First(ctx)
-```
-
-Relation filters and aggregates are available on model queries:
+Relation queries and aggregates:
 
 ```go
 articles, err := db.Use[Article]().
@@ -350,64 +300,24 @@ articles, err := db.Use[Article]().
     Get(ctx)
 ```
 
-Many-to-many pivot operations are handled through `db.Relation(...)`:
+## Writes
 
 ```go
-err := db.Relation(article.Tags()).Attach(ctx, tag)
-err = db.Relation(article.Tags()).Sync(ctx, []*Tag{tagA, tagB})
-err = db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{
-    "position": 10,
-})
+created, err := db.Use[Product]().Create(ctx, product, oro.Only("Code", "Price"))
+
+result, err := db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
+ids, err := result.IDs[uint64]()
+
+updated, err := db.Use[Product]().
+    Where("Code", "P001").
+    Update(ctx, oro.Map{"Price": oro.Increment(20)})
+
+deleted, err := db.Use[Product]().Where("Code", "P001").Delete(ctx)
 ```
 
-## Query Features
+Updates use `oro.Map` so zero values are never guessed.
 
-```go
-rows, err := db.Use[Order]().
-    Select("Status", oro.Count("*").As("total")).
-    Join("users", func(j *oro.Join) {
-        j.OnColumn("orders.user_id", "users.id")
-    }).
-    Where("users.status", "active").
-    GroupBy("Status").
-    Having("total", ">", 10).
-    OrderByDesc("total").
-    Limit(20).
-    Get(ctx)
-```
-
-Supported query features include:
-
-- `Select`, aggregate expressions, raw expressions, aliases
-- `Where`, `OrWhere`, `WhereGroup`, `WhereWhen`, `WhereRaw`
-- `WhereColumn`, `WhereIn`, `WhereExists`
-- `Join`, `LeftJoin`, `RightJoin`, `FullJoin`, `CrossJoin`, `JoinRaw`
-- `GroupBy`, `Having`, `HavingRaw`
-- `OrderBy`, `Limit`, `Offset`
-- `Count`, `Exists`, `Sum`, `Avg`, `Min[T]`, `Max[T]`
-- `Paginate`, `Chunk`, `Each`, `Stream`
-- JSON path conditions and full-text search conditions
-- pessimistic locks: `LockForUpdate`, `LockForShare`, `NoWait`, `SkipLocked`
-
-## Pagination
-
-Pagination follows the SeaORM-style explicit paginator:
-
-```go
-paginator := db.Use[Product]().
-    Where("Price", ">=", 100).
-    OrderBy("ID").
-    Paginate(20)
-
-page, err := paginator.Page(ctx, 1)
-total, err := paginator.Total(ctx)
-items, err := paginator.Items(ctx, 1)
-pages, err := paginator.Pages(ctx)
-```
-
-`First` returns `nil, nil` when no row is found. `Get` returns an empty slice when no rows are found.
-
-## Transactions
+## Transactions and Locks
 
 ```go
 err := db.Transaction(ctx, func(tx *oro.DB) error {
@@ -415,11 +325,8 @@ err := db.Transaction(ctx, func(tx *oro.DB) error {
         Where("Code", "P001").
         LockForUpdate().
         First(ctx)
-    if err != nil {
+    if err != nil || product == nil {
         return err
-    }
-    if product == nil {
-        return nil
     }
 
     _, err = tx.Use[Product]().
@@ -429,227 +336,68 @@ err := db.Transaction(ctx, func(tx *oro.DB) error {
 }, oro.TxAttempts(3), oro.TxIsolation(oro.LevelReadCommitted))
 ```
 
-Nested transactions use savepoints:
+Nested transactions use savepoints, and manual savepoints are available.
 
-```go
-tx, err := db.Begin(ctx)
-nested, err := tx.Begin(ctx)
-err = nested.Rollback(ctx)
-err = tx.Commit(ctx)
-```
-
-Manual savepoints are available:
-
-```go
-sp, err := tx.Savepoint(ctx)
-err = sp.Rollback(ctx)
-err = sp.Release(ctx)
-```
-
-## Multi Driver and Connections
-
-Oro is built on `database/sql`. Drivers are injected through connection config, so standard SQL drivers can be wrapped behind the Oro driver interface.
+## Multi Driver, Tenancy, and Sharding
 
 ```go
 db, err := oro.Open(oro.Config{
     Default:     "main",
     TablePrefix: "app_",
     Connections: map[string]oro.ConnectionConfig{
-        "main": {
-            Driver: sqlite.Open("app.db"),
-        },
-        "mysql": {
-            Driver: mysql.Open("root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false"),
-        },
-        "pgsql": {
-            Driver: pgsql.Open("postgres://root@localhost:5432/duxorm?sslmode=disable"),
-        },
+        "main":  {Driver: sqlite.Open("app.db")},
+        "mysql": {Driver: mysql.Open(mysqlDSN)},
+        "pgsql": {Driver: pgsql.Open(pgDSN)},
     },
 })
 ```
 
-Read replicas are connection-local:
+Tenant and sharding use one explicit input type: `oro.Map`.
 
 ```go
-Connections: map[string]oro.ConnectionConfig{
-    "main": {
-        Driver: sqlite.Open("primary.db"),
-        Reads: []oro.Driver{
-            sqlite.Open("replica-1.db"),
-            sqlite.Open("replica-2.db"),
-        },
-    },
-}
-```
-
-Use `db.TableName(...)` when composing raw SQL with configured table prefixes:
-
-```go
-rows, err := db.Raw(
-    "select count(*) as total from "+db.TableName("products")+" where price >= ?",
-    100,
-).First(ctx)
-```
-
-Models can declare their default connection:
-
-```go
-func (Order) Define(s *oro.SchemaBuilder) {
-    s.Connection("orders")
-    s.Table("orders")
-}
-```
-
-## Tenancy and Sharding
-
-Tenant values are explicit and use one semantic input type: `oro.Map`.
-
-```go
-db, err := oro.Open(oro.Config{
-    Tenant: &oro.TenantConfig{
-        Fields: []string{"TenantID", "AppID"},
-    },
-    Connections: connections,
-})
-
-rows, err := db.Tenant(oro.Map{
-    "TenantID": 10,
-    "AppID":    20,
-}).Use[Product]().Get(ctx)
-```
-
-Models can opt in, override tenant fields, or opt out:
-
-```go
-func (Product) Define(s *oro.SchemaBuilder) {
-    s.Tenant("TenantID", "AppID")
-}
-
-func (SystemLog) Define(s *oro.SchemaBuilder) {
-    s.NoTenant()
-}
-```
-
-Sharding is also explicit:
-
-```go
-func (Order) Define(s *oro.SchemaBuilder) {
-    s.Shard("orders", "TenantID")
-}
+rows, err := db.Tenant(oro.Map{"TenantID": 10, "AppID": 20}).
+    Use[Product]().
+    Get(ctx)
 
 orders, err := db.Use[Order]().
     Shard(oro.Map{"TenantID": 10}).
     Get(ctx)
 ```
 
-## Hooks, Events, Cache, Serialization
+## Benchmarks
 
-Model hooks:
+Benchmarks run against SQLite, MySQL, and PostgreSQL using the same database drivers for each ORM. The documentation reports the median of 10 runs.
 
-```go
-func (product *Product) BeforeCreate(ctx context.Context, h *oro.Hook) error {
-    product.Code = strings.TrimSpace(product.Code)
-    return nil
-}
-```
+| Scenario | SQLite | MySQL | PostgreSQL |
+| :--- | :--- | :--- | :--- |
+| CreateMany100 | Oro leads this run | Oro leads this run | Oro is near the lead |
+| FirstByCode | Oro leads this run | Oro leads this run | Oro is competitive |
+| WhereList | Oro leads this run | Oro leads this run | Oro is competitive |
+| DeleteByCode | Oro leads this run | Oro leads this run | Oro is competitive |
 
-Global events:
+See the full benchmark tables, environment, versions, and commands in the [Performance Benchmarks](https://duxweb.github.io/oro/advanced/performance-benchmarks/) page.
 
-```go
-unsubscribe := db.On(oro.AfterQuery, func(ctx context.Context, event *oro.Event) error {
-    return nil
-})
-defer unsubscribe()
-```
+## Comparison
 
-Query cache:
-
-```go
-db, err := oro.Open(oro.Config{
-    Cache: oro.NewMemoryCacheStore(),
-    Connections: connections,
-})
-
-rows, err := db.Use[Product]().
-    Cache(time.Minute).
-    CacheTags("products").
-    Get(ctx)
-
-err = db.Cache().ForgetTag(ctx, "products")
-```
-
-API-safe serialization hides fields declared with `Hidden()` and includes loaded relations:
-
-```go
-payload := oro.Serialize(product)
-payloadWithHidden := oro.Serialize(product, oro.ShowHidden())
-```
-
-## ORM Comparison
-
-| ORM | Language | Main workflow | Strength | Tradeoff | Oro position |
-| --- | --- | --- | --- | --- | --- |
-| [GORM](https://gorm.io/docs/) | Go | Struct models + tags + AutoMigrate | Mature Go ecosystem, broad feature set | Tag-heavy metadata, zero-value writes can be surprising, association APIs are broad | Keeps Auto Sync idea, but uses `Define` and explicit `Map` writes |
-| [Laravel Eloquent](https://laravel.com/docs/12.x/eloquent) | PHP | Active Record models + migrations | Extremely readable relationship and query syntax | Migration files are separate; dynamic typing does not map to Go directly | Borrows method-based relations and fluent query style |
-| [SeaORM](https://www.sea-ql.org/SeaORM/docs/index/) | Rust | Entity/query APIs, often generated from schema | Strong typing, explicit relation loaders, async Rust design | Entity generation and Rust ceremony are part of the workflow | Borrows typed relation access without requiring codegen |
-| [Ent](https://entgo.io/docs/getting-started/) | Go | Schema definitions + code generation | Strong compile-time API and graph model | Codegen is central; generated package layout affects architecture | Chooses no-codegen and smaller public surface |
-| [Prisma](https://www.prisma.io/docs/orm) | Node.js/TS | Prisma schema + generated client | Excellent developer experience and type-safe client | Requires schema file and generated client | Keeps the simple client feel, but stores schema beside Go model |
-| [TypeORM](https://typeorm.io/) | Node.js/TS | Decorators/entities or schema objects | Familiar ORM model for TypeScript apps | Runtime metadata/decorator behavior can be opaque | Keeps direct query ergonomics without decorators |
-
-## Release Readiness
-
-Oro is close to a public preview release:
-
-- implemented: SQLite, MySQL, PostgreSQL drivers
-- implemented: schema sync, CRUD, table queries, raw queries, relation loading, many-to-many, dynamic relations
-- implemented: transactions, savepoints, locks, upsert, pagination, aggregates, scopes, hooks/events, cache, tenancy, sharding
-- tested: shared SQLite/MySQL/PostgreSQL integration matrix
-- documented: README, examples, and Astro documentation site
-
-Before calling it `v1.0`, the remaining release work should be treated as product hardening:
-
-- freeze public API names and option semantics
-- run real project dogfooding against at least one non-trivial service
-- add CI for Go 1.27, SQLite, MySQL, and PostgreSQL
-- confirm license, module tags, release notes, and compatibility policy
-- switch from `go1.27rc1` to stable Go 1.27 when available
-
-Recommended first tag: **`v0.1.0` or `v0.9.0-preview`**, not `v1.0.0`.
-
-## Tests
-
-Use Go 1.27:
-
-```bash
-source ~/.gvm/scripts/gvm
-gvm use go1.27rc1
-go test ./...
-go test -race ./...
-```
-
-MySQL and PostgreSQL integration tests use these defaults when environment variables are not set:
-
-```bash
-ORO_MYSQL_DSN='root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false'
-ORO_PGSQL_DSN='postgres://root@localhost:5432/duxorm?sslmode=disable'
-```
-
-## Examples
-
-```bash
-go run ./examples/quickstart
-go run ./examples/crud
-go run ./examples/relations
-go run ./examples/transactions
-go run ./examples/multi-driver
-```
+| Project | Workflow | Strength | Tradeoff | Oro position |
+| :--- | :--- | :--- | :--- | :--- |
+| GORM | Struct models + tags + AutoMigrate | Mature, broad ecosystem | Tag-heavy metadata and broad association behavior | Keeps auto-sync style, makes schema and writes explicit |
+| Ent | Schema definitions + code generation | Strong compile-time graph API | Codegen is central | No codegen, smaller public surface |
+| Bun | SQL-first builder + models | Fast and close to SQL | Less model-level automation | Keeps SQL clarity, adds schema sync and relation methods |
+| XORM | Traditional ORM mapping | Simple model CRUD | Older API shape | More explicit generics and sync rules |
+| Oro | Plain structs + `Define` + generic queries | Clear boundaries, no codegen, multi-driver | Requires Go 1.27+ generics | Designed for modern Go applications |
 
 ## Documentation
 
-The full documentation website lives in `docs/` and is built with Astro Starlight.
+- English docs: <https://duxweb.github.io/oro/>
+- 中文文档: <https://duxweb.github.io/oro/zh-cn/>
+- Examples: [`examples/`](examples/)
+- Benchmarks: [`benchmarks/ormbench/`](benchmarks/ormbench/)
 
-```bash
-cd docs
-pnpm install
-pnpm run dev
-```
+## Contributing
+
+Oro is still pre-1.0, so API feedback is valuable. Please open issues for naming problems, missing driver capabilities, schema sync edge cases, benchmark gaps, and real-world adoption feedback.
+
+## License
+
+MIT

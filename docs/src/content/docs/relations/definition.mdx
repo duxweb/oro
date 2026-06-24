@@ -1,0 +1,61 @@
+---
+title: Relation Definition
+description: Define BelongsTo, HasOne, HasMany, ManyToMany, and dynamic relations with model methods.
+---
+
+Oro relations are model methods returning `oro.Relation`. They are not embedded fields on the struct.
+
+```go
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+This keeps models split across packages without forcing import cycles.
+
+## HasOne
+
+```go
+func (article Article) Cover() oro.Relation {
+    return oro.HasOne(article, "Cover", "Image").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## HasMany
+
+```go
+func (article Article) Comments() oro.Relation {
+    return oro.HasMany(article, "Comments", "Comment").ForeignKey("ArticleID")
+}
+```
+
+## BelongsTo
+
+```go
+func (comment Comment) Article() oro.Relation {
+    return oro.BelongsTo(comment, "Article", "Article").
+        ForeignKey("ArticleID").
+        ReferenceKey("ID")
+}
+```
+
+## Many-to-many
+
+```go
+func (article Article) Tags() oro.Relation {
+    return oro.ManyToMany(article, "Tags", "Tag").
+        JoinTable("article_tags").
+        ForeignKey("ArticleID").
+        RelatedKey("TagID")
+}
+```
+
+The join table can also be represented by a model when it has business fields.
+
+## Dynamic relation names
+
+Static relation methods are preferred. String names are supported where dynamic many-to-many or plugin-defined relations need them.

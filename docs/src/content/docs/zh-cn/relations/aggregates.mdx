@@ -1,0 +1,153 @@
+---
+title: 关联聚合
+description: 使用 WithCount、WithExists、WithSum、WithAvg、WithMin、WithMax 和关系聚合表达式加载统计。
+---
+
+关系聚合把关系统计结果加载到主模型上，常用于列表页展示评论数、是否有封面、订单总额、最高评分等。
+
+聚合结果会写入主模型上的字段。建议把接收字段声明为 `Virtual()`，让“这是查询派生字段”在模型定义里可见。
+
+## 定义虚拟字段
+
+```go
+type Article struct {
+    oro.Model
+    Title           string
+    CommentsCount   int64
+    CommentsExists  bool
+    CommentsScoreSum int64
+}
+
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Table("articles")
+    s.Field("Title").String()
+    s.Field("CommentsCount").Virtual()
+    s.Field("CommentsExists").Virtual()
+    s.Field("CommentsScoreSum").Column("comments_score_sum").Virtual()
+}
+```
+
+`Virtual` 字段不参与建表，只接收查询结果。
+
+## WithCount
+
+```go
+articles, err := db.Use[Article]().
+    WithCount(Article{}.Comments()).
+    Get(ctx)
+```
+
+默认别名按关系名生成，例如 `CommentsCount`。
+
+如果字段名不符合默认规则，可以用表达式自定义别名：
+
+```go
+articles, err := db.Use[Article]().
+    Select(
+        "ID",
+        "Title",
+        oro.CountOf(Article{}.Comments()).As("comments_total"),
+    ).
+    Get(ctx)
+```
+
+然后定义对应虚拟字段：
+
+```go
+CommentsTotal int64
+
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Field("CommentsTotal").Column("comments_total").Virtual()
+}
+```
+
+## WithExists
+
+```go
+articles, err := db.Use[Article]().
+    WithExists(Article{}.Comments()).
+    Get(ctx)
+```
+
+适合只关心是否存在关系，不需要加载完整关系对象。相比 `With` 预加载，`WithExists` 返回数据更小。
+
+## Sum / Avg / Min / Max
+
+```go
+articles, err := db.Use[Article]().
+    WithSum(Article{}.Comments(), "Score").
+    WithAvg(Article{}.Comments(), "Score").
+    WithMin(Article{}.Comments(), "Score").
+    WithMax(Article{}.Comments(), "Score").
+    Get(ctx)
+```
+
+关系字段使用目标模型的 Go 字段名。
+
+默认别名为 `关系名 + 字段名 + 聚合函数` 的 snake_case，例如 `WithSum(Article{}.Comments(), "Score")` 会映射到 `comments_score_sum`。如果 Go 字段名不能自然匹配，使用 `Column("comments_score_sum")` 或在 `Select` 表达式里自定义 `As(...)`。
+
+这些方法都支持可选回调：
+
+```go
+articles, err := db.Use[Article]().
+    WithSum(Article{}.Comments(), "Score", func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    }).
+    Get(ctx)
+```
+
+## Select 表达式写法
+
+所有关系聚合都有表达式形式：
+
+```go
+articles, err := db.Use[Article]().Select(
+    "ID",
+    "Title",
+    oro.CountOf(Article{}.Comments()).As("comments_count"),
+    oro.ExistsOf(Article{}.Cover()).As("has_cover"),
+    oro.SumOf(Article{}.Comments(), "Score").As("score_sum"),
+    oro.AvgOf(Article{}.Comments(), "Score").As("score_avg"),
+    oro.MinOf(Article{}.Comments(), "Score").As("score_min"),
+    oro.MaxOf(Article{}.Comments(), "Score").As("score_max"),
+).Get(ctx)
+```
+
+带过滤：
+
+```go
+oro.CountOf(Article{}.Comments()).
+    As("approved_comments").
+    Filter(func(q *oro.RelationQuery) {
+        q.Where("Status", "approved")
+    })
+```
+
+## 字符串关系
+
+动态关系或插件化场景可以使用字符串关系：
+
+```go
+articles, err := db.Use[Article]().WithCount("Comments").Get(ctx)
+```
+
+普通代码优先使用关系方法，重构更安全。
+
+## 和 With 的区别
+
+| 需求 | 推荐 |
+| --- | --- |
+| 展示数量、是否存在、总额 | 关系聚合 |
+| 展示关系明细 | `With` 预加载 |
+| 按关系过滤主数据 | `WhereHas` |
+| 已有实例查关系目标 | `For` |
+
+关系聚合不会加载关系对象，不能通过 `article.Comments().Many[Comment]()` 读取明细。
+
+## 性能建议
+
+- 列表页需要数量时，用 `WithCount`，不要预加载全部关系再计数；
+- 只需要布尔状态时，用 `WithExists`；
+- 聚合字段要定义为 `Virtual`，避免同步建表；
+- 复杂聚合建议配合 `Select` 表达式显式命名；
+- 同时使用多个聚合时，关注生成 SQL 和数据库索引。

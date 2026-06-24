@@ -1,0 +1,149 @@
+---
+title: 写入选项
+description: Only、Omit、BatchSize、ConflictBy、CheckVersion、CreateResult 和写入表达式参考。
+---
+
+写入选项用于明确表达写入字段、批量大小、冲突处理和乐观锁策略。Oro 不猜测 Go 零值是否是用户主动传入。
+
+## Only
+
+`Only` 只写指定字段。
+
+```go
+product := &Product{Code: "P001"}
+
+created, err := db.Use[Product]().Create(ctx, product, oro.Only("Code"))
+```
+
+适合让数据库默认值接管未写字段。
+
+## Omit
+
+`Omit` 排除指定字段。
+
+```go
+created, err := db.Use[Product]().Create(ctx, product, oro.Omit("Status"))
+```
+
+`Omit` 不是“写入 NULL”，而是不把字段放进 SQL。创建时数据库默认值是否生效取决于表结构；更新时该字段保持原值。
+
+## BatchSize
+
+```go
+result, err := db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
+```
+
+优先级：
+
+1. 单次写入 `oro.BatchSize(size)`；
+2. 全局 `Config.Batch.CreateSize`；
+3. 默认批量大小。
+
+## CreateResult
+
+`CreateMany` 返回轻量结果：
+
+```go
+result, err := db.Table("products").CreateMany(ctx, []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+})
+
+ids, err := result.IDs[uint64]()
+```
+
+| 字段/方法 | 含义 |
+| --- | --- |
+| `RowsAffected` | 影响行数 |
+| `PrimaryKey` | 主键列名 |
+| `IDs[T]()` | 返回指定类型的主键列表 |
+| `FirstID[T]()` | 返回第一条主键 |
+| `IDCount()` | 主键数量 |
+
+如果需要完整返回行，使用 `CreateManyResult`。
+
+## ConflictBy
+
+`ConflictBy` 用于 upsert 或冲突处理。
+
+```go
+product, err := db.Use[Product]().Upsert(ctx, &Product{
+    Code:  "P001",
+    Price: 120,
+}, oro.ConflictBy("Code").Update("Price"))
+```
+
+可用策略：
+
+| 方法 | 用途 |
+| --- | --- |
+| `ConflictBy(fields...).DoNothing()` | 冲突时不处理 |
+| `ConflictBy(fields...).Update(fields...)` | 冲突时更新指定字段 |
+| `ConflictBy(fields...).UpdateAll()` | 冲突时更新所有可写字段 |
+| `ConflictBy(fields...).UpdateMap(values)` | 冲突时使用指定 Map 更新 |
+
+模型查询使用 Go 字段名，裸表查询使用数据库列名。
+
+## UpsertMany
+
+```go
+created, err := db.Use[Product]().UpsertMany(ctx, products, oro.ConflictBy("Code").Update("Price"))
+```
+
+`UpsertMany` 逐条执行语义更稳定，适合业务写入。大量导入优先评估 `CreateMany` 加数据库原生批量方案。
+
+## 乐观锁
+
+字段定义：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Version").UnsignedBigInt().Default(1).OptimisticLock()
+}
+```
+
+更新时校验版本：
+
+```go
+rows, err := db.Use[Product]().
+    Where("ID", product.ID).
+    Update(ctx, oro.Map{"Price": 120}, oro.CheckVersion(product.Version))
+```
+
+版本不匹配时返回 `oro.ErrStaleData`。
+
+## 写入表达式
+
+更新支持自增、自减和 Raw 表达式。
+
+```go
+rows, err := db.Use[Product]().
+    Where("ID", id).
+    Update(ctx, oro.Map{
+        "Stock": oro.Decrement(1),
+        "Sold":  oro.Increment(1),
+    })
+```
+
+Raw 表达式：
+
+```go
+rows, err := db.Table("products").Where("id", id).Update(ctx, oro.Map{
+    "updated_at": oro.Raw("CURRENT_TIMESTAMP"),
+})
+```
+
+## Unsafe update/delete
+
+更新和删除必须带条件，避免误操作整表。
+
+```go
+_, err := db.Use[Product]().Update(ctx, oro.Map{"Status": "archived"})
+// err 是 oro.ErrUnsafeUpdate
+```
+
+需要全表操作时，建议显式写永真条件，让代码审查可以看见意图：
+
+```go
+_, err := db.Table("logs").WhereRaw("1 = 1").Delete(ctx)
+```

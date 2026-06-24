@@ -1,0 +1,85 @@
+---
+title: Cache
+description: Query cache, tags, invalidation, and cache store interface.
+---
+
+Oro has two different cache categories:
+
+- internal performance cache, used by the ORM and invisible to application semantics;
+- query result cache, explicitly enabled by application code.
+
+Do not treat internal cache as business cache.
+
+## Internal performance cache
+
+| Cache | Purpose |
+| --- | --- |
+| Statement cache | reuse prepared statements |
+| SQL cache | reuse compiled SQL from query AST |
+| Scan cache | reuse struct scan plans and reduce reflection |
+
+```go
+db, err := oro.Open(oro.Config{
+    StatementCache: oro.StatementCacheConfig{MaxSize: 128},
+    SQLCache:       oro.SQLCacheConfig{MaxSize: 256},
+    ScanCache:      oro.ScanCacheConfig{MaxSize: 256},
+})
+```
+
+Disable only when benchmarking or debugging driver behavior:
+
+```go
+db, err := oro.Open(oro.Config{
+    SQLCache: oro.SQLCacheConfig{Disabled: true},
+})
+```
+
+## Query result cache
+
+Configure a `CacheStore`, then opt in per query:
+
+```go
+db, err := oro.Open(oro.Config{
+    Cache: oro.NewMemoryCacheStore(),
+})
+
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    Cache(30 * time.Second).
+    Get(ctx)
+```
+
+`Cache(ttl)` caches read results only. Writes are not cached and models do not become second-level cached automatically.
+
+## Cache keys
+
+The default key includes connection, tenant, shard, table/model, SQL, arguments, preloads, and locks.
+
+Use an explicit key when the application needs stable business keys:
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    Cache(30 * time.Second).
+    CacheKey("products:active").
+    Get(ctx)
+```
+
+If you set a custom key, include tenant, locale, filters, and other business dimensions yourself.
+
+## Tags and invalidation
+
+```go
+products, err := db.Use[Product]().
+    Cache(time.Minute).
+    CacheTags("products", "tenant:10").
+    Get(ctx)
+
+err = db.Cache().ForgetTag(ctx, "products")
+```
+
+Tags are the recommended invalidation mechanism for list and detail APIs.
+
+## Store interface
+
+Applications can use the in-memory store for tests and implement their own store for Redis or another backend. The store boundary should be at the result-cache layer, not inside SQL compilation or scanning.

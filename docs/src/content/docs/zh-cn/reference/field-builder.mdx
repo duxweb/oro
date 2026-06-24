@@ -1,0 +1,180 @@
+---
+title: 字段构建器
+description: SchemaBuilder、FieldBuilder、字段类型、索引、隐藏字段、乐观锁和模型级配置参考。
+---
+
+Oro 不使用 ORM tag 描述数据库结构。模型通过 `Define` 显式定义表结构，Go 字段负责承载业务数据。
+
+```go
+type Product struct {
+    oro.Model
+    Code   string
+    Price  uint
+    Status string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Size(64).Unique()
+    s.Field("Price").Uint().Default(0)
+    s.Field("Status").String().Default("active").Index()
+}
+```
+
+## SchemaBuilder
+
+| 方法 | 用途 |
+| --- | --- |
+| `Table(name)` | 设置逻辑表名 |
+| `Connection(name)` | 设置模型默认连接 |
+| `Shard(group, fields...)` | 设置模型分片组和分片字段 |
+| `Tenant(fields...)` | 设置模型租户字段 |
+| `NoTenant()` | 当前模型不应用全局租户 |
+| `Field(name)` | 获取字段构建器，`name` 是 Go 字段名 |
+| `Index(name, fields...)` | 定义组合普通索引 |
+| `Unique(name, fields...)` | 定义组合唯一索引 |
+| `FullText(name, fields...)` | 定义组合全文索引 |
+
+`Field(name)` 使用 Go 字段名。没有设置 `Column` 时，Oro 自动把 Go 字段名转为 snake_case 列名。
+
+```go
+s.Field("CategoryID").UnsignedBigInt().Column("category_id")
+```
+
+## 基础类型
+
+| 方法 | 逻辑类型 | 典型用途 |
+| --- | --- | --- |
+| `String()` | string | 短文本 |
+| `Text()` | text | 长文本 |
+| `Bool()` | bool | 布尔值 |
+| `Int()` | int | 有符号整数 |
+| `BigInt()` | int64 | 大整数 |
+| `Uint()` / `UnsignedInt()` | uint | 无符号整数 |
+| `UnsignedBigInt()` | uint64 | 无符号大整数 |
+| `Decimal(precision, scale)` | decimal | 金额、精度数值 |
+| `Float()` | float | 浮点数 |
+| `Double()` | double | 双精度浮点 |
+| `Binary()` | binary | 二进制数据 |
+| `JSON()` | json | JSON 字段 |
+| `UUID()` | uuid | UUID |
+| `Timestamp()` | time.Time | 时间戳 |
+| `Date()` | date | 日期 |
+| `Time()` | time | 时间 |
+
+## 语义类型
+
+语义类型会映射为各数据库最合适的列类型，便于跨库保持统一定义。
+
+| 方法 | 用途 |
+| --- | --- |
+| `Enum(values...)` | 枚举值 |
+| `Email()` | 邮箱 |
+| `URL()` | URL |
+| `IP()` | IP 地址 |
+| `MAC()` | MAC 地址 |
+| `Phone()` | 电话 |
+| `Slug()` | slug |
+| `Color()` | 颜色值 |
+| `StringArray()` | 字符串数组 |
+| `IntArray()` | 整数数组 |
+| `Point()` | 坐标点 |
+
+语义类型不是验证器。应用层仍应做输入校验。
+
+## 字段属性
+
+| 方法 | 用途 |
+| --- | --- |
+| `Column(name)` | 设置数据库列名 |
+| `Size(size)` | 设置长度 |
+| `NotNull()` | 设置非空 |
+| `Nullable()` | 设置可空 |
+| `Default(value)` | 设置数据库默认值 |
+| `DefaultExpr(expr)` | 设置数据库默认表达式 |
+| `Comment(text)` | 设置字段注释 |
+| `Primary()` | 设置主键 |
+| `Ignore()` | ORM 完全忽略字段 |
+| `Virtual()` | 查询/输出虚拟字段，不参与同步 |
+| `Hidden()` | 序列化时默认隐藏 |
+| `OptimisticLock()` | 标记乐观锁字段 |
+
+示例：
+
+```go
+func (User) Define(s *oro.SchemaBuilder) {
+    s.Field("Email").Email().Size(191).Unique()
+    s.Field("Password").String().Size(255).Hidden()
+    s.Field("Version").UnsignedBigInt().Default(1).OptimisticLock()
+    s.Field("Profile").JSON().Nullable()
+    s.Field("Score").Decimal(12, 2).Default("0.00")
+}
+```
+
+字段备注：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").String().Size(64).Comment("商品编码")
+    s.Field("Price").Uint().Comment("销售价格，单位分")
+}
+```
+
+`Comment` 会进入模型结构元数据，并在驱动支持时同步到数据库：
+
+| 驱动 | 行为 |
+| --- | --- |
+| MySQL | 在列定义里生成 `comment '...'` |
+| PostgreSQL | 额外生成 `comment on column ... is '...'` |
+| SQLite | SQLite 没有原生列备注，保留在 ORM 元数据中，不生成 DDL |
+
+## 索引
+
+字段级索引：
+
+```go
+s.Field("Code").String().Unique()
+s.Field("Status").String().Index()
+s.Field("Title").String().FullText()
+```
+
+指定索引名：
+
+```go
+s.Field("Code").String().Unique("products_code_unique")
+```
+
+组合索引：
+
+```go
+s.Index("orders_tenant_status_idx", "TenantID", "Status")
+s.Unique("users_email_app_unique", "Email", "AppID")
+s.FullText("articles_search_fulltext", "Title", "Content")
+```
+
+组合索引里的字段名仍然是 Go 字段名。
+
+## 可空字段
+
+推荐使用 `oro.Null[T]` 表达数据库 `NULL`，避免到处解引用指针。
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[int]
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Stock").Int().Nullable()
+}
+```
+
+`oro.Null[T]` 能区分有效值和空值，并支持 JSON 序列化。
+
+## 字段定义规则
+
+- `Define` 是模型结构的唯一来源；
+- tag 只用于 JSON 等 Go 标准序列化，不用于 ORM 结构定义；
+- `Column` 只在字段名与数据库列名不一致时使用；
+- 同一个字段不要定义多个冲突类型；
+- 删除、危险类型变更等操作由 `Sync` 的安全策略处理。

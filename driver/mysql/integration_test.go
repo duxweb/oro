@@ -6,6 +6,7 @@ import (
 
 	"github.com/duxweb/oro/driver/internal/integrationtest"
 	"github.com/duxweb/oro/driver/mysql"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func TestMySQLIntegrationEntry(t *testing.T) {

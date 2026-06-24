@@ -16,6 +16,7 @@ import (
 	orosqlite "github.com/duxweb/oro/driver/sqlite"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/mysqldialect"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -171,12 +172,15 @@ func benchOroCreateMany100(b *testing.B) {
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
 		products := makeOroBenchProducts(createManyCode(index), 100)
-		created, err := db.Use[oroBenchProduct]().CreateMany(ctx, products)
+		result, err := db.Use[oroBenchProduct]().CreateMany(ctx, products)
 		if err != nil {
 			b.Fatal(err)
 		}
-		if len(created) != len(products) {
-			b.Fatalf("expected %d created rows, got %d", len(products), len(created))
+		if result.RowsAffected != int64(len(products)) {
+			b.Fatalf("expected %d created rows, got %d", len(products), result.RowsAffected)
+		}
+		if result.IDCount() != len(products) {
+			b.Fatalf("expected %d ids, got %d", len(products), result.IDCount())
 		}
 	}
 }
@@ -809,8 +813,9 @@ func resetBunBenchTables(b *testing.B, ctx context.Context, db *bun.DB) {
 }
 
 type benchDriverConfig struct {
-	name string
-	dsn  string
+	name         string
+	dsn          string
+	sqliteDriver string
 }
 
 func currentBenchConfig() benchDriverConfig {
@@ -824,7 +829,11 @@ func currentBenchConfig() benchDriverConfig {
 	case "pgsql", "postgres", "postgresql":
 		return benchDriverConfig{name: "pgsql", dsn: envOr("ORO_BENCH_DSN", "postgres://root@localhost/duxorm?sslmode=disable")}
 	default:
-		return benchDriverConfig{name: "sqlite", dsn: memoryDSN()}
+		return benchDriverConfig{
+			name:         "sqlite",
+			dsn:          memoryDSN(),
+			sqliteDriver: sqliteBenchDriver(),
+		}
 	}
 }
 
@@ -835,6 +844,13 @@ func (config benchDriverConfig) oroDriver() oro.Driver {
 	case "pgsql":
 		return oropgsql.Open(config.dsn)
 	default:
+		if config.sqliteDriver == "mattn" {
+			sqlDB, err := sql.Open("sqlite3", config.dsn)
+			if err != nil {
+				return benchErrorDriver{err: err}
+			}
+			return orosqlite.Wrap(sqlDB, orosqlite.OwnsDB(true))
+		}
 		return orosqlite.Open(config.dsn)
 	}
 }
@@ -857,6 +873,9 @@ func (config benchDriverConfig) xormDriverName() string {
 	case "pgsql":
 		return "pgx"
 	default:
+		if config.sqliteDriver == "mattn" {
+			return "sqlite3"
+		}
 		return "sqlite"
 	}
 }
@@ -872,6 +891,9 @@ func (config benchDriverConfig) sqlDriverName() string {
 	case "pgsql":
 		return "pgx"
 	default:
+		if config.sqliteDriver == "mattn" {
+			return "sqlite3"
+		}
 		return sqliteshim.ShimName
 	}
 }
@@ -908,6 +930,46 @@ func envOr(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func sqliteBenchDriver() string {
+	name := strings.ToLower(strings.TrimSpace(os.Getenv("ORO_BENCH_SQLITE_DRIVER")))
+	switch name {
+	case "", "modernc", "purego", "pure":
+		return "modernc"
+	case "mattn", "sqlite3", "cgo":
+		return "mattn"
+	default:
+		return "modernc"
+	}
+}
+
+type benchErrorDriver struct {
+	err error
+}
+
+func (driver benchErrorDriver) Name() string {
+	return "error"
+}
+
+func (driver benchErrorDriver) Open(context.Context) (*sql.DB, error) {
+	return nil, driver.err
+}
+
+func (driver benchErrorDriver) Dialect() oro.Dialect {
+	return orosqlite.Open(":memory:").Dialect()
+}
+
+func (driver benchErrorDriver) Inspector(db *sql.DB) oro.Inspector {
+	return orosqlite.Open(":memory:").Inspector(db)
+}
+
+func (driver benchErrorDriver) TranslateError(err error) error {
+	return err
+}
+
+func (driver benchErrorDriver) Owned() bool {
+	return false
 }
 
 var benchDBCounter atomic.Uint64

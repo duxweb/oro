@@ -1,0 +1,48 @@
+---
+title: Preloading
+description: With, nested preloading, constrained preloading, and relation result access.
+---
+
+`With` preloads relations while querying the main model.
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Cover()).
+    With(Article{}.Comments()).
+    Get(ctx)
+```
+
+## Constrained preload
+
+```go
+articles, err := db.Use[Article]().
+    With(Article{}.Comments(), func(q *oro.RelationQuery) {
+        q.Where("Status", "approved").OrderByDesc("ID")
+    }).
+    Get(ctx)
+```
+
+The callback only affects the relation query.
+
+## Nested preload
+
+```go
+articles, err := db.Use[Article]().
+    With("Comments.User.Profile").
+    Get(ctx)
+```
+
+String paths are useful for nested and dynamic relation paths. Static methods remain preferred when available.
+
+## Access loaded values
+
+```go
+cover, err := article.Cover().One[Image]()
+comments, err := article.Comments().Many[Comment]()
+```
+
+If a relation was not loaded, accessors return the relation state error rather than implicitly querying the database.
+
+## Cross-connection relations
+
+Relation preloading can use different model connections. Each related query follows the related model's connection metadata unless overridden.

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 
 	"github.com/duxweb/oro"
-	_ "modernc.org/sqlite"
 )
 
 type driver struct {
@@ -13,7 +12,7 @@ type driver struct {
 }
 
 func Open(dsn string, options ...Option) oro.Driver {
-	config := driverConfig{dsn: dsn, owned: true}
+	config := driverConfig{driverName: "sqlite", dsn: dsn, owned: true}
 	for _, option := range options {
 		option(&config)
 	}
@@ -36,7 +35,7 @@ func (driver driver) Open(ctx context.Context) (*sql.DB, error) {
 	if driver.config.db != nil {
 		return driver.config.db, nil
 	}
-	return sql.Open("sqlite", driver.config.dsn)
+	return sql.Open(driver.config.driverName, driver.config.dsn)
 }
 
 func (driver driver) Dialect() oro.Dialect {

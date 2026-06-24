@@ -6,6 +6,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 type Product struct {

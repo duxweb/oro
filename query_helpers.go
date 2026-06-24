@@ -786,6 +786,9 @@ func queryFirstRowPrepared(ctx context.Context, db *DB, spec QuerySpec) (Map, er
 }
 
 func execRawRows(ctx context.Context, db *DB, raw RawSpec, cache CacheSpec, timeout time.Duration) ([]Map, error) {
+	if err := validateRawSQL(db, raw.SQL); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, db.session.connection)
 	if err != nil {
 		return nil, err
@@ -812,6 +815,9 @@ func execRawRows(ctx context.Context, db *DB, raw RawSpec, cache CacheSpec, time
 }
 
 func execRaw(ctx context.Context, db *DB, raw RawSpec, timeout time.Duration) (int64, error) {
+	if err := validateRawSQL(db, raw.SQL); err != nil {
+		return 0, err
+	}
 	conn, err := connectionForQuery(db, db.session.connection)
 	if err != nil {
 		return 0, err
@@ -825,6 +831,64 @@ func execRaw(ctx context.Context, db *DB, raw RawSpec, timeout time.Duration) (i
 		return 0, translateQueryError(conn, err)
 	}
 	return result.RowsAffected, nil
+}
+
+func validateRawSQL(db *DB, sql string) error {
+	if db != nil && db.runtime != nil && db.runtime.Config.AllowRawMultiStatement {
+		return nil
+	}
+	if hasMultipleSQLStatements(sql) {
+		return &Error{Op: "raw", Kind: ErrInvalidQuery}
+	}
+	return nil
+}
+
+func hasMultipleSQLStatements(sql string) bool {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	seenTerminator := false
+	for _, char := range sql {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inSingle || inDouble {
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if inSingle && char == '\'' {
+				inSingle = false
+			}
+			if inDouble && char == '"' {
+				inDouble = false
+			}
+			continue
+		}
+		switch char {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case ';':
+			seenTerminator = true
+		default:
+			if seenTerminator && !isSQLWhitespace(char) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSQLWhitespace(char rune) bool {
+	switch char {
+	case ' ', '\t', '\n', '\r':
+		return true
+	default:
+		return false
+	}
 }
 
 func updateRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
@@ -896,6 +960,32 @@ func createRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
 		return []Map{}, nil
 	}
 	return result.Rows, nil
+}
+
+func createResultRows(ctx context.Context, db *DB, spec WriteSpec) (*CreateResult, error) {
+	conn, err := connectionForQuery(db, spec.Connection)
+	if err != nil {
+		return nil, err
+	}
+	tableNames(db).ApplyWrite(&spec)
+	spec.Returning = false
+	compiled, err := compileInsertSQL(db, conn, spec)
+	if err != nil {
+		return nil, err
+	}
+	result, err := execCompiled(ctx, db, execForQueryRuntime(db, conn), spec.QuerySpec, compiled, "create")
+	if err != nil {
+		return nil, translateQueryError(conn, err)
+	}
+	primaryColumns, err := primaryColumns(ctx, conn, spec)
+	if err != nil || len(primaryColumns) != 1 {
+		return &CreateResult{RowsAffected: result.RowsAffected}, err
+	}
+	primaryValues, err := createdPrimaryValues(conn, spec.Values, primaryColumns[0], result)
+	if err != nil {
+		return &CreateResult{RowsAffected: result.RowsAffected, PrimaryKey: primaryColumns[0]}, nil
+	}
+	return createResultFromIDs(primaryColumns[0], primaryValues, result.RowsAffected), nil
 }
 
 func upsertRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
@@ -1704,6 +1794,12 @@ func convertModelSelects(schema *ModelSchema, spec *QuerySpec) error {
 		if item.Expr == "__oro_relation_exists__" {
 			continue
 		}
+		if isStructuredSelectExpression(item.Expr) {
+			if err := convertModelSelectExpression(schema, &spec.Select[index]); err != nil {
+				return err
+			}
+			continue
+		}
 		if item.Raw {
 			if err := convertModelSelectExpression(schema, &spec.Select[index]); err != nil {
 				return err
@@ -1758,20 +1854,54 @@ func convertModelSelects(schema *ModelSchema, spec *QuerySpec) error {
 	return nil
 }
 
+func isStructuredSelectExpression(expr string) bool {
+	switch expr {
+	case "__oro_aggregate__", "__oro_fulltext_score__":
+		return true
+	default:
+		return false
+	}
+}
+
 func convertModelSelectExpression(schema *ModelSchema, item *SelectExpr) error {
-	if item == nil || item.Expr != "__oro_fulltext_score__" || len(item.Args) == 0 {
+	if item == nil {
 		return nil
 	}
-	expr, ok := item.Args[0].(FullTextExpr)
-	if !ok {
-		return &Error{Op: "select", Kind: ErrInvalidArgument, Model: schema.Name}
+	if item.Expr == "__oro_aggregate__" {
+		if len(item.Args) == 0 {
+			return &Error{Op: "select", Kind: ErrInvalidArgument, Model: schema.Name}
+		}
+		expr, ok := item.Args[0].(AggregateExpr)
+		if !ok {
+			return &Error{Op: "select", Kind: ErrInvalidArgument, Model: schema.Name}
+		}
+		field := expr.Field
+		if field != "*" && !isQualifiedIdentifier(field) {
+			schemaField, ok := schema.FieldByGo[field]
+			if !ok {
+				return &Error{Op: "select", Kind: ErrUnknownField, Model: schema.Name, Field: field}
+			}
+			field = schemaField.Column
+		}
+		expr.Field = field
+		item.Args[0] = expr
+		return nil
 	}
-	fields, err := convertFullTextFields(schema, expr.Fields)
-	if err != nil {
-		return err
+	if item.Expr == "__oro_fulltext_score__" {
+		if len(item.Args) == 0 {
+			return &Error{Op: "select", Kind: ErrInvalidArgument, Model: schema.Name}
+		}
+		expr, ok := item.Args[0].(FullTextExpr)
+		if !ok {
+			return &Error{Op: "select", Kind: ErrInvalidArgument, Model: schema.Name}
+		}
+		fields, err := convertFullTextFields(schema, expr.Fields)
+		if err != nil {
+			return err
+		}
+		expr.Fields = fields
+		item.Args[0] = expr
 	}
-	expr.Fields = fields
-	item.Args[0] = expr
 	return nil
 }
 

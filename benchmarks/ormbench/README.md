@@ -9,111 +9,128 @@ Compared libraries:
 - XORM
 - Bun
 
-Current benchmark database: SQLite in-memory.
+## Drivers
 
-## Run
-
-```bash
-source ~/.gvm/scripts/gvm
-gvm use go1.27rc1
-cd benchmarks/ormbench
-go mod tidy
-go test -bench=. -benchmem -run '^$' -count=5
-```
-
-For a quick local check:
-
-```bash
-go test -bench=. -benchmem -run '^$' -benchtime=1s -count=1
-```
-
-Run against another driver:
-
-```bash
-ORO_BENCH_DRIVER=mysql COUNT=1 BENTIME=100ms ./run.sh
-ORO_BENCH_DRIVER=pgsql COUNT=1 BENTIME=100ms ./run.sh
-```
+The benchmark can run against SQLite, MySQL, and PostgreSQL.
 
 Driver options:
 
 - `ORO_BENCH_DRIVER=sqlite|mysql|pgsql`
+- `ORO_BENCH_SQLITE_DRIVER=modernc|mattn`
 - `ORO_BENCH_DSN=...`
-- MySQL default DSN: `root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=true&clientFoundRows=true`
-- PostgreSQL default DSN: `postgres://root@localhost/duxorm?sslmode=disable`
+
+Default DSNs:
+
+- SQLite: in-memory database.
+- MySQL: `root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=true&clientFoundRows=true`
+- PostgreSQL: `postgres://root@localhost/duxorm?sslmode=disable`
+
+The published benchmark reference uses the same underlying database driver for each compared library:
+
+- SQLite: `github.com/mattn/go-sqlite3`
+- MySQL: `github.com/go-sql-driver/mysql`
+- PostgreSQL: `github.com/jackc/pgx/v5`
+
+Oro root module and adapter packages do not import concrete SQL driver implementations. Applications opt in with blank imports or by opening their own `*sql.DB` and using `Wrap`.
+
+## Run
+
+SQLite fair-driver run:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+MySQL:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=mysql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+PostgreSQL:
+
+```bash
+source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+cd benchmarks/ormbench
+ORO_BENCH_DRIVER=pgsql \
+  go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
+```
+
+For a quick smoke check, use the helper script with a shorter count:
+
+```bash
+COUNT=1 BENTIME=100ms ./run.sh
+ORO_BENCH_DRIVER=mysql COUNT=1 BENTIME=100ms ./run.sh
+ORO_BENCH_DRIVER=pgsql COUNT=1 BENTIME=100ms ./run.sh
+```
 
 ## Scenarios
 
 - `BenchmarkCreate`: insert one product per operation.
+- `BenchmarkCreateMany100`: insert 100 products per operation.
 - `BenchmarkFirstByCode`: query one row by indexed unique code.
 - `BenchmarkWhereList`: query 20 rows with `where price >= ? order by id limit 20`.
 - `BenchmarkUpdateByCode`: update one row by indexed unique code.
 - `BenchmarkDeleteByCode`: delete one row by indexed unique code.
 
-## Notes
+Read/update benchmarks seed 1000 rows before timing. Delete benchmarks seed `b.N` rows before timing so each operation deletes a unique row.
 
-- Benchmarks are useful for relative direction, not absolute product claims.
-- SQLite in-memory measures ORM overhead plus SQLite driver behavior.
-- MySQL and PostgreSQL runs use the local `duxorm` database by default and reset `products` / `oro_schema` for each sub-benchmark.
-- Each sub-benchmark gets a fresh in-memory database.
-- Delete benchmarks seed `b.N` rows before timing so each operation deletes a unique row.
-- Read/update benchmarks seed 1000 rows before timing.
-
-## Latest Local Result
+## Published Reference Run
 
 Environment:
 
 - Date: 2026-06-24
 - CPU: Apple M4 Pro
-- OS/arch: darwin/arm64
+- OS/arch: macOS 26.5.1, darwin/arm64
 - Go: go1.27rc1
-- Command: `go test -bench=. -benchmem -run '^$' -benchtime=1s -count=3`
+- MySQL: 8.0.45, local `localhost`
+- PostgreSQL: 18.4 Homebrew, local `localhost`
+- SQLite: in-memory with `mattn/go-sqlite3`
 
-Median-style summary from the 3 local runs:
+The tables report the median from 10 runs.
+
+### SQLite
 
 | Scenario | Oro | GORM | XORM | Bun |
 | --- | ---: | ---: | ---: | ---: |
-| Create | 9.72 µs/op, 96 allocs | 7.44 µs/op, 56 allocs | 5.76 µs/op, 43 allocs | 9.49 µs/op, 23 allocs |
-| First by code | 4.52 µs/op, 72 allocs | 5.25 µs/op, 69 allocs | 7.34 µs/op, 114 allocs | 5.90 µs/op, 31 allocs |
-| Where list 20 rows | 22.18 µs/op, 261 allocs | 16.71 µs/op, 203 allocs | 22.32 µs/op, 500 allocs | 15.16 µs/op, 93 allocs |
-| Update by code | 4.26 µs/op, 50 allocs | 4.27 µs/op, 48 allocs | 5.25 µs/op, 74 allocs | 4.23 µs/op, 15 allocs |
-| Delete by code | 3.44 µs/op, 28 allocs | 3.69 µs/op, 40 allocs | 5.17 µs/op, 72 allocs | 5.37 µs/op, 13 allocs |
-
-Current conclusion:
-
-- Oro and GORM both run with skipped default write transactions for fair high-throughput comparison. Production Oro default remains safe unless `SkipDefaultTransaction` is explicitly enabled.
-- Compared with the earlier optimized Oro result, `Create` improved from ~22.34 µs / 139 allocs to ~9.72 µs / 96 allocs; `WhereList` improved from ~28.24 µs / 348 allocs to ~22.18 µs / 261 allocs; `Delete` improved from ~7.66 µs / 44 allocs to ~3.44 µs / 28 allocs.
-- Oro leads this matrix on single-row read, update, and delete; create remains behind XORM/GORM/Bun; list reads remain behind Bun/GORM and close to XORM.
-
-## Driver Matrix Smoke Results
-
-These are short local smoke runs, useful for compatibility checks rather than final claims.
-
-Command:
-
-```bash
-COUNT=1 BENTIME=100ms ./run.sh
-```
+| Create | 9.17 µs/op | 9.44 µs/op | 6.15 µs/op | 8.15 µs/op |
+| CreateMany100 | 119.82 µs/op | 195.59 µs/op | 206.18 µs/op | 173.10 µs/op |
+| FirstByCode | 5.02 µs/op | 7.31 µs/op | 11.07 µs/op | 6.13 µs/op |
+| WhereList | 24.32 µs/op | 34.13 µs/op | 56.75 µs/op | 28.58 µs/op |
+| UpdateByCode | 3.97 µs/op | 5.72 µs/op | 4.16 µs/op | 3.31 µs/op |
+| DeleteByCode | 2.84 µs/op | 6.84 µs/op | 8.06 µs/op | 4.62 µs/op |
 
 ### MySQL
 
-Environment: local `duxorm` database, default DSN from `ORO_BENCH_DRIVER=mysql`.
-
 | Scenario | Oro | GORM | XORM | Bun |
 | --- | ---: | ---: | ---: | ---: |
-| Create | 135.33 µs/op, 100 allocs | 123.45 µs/op, 41 allocs | 121.75 µs/op, 47 allocs | 103.27 µs/op, 15 allocs |
-| First by code | 38.01 µs/op, 62 allocs | 65.93 µs/op, 68 allocs | 66.66 µs/op, 118 allocs | 37.84 µs/op, 31 allocs |
-| Where list 20 rows | 59.31 µs/op, 290 allocs | 84.34 µs/op, 203 allocs | 89.86 µs/op, 543 allocs | 52.57 µs/op, 93 allocs |
-| Update by code | 82.33 µs/op, 50 allocs | 92.66 µs/op, 49 allocs | 92.97 µs/op, 67 allocs | 89.46 µs/op, 18 allocs |
-| Delete by code | 114.26 µs/op, 30 allocs | 134.96 µs/op, 40 allocs | 133.56 µs/op, 75 allocs | 115.92 µs/op, 15 allocs |
+| Create | 134.44 µs/op | 127.72 µs/op | 128.43 µs/op | 102.39 µs/op |
+| CreateMany100 | 634.42 µs/op | 868.68 µs/op | 861.11 µs/op | 813.34 µs/op |
+| FirstByCode | 38.50 µs/op | 73.49 µs/op | 79.83 µs/op | 41.75 µs/op |
+| WhereList | 60.96 µs/op | 103.45 µs/op | 123.31 µs/op | 67.11 µs/op |
+| UpdateByCode | 100.19 µs/op | 131.75 µs/op | 118.71 µs/op | 108.04 µs/op |
+| DeleteByCode | 113.57 µs/op | 160.96 µs/op | 148.68 µs/op | 121.98 µs/op |
 
 ### PostgreSQL
 
-Environment: local `duxorm` database, default DSN from `ORO_BENCH_DRIVER=pgsql`.
-
 | Scenario | Oro | GORM | XORM | Bun |
 | --- | ---: | ---: | ---: | ---: |
-| Create | 62.30 µs/op, 92 allocs | 57.56 µs/op, 52 allocs | 56.79 µs/op, 65 allocs | 101.29 µs/op, 33 allocs |
-| First by code | 37.35 µs/op, 70 allocs | 35.95 µs/op, 64 allocs | 39.14 µs/op, 125 allocs | 95.28 µs/op, 46 allocs |
-| Where list 20 rows | 109.01 µs/op, 222 allocs | 42.54 µs/op, 199 allocs | 97.52 µs/op, 512 allocs | 101.53 µs/op, 93 allocs |
-| Update by code | 59.03 µs/op, 48 allocs | 57.37 µs/op, 43 allocs | 58.39 µs/op, 83 allocs | 64.20 µs/op, 13 allocs |
-| Delete by code | 53.22 µs/op, 28 allocs | 53.76 µs/op, 35 allocs | 52.91 µs/op, 78 allocs | 59.03 µs/op, 10 allocs |
+| Create | 61.56 µs/op | 62.71 µs/op | 62.65 µs/op | 113.80 µs/op |
+| CreateMany100 | 755.59 µs/op | 756.51 µs/op | 1.28 ms/op | 1.68 ms/op |
+| FirstByCode | 38.72 µs/op | 83.25 µs/op | 46.55 µs/op | 113.36 µs/op |
+| WhereList | 107.95 µs/op | 122.95 µs/op | 138.04 µs/op | 101.86 µs/op |
+| UpdateByCode | 57.62 µs/op | 104.80 µs/op | 58.54 µs/op | 62.78 µs/op |
+| DeleteByCode | 52.12 µs/op | 65.31 µs/op | 64.87 µs/op | 70.55 µs/op |
+
+## Notes
+
+- Benchmarks are useful for relative direction, not fixed production guarantees.
+- SQLite driver choice has a large impact; published SQLite results use `mattn/go-sqlite3` for every library.
+- MySQL and PostgreSQL runs use the local `duxorm` database by default and reset `products` / `oro_schema` for each sub-benchmark.
+- Oro and GORM both run with skipped default write transactions for fair high-throughput comparison.

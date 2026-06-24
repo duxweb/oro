@@ -40,7 +40,7 @@ Use this for imports, repair scripts, or trusted internal paths.
 ## Global events
 
 ```go
-db.On(oro.EventAfterCreate, func(ctx context.Context, event oro.Event) error {
+db.On(oro.AfterCreate, func(ctx context.Context, event *oro.Event) error {
     // publish domain event, invalidate cache, collect audit metadata, etc.
     return nil
 })
@@ -59,7 +59,7 @@ _, err := db.Use[Product]().SkipEvents().Update(ctx, oro.Map{"Price": 120})
 SQL events allow logging and observability integrations without binding Oro to a specific logging framework.
 
 ```go
-db.On(oro.EventSQL, func(ctx context.Context, event oro.Event) error {
+db.On(oro.AfterSQL, func(ctx context.Context, event *oro.Event) error {
     return nil
 })
 ```

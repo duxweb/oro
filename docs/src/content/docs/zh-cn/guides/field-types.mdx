@@ -1,0 +1,136 @@
+---
+title: 字段类型
+description: 字段类型、默认值、nullable、索引、虚拟字段和隐藏字段的定义方式。
+---
+
+字段类型都写在 `Define` 里。结构体只表达业务字段，数据库类型、索引和默认值集中在 schema builder 中。
+
+## 标量类型
+
+```go
+s.Field("Name").String().Size(120)
+s.Field("Description").Text()
+s.Field("Enabled").Bool().Default(true)
+s.Field("Quantity").Int()
+s.Field("Views").BigInt()
+s.Field("Price").Decimal(12, 2).Default(0)
+s.Field("Ratio").Float()
+s.Field("Payload").Binary()
+```
+
+常见数字类型：
+
+```go
+s.Field("Age").Int()
+s.Field("Stock").Uint()
+s.Field("Count").BigInt()
+s.Field("Total").UnsignedBigInt()
+```
+
+## 时间类型
+
+```go
+s.Field("CreatedAt").Timestamp()
+s.Field("Birthday").Date()
+s.Field("SendAt").Time()
+```
+
+`oro.Model` 已内置常用主键和时间字段。自定义模型仍然可以显式定义自己的时间字段。
+
+## JSON 和数组
+
+```go
+s.Field("Meta").JSON().Nullable()
+s.Field("Tags").StringArray()
+s.Field("Scores").IntArray()
+```
+
+不同数据库对数组支持不同。方言会尽量映射到对应能力；不支持的数据库可能退化为 JSON 或文本存储。
+
+## 语义类型
+
+```go
+s.Field("Email").Email()
+s.Field("URL").URL()
+s.Field("IP").IP()
+s.Field("MAC").MAC()
+s.Field("Phone").Phone()
+s.Field("Slug").Slug()
+s.Field("Color").Color()
+s.Field("Location").Point()
+```
+
+语义类型的价值是可读性：模型定义一眼能看出字段意图。具体数据库类型由方言决定。
+
+## 枚举
+
+```go
+s.Field("Status").Enum("draft", "published", "archived").Default("draft")
+```
+
+枚举不是为了把 Go 类型系统复杂化，而是让同步和文档能知道这个字段的合法取值。数据库不支持原生 enum 时，方言可以映射为字符串加约束，或保守映射为字符串。
+
+## Nullable
+
+```go
+s.Field("DeletedAt").Timestamp().Nullable()
+s.Field("Stock").Uint().Nullable()
+```
+
+结构体里建议配合 `oro.Null[T]`：
+
+```go
+type Product struct {
+    oro.Model
+    Stock oro.Null[uint]
+}
+```
+
+## 默认值
+
+```go
+s.Field("Price").Uint().Default(0)
+s.Field("Status").String().Default("active")
+s.Field("CreatedAt").Timestamp().DefaultExpr("CURRENT_TIMESTAMP")
+```
+
+`Default` 是普通值；`DefaultExpr` 是数据库表达式。表达式是否支持由具体方言决定。
+
+## 索引和唯一约束
+
+```go
+s.Field("Code").String().Unique()
+s.Field("Status").String().Index()
+
+s.Index("idx_orders_status", "Status")
+s.Unique("uk_products_code", "Code")
+```
+
+字段级索引适合单列；模型级索引适合联合索引和命名清晰的索引。
+
+## 全文索引
+
+```go
+s.Field("Title").String().FullText()
+s.Field("Body").Text()
+s.FullText("ft_posts_title_body", "Title", "Body")
+```
+
+全文索引能力差异较大：MySQL、PostgreSQL、SQLite 的语法和限制不同。Oro 保留统一定义，具体编译交给方言。
+
+## Hidden 和 Virtual
+
+```go
+s.Field("PasswordHash").String().Hidden()
+s.Field("CommentsCount").Virtual()
+```
+
+`Hidden` 用于默认序列化隐藏敏感字段；`Virtual` 用于接收聚合或计算字段，不参与建表。
+
+## Column 覆盖
+
+```go
+s.Field("PasswordHash").Column("password_hash").String()
+```
+
+如果不设置 `Column`，默认使用字段名的 snake_case。只在数据库列名和 Go 字段名无法自然转换时使用 `Column`。

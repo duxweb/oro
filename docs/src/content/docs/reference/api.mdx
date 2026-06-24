@@ -47,7 +47,8 @@ Use `db.TableName("products")` when raw SQL needs the physical table name after 
 | `Find(ctx, id)` | one model by primary key or `nil` |
 | `Get(ctx)` | all rows as a slice |
 | `Create(ctx, value)` | created row with returned primary key |
-| `CreateMany(ctx, values)` | created rows |
+| `CreateMany(ctx, values)` | write result with affected rows and primary IDs |
+| `CreateManyResult(ctx, values)` | created rows |
 | `Update(ctx, Map)` | affected row count |
 | `Delete(ctx)` | affected row count |
 | `Upsert(ctx, value)` | inserted or updated row |

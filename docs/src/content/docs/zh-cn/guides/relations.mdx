@@ -108,14 +108,14 @@ func (article Article) Tags() oro.Relation {
 }
 ```
 
-通过关系操作器写入：
+通过关系操作器写入。中间表附加字段的键名使用 Go 风格名称，内部按 snake_case 转成数据库列名：
 
 ```go
 err := db.Relation(article.Tags()).Attach(ctx, tag, oro.Map{"Sort": 1})
 err = db.Relation(article.Tags()).UpdateThrough(ctx, tag, oro.Map{"Sort": 2})
 err = db.Relation(article.Tags()).Detach(ctx, tag)
-err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[Tag]{
-    {Model: tag, Through: oro.Map{"Sort": 1}},
+err = db.Relation(article.Tags()).Sync(ctx, []oro.RelationItem[*Tag]{
+    {Model: tag, Data: oro.Map{"Sort": 1}},
 })
 ```
 

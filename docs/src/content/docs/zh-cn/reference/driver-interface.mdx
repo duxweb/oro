@@ -1,0 +1,142 @@
+---
+title: 驱动接口
+description: Driver、Dialect、Inspector、Capabilities、Logger 和第三方 SQL 驱动开发参考。
+---
+
+Oro 驱动边界是 `database/sql`。官方驱动和第三方驱动都只需要实现公开接口。
+
+## Driver
+
+```go
+type Driver interface {
+    Name() string
+    Open(ctx context.Context) (*sql.DB, error)
+    Dialect() oro.Dialect
+    Inspector(db *sql.DB) oro.Inspector
+    TranslateError(err error) error
+    Owned() bool
+}
+```
+
+| 方法 | 说明 |
+| --- | --- |
+| `Name()` | 驱动名称，用于日志和错误上下文 |
+| `Open(ctx)` | 打开 `*sql.DB` |
+| `Dialect()` | 返回 SQL 方言编译器 |
+| `Inspector(db)` | 返回数据库结构检查器 |
+| `TranslateError(err)` | 把数据库错误转成 Oro 标准错误 |
+| `Owned()` | DB 是否由 ORM 创建，关闭时是否负责释放 |
+
+官方驱动提供 `Open(dsn)` 和 `Wrap(*sql.DB)` 两种形态。用户自己 import 具体 SQL driver。
+
+```go
+import (
+    "github.com/duxweb/oro"
+    "github.com/duxweb/oro/driver/sqlite"
+    _ "modernc.org/sqlite"
+)
+
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("file:app.db")},
+    },
+})
+```
+
+## Dialect
+
+```go
+type Dialect interface {
+    Name() string
+    Capabilities() oro.Capabilities
+    QuoteIdent(name string) string
+    Placeholder(index int) string
+    DataType(column oro.ColumnSpec) (string, error)
+    NormalizeType(dbType string) (oro.ColumnType, error)
+    Compile(stmt oro.Statement) (oro.CompiledSQL, error)
+    CompileSchema(change oro.SchemaChange) ([]oro.CompiledSQL, error)
+}
+```
+
+`Dialect` 负责两件事：
+
+- 把查询 AST 编译成 SQL；
+- 把模型结构变更编译成 DDL。
+
+Oro 根包负责构建 AST。驱动不需要解析链式查询，只需要处理 `oro.Statement`。
+
+## Capabilities
+
+```go
+type Capabilities struct {
+    Returning       bool
+    Upsert          bool
+    Savepoint       bool
+    LockForUpdate   bool
+    LockForShare    bool
+    LockNoWait      bool
+    LockSkipLocked  bool
+    FullJoin        bool
+    JSON            bool
+    FullText        bool
+    CheckConstraint bool
+}
+```
+
+能力开关影响编译和回退策略。例如不支持 `RETURNING` 的数据库会走主键回填或必要的回查路径。
+
+## Inspector
+
+```go
+type Inspector interface {
+    Tables(ctx context.Context) ([]oro.TableInfo, error)
+    Table(ctx context.Context, name string) (*oro.TableSpec, error)
+    Indexes(ctx context.Context, table string) ([]oro.IndexSpec, error)
+    Constraints(ctx context.Context, table string) ([]oro.ConstraintSpec, error)
+}
+```
+
+`Sync(ctx)` 依赖 Inspector 对比当前数据库结构和模型定义。
+
+## Logger
+
+日志接口保持极小：
+
+```go
+type Logger interface {
+    Log(ctx context.Context, event oro.LogEvent)
+}
+```
+
+可以直接适配 `slog`、`zap`、`zerolog` 等日志库。
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger: oro.LoggerFunc(func(ctx context.Context, event oro.LogEvent) {
+        slog.InfoContext(ctx, "sql", "op", event.Operation, "sql", event.SQL, "err", event.Err)
+    }),
+    LogLevel: oro.LogLevelInfo,
+})
+```
+
+## 第三方驱动建议
+
+第三方 SQL 驱动建议按这个目录组织：
+
+```txt
+driver/oracle/
+  oracle.go       // Open / Wrap / Option
+  dialect.go      // Dialect.Compile / CompileSchema
+  inspector.go    // Inspector
+  errors.go       // TranslateError
+```
+
+最低可用版本应实现：
+
+- `SELECT`、`INSERT`、`UPDATE`、`DELETE` 编译；
+- 占位符和标识符引用；
+- 基础字段类型映射；
+- 唯一冲突和约束错误转换；
+- 表、列、索引检查。
+
+MongoDB 这类文档数据库不建议塞进当前驱动接口，除非有完整 SQL 兼容层。否则应做独立 ODM，而不是伪装成关系型 ORM 驱动。

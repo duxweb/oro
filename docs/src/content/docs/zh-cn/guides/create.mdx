@@ -1,0 +1,121 @@
+---
+title: 创建数据
+description: 模型创建、批量创建、表写入、默认值、Only/Omit 和返回主键。
+---
+
+创建数据分两类：模型创建和裸表创建。模型创建使用 Go 字段名和模型元数据；裸表创建使用数据库列名和 `oro.Map`。
+
+## 单条模型创建
+
+```go
+product, err := db.Use[Product]().Create(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+})
+```
+
+`Create` 返回创建后的模型。Oro 会回填主键、自动时间字段，以及驱动能够安全返回的数据库默认值。
+
+## 单条裸表创建
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+})
+```
+
+`Table` 使用数据库列名。返回值是 `oro.Map`。
+
+## 批量创建
+
+```go
+result, err := db.Use[Product]().CreateMany(ctx, products, oro.BatchSize(500))
+if err != nil {
+    return err
+}
+
+ids, err := result.IDs[uint64]()
+```
+
+`CreateMany` 默认返回轻量写入结果：
+
+| 字段/方法 | 含义 |
+| --- | --- |
+| `RowsAffected` | 写入行数 |
+| `PrimaryKey` | 主键字段名 |
+| `IDs[T]()` | 批量主键 ID |
+| `FirstID[T]()` | 第一条主键 ID |
+| `IDCount()` | 已回填 ID 数量 |
+
+这样批量写入不需要为了返回完整模型而额外回查。
+
+## 需要完整返回时
+
+```go
+created, err := db.Use[Product]().CreateManyResult(ctx, products)
+```
+
+`CreateManyResult` 显式要求返回完整行。它适合确实需要数据库 trigger/default 修改后结果的场景；普通批量导入优先用 `CreateMany`。
+
+## Only 和 Omit
+
+Go 结构体无法区分“字段没传”和“字段主动传了零值”。Oro 不做猜测，写入字段用 `Only` / `Omit` 明确表达。
+
+```go
+product := &Product{Code: "P001"}
+_, err := db.Use[Product]().Create(ctx, product, oro.Only("Code"))
+```
+
+```go
+_, err := db.Use[Product]().Create(ctx, product, oro.Omit("CreatedAt", "UpdatedAt"))
+```
+
+- `Only`：只写指定字段；
+- `Omit`：排除指定字段；
+- 创建时未写入的字段交给数据库默认值或 ORM 自动值处理。
+
+## 使用默认值
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Price").Uint().Default(0)
+    s.Field("Status").String().Default("active")
+}
+```
+
+如果希望数据库默认值生效，不要把该字段写入 insert。使用 `Only` 或 `Omit` 明确排除。
+
+## 表批量创建
+
+```go
+rows := []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+}
+
+result, err := db.Table("products").CreateMany(ctx, rows)
+ids, err := result.IDs[uint64]()
+```
+
+需要完整行：
+
+```go
+created, err := db.Table("products").CreateManyResult(ctx, rows)
+```
+
+映射为 DTO：
+
+```go
+views, err := db.Table("products").MapTo[ProductView]().CreateManyResult(ctx, rows)
+```
+
+## Hook 和事件
+
+模型创建会触发模型 Hook 和事件；裸表创建不会触发模型 Hook。
+
+```go
+_, err := db.Use[Product]().SkipHooks().SkipEvents().Create(ctx, product)
+```
+
+导入脚本或可信内部路径可以跳过 Hook/Event，但业务入口建议保留。

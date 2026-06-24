@@ -32,7 +32,7 @@ function highlight(code: string): string {
   s = s.replace(/\/\/.*$/gm, (m) => stash('tok-com', m));
   s = s.replace(/&quot;.*?&quot;|"[^"]*"/g, (m) => stash('tok-str', m));
   s = s.replace(
-    /\b(Field|db|Use|Table|Raw|With|Where|Get|First|One|Debug|Eq|NotEq|Gt|Gte|Lt|Lte|In|NotIn|Like|NotLike|Between|IsNull|IsNotNull)\b/g,
+    /\b(Field|db|Use|Table|Raw|MapTo|Register|Sync|Create|With|Where|Get|First|One|Debug|Eq|NotEq|Gt|Gte|Lt|Lte|In|NotIn|Like|NotLike|Between|IsNull|IsNotNull)\b/g,
     '<span class="tok-fn">$1</span>'
   );
   s = s.replace(/\[([A-Z][A-Za-z0-9]*)\]/g, '[<span class="tok-key">$1</span>]');
@@ -40,31 +40,32 @@ function highlight(code: string): string {
   return s;
 }
 ---
-<div class="mt-9 grid gap-4 md:grid-cols-2">
+<div class="dux-pillars not-content">
   {items.map((item) => (
-    <article class="flex h-full flex-col rounded-2xl bg-surface p-7 transition hover:-translate-y-0.5 hover:shadow-[var(--dux-shadow)]">
-      <span
-        class="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-ink text-canvas"
-        aria-hidden="true"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          class="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          set:html={icons[item.icon]}
-        />
-      </span>
-      <h3 class="mb-2 text-[1.18rem] font-bold tracking-[-0.02em] text-ink">{item.title}</h3>
-      <p class="mb-5 text-[0.95rem] leading-relaxed text-muted">{item.desc}</p>
+    <article class="dux-pillar">
+      <div class="dux-pillar__head">
+        <span
+          class="dux-pillar__icon"
+          aria-hidden="true"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="dux-pillar__svg"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            set:html={icons[item.icon]}
+          />
+        </span>
+        <h3>{item.title}</h3>
+      </div>
+      <p class="dux-pillar__desc">{item.desc}</p>
       {item.code && (
-        <code
-          class="dux-code-dark mt-auto block overflow-x-auto whitespace-pre rounded-lg px-3.5 py-3 font-mono text-[0.8rem] leading-normal"
-          set:html={highlight(item.code)}
-        />
+        <div class="dux-mini-code">
+          <pre><code set:html={highlight(item.code)} /></pre>
+        </div>
       )}
     </article>
   ))}

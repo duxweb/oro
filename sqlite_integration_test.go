@@ -9,6 +9,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 type integrationProduct struct {
@@ -21,6 +22,20 @@ func (integrationProduct) Define(s *oro.SchemaBuilder) {
 	s.Table("products")
 	s.Field("Code").String()
 	s.Field("Price").Uint()
+}
+
+type integrationProductAggregate struct {
+	oro.Model
+	Code       string
+	Price      uint
+	TotalPrice int64
+}
+
+func (integrationProductAggregate) Define(s *oro.SchemaBuilder) {
+	s.Table("products")
+	s.Field("Code").String()
+	s.Field("Price").Uint()
+	s.Field("TotalPrice").Column("total_price").BigInt().Virtual()
 }
 
 type integrationUser struct {
@@ -557,6 +572,35 @@ func TestSQLiteRawExecRowsAffected(t *testing.T) {
 	}
 	if affected != 1 {
 		t.Fatalf("expected one affected row, got %d", affected)
+	}
+}
+
+func TestSQLiteRawMultiStatementRequiresOptIn(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	if _, err := db.Raw("select 1; select 2").Exec(ctx); !errors.Is(err, oro.ErrInvalidQuery) {
+		t.Fatalf("expected invalid query for multi statement raw, got %v", err)
+	}
+	if _, err := db.Raw("select ';';").Get(ctx); err != nil {
+		t.Fatalf("expected semicolon in string and trailing terminator to be allowed, got %v", err)
+	}
+
+	multiDB, err := oro.Open(oro.Config{
+		AllowRawMultiStatement: true,
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := multiDB.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := multiDB.Raw("create table raw_multi_a (id integer); create table raw_multi_b (id integer)").Exec(ctx); err != nil {
+		t.Fatalf("expected multi statement raw to run after opt-in, got %v", err)
 	}
 }
 
@@ -1258,32 +1302,60 @@ func TestSQLiteCreateFallbackWithoutReturning(t *testing.T) {
 func TestSQLiteCreateMany(t *testing.T) {
 	db, ctx := openSQLiteTestDB(t)
 
-	tableRows, err := db.Table("products").CreateMany(ctx, []oro.Map{
+	tableResult, err := db.Table("products").CreateMany(ctx, []oro.Map{
 		{"code": "A010", "price": 10},
 		{"code": "A011", "price": 11},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tableRows) != 2 || tableRows[0]["code"] != "A010" || tableRows[1]["code"] != "A011" {
-		t.Fatalf("unexpected table rows %#v", tableRows)
+	tableIDs, err := tableResult.IDs[uint64]()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tableRows[0]["id"] == nil || tableRows[1]["id"] == nil {
-		t.Fatalf("expected table create many ids %#v", tableRows)
+	if tableResult.RowsAffected != 2 || len(tableIDs) != 2 || tableIDs[0] == 0 || tableIDs[1] == 0 {
+		t.Fatalf("unexpected table create many result %#v ids=%#v", tableResult, tableIDs)
 	}
 
-	products, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
-		{Code: "A012", Price: 12},
-		{Code: "A013", Price: 13},
+	tableRows, err := db.Table("products").CreateManyResult(ctx, []oro.Map{
+		{"code": "A010R", "price": 10},
+		{"code": "A011R", "price": 11},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(products) != 2 || products[0].ID == 0 || products[1].ID == 0 || products[0].Code != "A012" || products[1].Code != "A013" {
-		t.Fatalf("unexpected model rows %#v", products)
+	if len(tableRows) != 2 || tableRows[0]["code"] != "A010R" || tableRows[1]["code"] != "A011R" || tableRows[0]["id"] == nil || tableRows[1]["id"] == nil {
+		t.Fatalf("unexpected table result rows %#v", tableRows)
 	}
-	if products[0].CreatedAt.IsZero() || products[1].UpdatedAt.IsZero() {
-		t.Fatalf("expected timestamps in model rows %#v", products)
+
+	models := []*integrationProduct{
+		{Code: "A012", Price: 12},
+		{Code: "A013", Price: 13},
+	}
+	result, err := db.Use[integrationProduct]().CreateMany(ctx, models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := result.IDs[uint64]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RowsAffected != 2 || len(ids) != 2 || ids[0] == 0 || ids[1] == 0 || models[0].ID == 0 || models[1].ID == 0 {
+		t.Fatalf("unexpected model create many result %#v ids=%#v models=%#v", result, ids, models)
+	}
+	if models[0].CreatedAt.IsZero() || models[1].UpdatedAt.IsZero() {
+		t.Fatalf("expected timestamps in model rows %#v", models)
+	}
+
+	products, err := db.Use[integrationProduct]().CreateManyResult(ctx, []*integrationProduct{
+		{Code: "A012R", Price: 12},
+		{Code: "A013R", Price: 13},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(products) != 2 || products[0].ID == 0 || products[1].ID == 0 || products[0].Code != "A012R" || products[1].Code != "A013R" {
+		t.Fatalf("unexpected model result rows %#v", products)
 	}
 
 	type productView struct {
@@ -1292,7 +1364,7 @@ func TestSQLiteCreateMany(t *testing.T) {
 	}
 	views, err := db.Table("products").
 		MapTo[productView]().
-		CreateMany(ctx, []oro.Map{
+		CreateManyResult(ctx, []oro.Map{
 			{"code": "A014", "price": 14},
 			{"code": "A015", "price": 15},
 		})
@@ -1303,7 +1375,7 @@ func TestSQLiteCreateMany(t *testing.T) {
 		t.Fatalf("unexpected mapped create many rows %#v", views)
 	}
 
-	chunked, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
+	chunked, err := db.Use[integrationProduct]().CreateManyResult(ctx, []*integrationProduct{
 		{Code: "A016", Price: 16},
 		{Code: "A017", Price: 17},
 	}, oro.BatchSize(1))
@@ -1318,18 +1390,22 @@ func TestSQLiteCreateMany(t *testing.T) {
 func TestSQLiteCreateManyFallbackWithoutReturning(t *testing.T) {
 	db, ctx := openSQLiteTestDBWithDriver(t, sqlite.Open(":memory:", sqlite.DisableReturning()))
 
-	tableRows, err := db.Table("products").CreateMany(ctx, []oro.Map{
+	tableResult, err := db.Table("products").CreateMany(ctx, []oro.Map{
 		{"code": "A018", "price": 18},
 		{"code": "A019", "price": 19},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tableRows) != 2 || tableRows[0]["code"] != "A018" || tableRows[1]["code"] != "A019" || tableRows[0]["id"] == nil || tableRows[1]["id"] == nil {
-		t.Fatalf("unexpected table fallback rows %#v", tableRows)
+	tableIDs, err := tableResult.IDs[uint64]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tableResult.RowsAffected != 2 || len(tableIDs) != 2 || tableIDs[0] == 0 || tableIDs[1] == 0 {
+		t.Fatalf("unexpected table fallback result %#v ids=%#v", tableResult, tableIDs)
 	}
 
-	products, err := db.Use[integrationProduct]().CreateMany(ctx, []*integrationProduct{
+	products, err := db.Use[integrationProduct]().CreateManyResult(ctx, []*integrationProduct{
 		{Code: "A020", Price: 20},
 		{Code: "A021", Price: 21},
 	})
@@ -1340,7 +1416,7 @@ func TestSQLiteCreateManyFallbackWithoutReturning(t *testing.T) {
 		t.Fatalf("unexpected model fallback rows %#v", products)
 	}
 
-	mixedRows, err := db.Table("products").CreateMany(ctx, []oro.Map{
+	mixedRows, err := db.Table("products").CreateManyResult(ctx, []oro.Map{
 		{"code": "A022", "price": 22},
 		{"id": uint64(100), "code": "A023", "price": 23},
 	})
@@ -2565,6 +2641,19 @@ func TestSQLiteAggregateExpressions(t *testing.T) {
 	}
 	if rows[0]["sum_price"] != int64(100) {
 		t.Fatalf("unexpected sum expression rows %#v", rows)
+	}
+
+	if err := db.Register(integrationProductAggregate{}); err != nil {
+		t.Fatal(err)
+	}
+	modelRows, err := db.Use[integrationProductAggregate]().
+		Select(oro.Sum("Price").As("total_price")).
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(modelRows) != 1 || modelRows[0].TotalPrice != 100 {
+		t.Fatalf("unexpected model aggregate rows %#v", modelRows)
 	}
 }
 

@@ -5,114 +5,89 @@ template: splash
 prev: false
 next: false
 hero:
-  title: 像你思考一样读得懂的 ORM
-  tagline: "面向 Go 的人性化泛型 ORM —— 查询读起来就是你的意图本身。"
+  title: 代码即查询,所见即所得
+  tagline: "面向 Go 的泛型 ORM —— 语义化条件、透明 SQL、零代码生成。"
   actions:
     - text: 快速开始
-      link: /zh-cn/quick-start/
+      link: zh-cn/quick-start/
       variant: primary
     - text: GitHub
       link: https://github.com/duxweb/oro
       variant: minimal
 ---
 
-import { LinkCard } from '@astrojs/starlight/components';
 import Pillars from '../../../components/Pillars.astro';
+import ShowcaseCode from '../../../components/ShowcaseCode.astro';
 
 <div class="dux-section">
   <div class="dux-section-head">
-    <span class="eyebrow">与众不同之处</span>
-    <h2>四个贯穿始终的承诺</h2>
-    <p>多数 ORM 用清晰度换取便利。Dux 保留便利，把清晰度还给你。</p>
+    <span class="eyebrow">核心设计</span>
+    <h2>让 ORM 像 Go 代码一样直观</h2>
+    <p>查询看得懂，模型不用生成，关联不制造循环依赖，返回值也有明确类型边界。</p>
   </div>
 
   <Pillars items={[
     {
       icon: 'semantics',
-      title: '人性化语义',
-      desc: '用语义化条件而不是字符串运算符。一条查询读起来就是你想说的那句话 —— 下一个工程师也会用同样的方式读懂它。',
-      code: 'db.Use[Product]().Where(Field("Price").Gte(100))',
+      title: '查询可读',
+      desc: '字段、比较和组合条件都有明确方法。复杂条件不用埋进 SQL 字符串，审查时能直接看出查询意图。',
+      code: `db.Use[Product]().Where(oro.Field("Price").Gte(100))
+db.Use[Product]().Where(oro.Field("Code").Like("A%"))`,
     },
     {
       icon: 'no-gen',
-      title: '零代码生成',
-      desc: 'go get 即用。没有生成器要运行、没有生成的 client 要提交、没有会悄悄和源码脱节的构建步骤。',
-      code: 'db.Use[Product]()  // 类型安全，零生成文件',
+      title: '无需生成',
+      desc: '模型就是普通 Go 结构体，查询直接使用泛型入口。没有生成器、client 文件和额外构建步骤。',
+      code: `db.Register(Product{})
+db.Use[Product]().Create(ctx, product)`,
     },
     {
       icon: 'no-cycle',
-      title: '无循环依赖',
-      desc: '关联是普通方法，而非内嵌指针。模型可分散在不同包中自由互相引用，永远不会让 Go 编译器陷入循环依赖。',
-      code: 'article.Cover().One[Image]()  // 关联即方法',
+      title: '关系不循环',
+      desc: '关联定义在方法里，不把关联对象塞进结构体字段。模型拆到多个包后，也能避开 import cycle。',
+      code: `article.Cover().One[Image]()
+db.Use[Article]().With(Article{}.Cover())`,
     },
     {
       icon: 'no-blackbox',
-      title: '非黑盒',
-      desc: '每条查询、Hook 和事件都可观测。你始终能看到真正执行的 SQL —— 没有隐藏魔法，没有意外的 N+1，没有解释不清的行为。',
-      code: 'db.Debug().Use[Product]().Get(ctx)  // 打印真实 SQL',
+      title: '类型边界清晰',
+      desc: '模型查询返回具体类型，动态写入使用 Map，原生 SQL 走 Raw。需要灵活的地方也有明确边界。',
+      code: `db.Use[Product]().First(ctx)  // *Product
+db.Table("products").First(ctx) // oro.Map`,
     },
   ]} />
 </div>
 
 <div class="dux-section">
-  <div class="dux-section-head">
-    <span class="eyebrow">为什么要再做一个 ORM</span>
-    <h2>取其精华，去其繁文缛节</h2>
-    <p>主流 ORM 各有所长。Dux 保留这些优点，去掉 Go 开发者真正会感到的摩擦。</p>
-  </div>
-
-  <div class="dux-why">
-    <article>
-      <h3>比 GORM 更克制</h3>
-      <p>GORM 功能很全、久经考验，但历史包袱让零值、tag 和隐式行为容易混乱。Dux 把 API 面积保持得足够小，能装进脑子里。</p>
-    </article>
-    <article>
-      <h3>像 Eloquent 一样可读</h3>
-      <p>Laravel Eloquent 读起来很优雅。Dux 用泛型保留这份流畅 —— 又不必为每次早期结构调整都写一个迁移文件。</p>
-    </article>
-    <article>
-      <h3>没有生成的 client</h3>
-      <p>很多 Node ORM 依赖生成的 client 或大量运行时 <code>any</code>。Dux 通过 Go 泛型做到类型安全，没有任何需要重新生成的东西。</p>
-    </article>
-  </div>
-</div>
-
-<div class="dux-section">
-  <div class="dux-section-head">
-    <span class="eyebrow">一屏看懂</span>
-    <h2>定义、同步、查询</h2>
-    <p>完整闭环 —— 模型、结构同步、类型化 CRUD —— 全程不离开 Go，也不用运行任何工具。</p>
-  </div>
-
-```go
-type Product struct {
-    oro.Model
-    Code  string
-    Price uint
-}
-
-func (Product) Define(s *oro.SchemaBuilder) {
+  <div class="dux-showcase not-content">
+    <div>
+      <span class="eyebrow">设计取舍</span>
+      <h2>把 ORM 的边界写在代码表面</h2>
+      <p>Oro 不靠生成器隐藏复杂度，也不把结构配置塞进 tag 字符串。模型、表、原生 SQL 是三条明确入口：业务代码用模型，动态场景用表，复杂查询直接 Raw。</p>
+      <ul>
+        <li>字段结构走 `Define`，不用在 tag 里拼配置。</li>
+        <li>写入字段显式表达，不猜零值。</li>
+        <li>关系放在方法里，减少模块拆包后的 import cycle。</li>
+      </ul>
+    </div>
+    <ShowcaseCode code={`func (Product) Define(s *oro.SchemaBuilder) {
     s.Table("products")
     s.Field("Code").String().Unique()
     s.Field("Price").Uint().Default(0)
 }
 
-// 根据上面的定义注册并同步结构
-db.Register(Product{})
-db.Sync(ctx)
-
-// 类型安全、可读的 CRUD，使用语义化条件
-product, _ := db.Use[Product]().Create(ctx, &Product{Code: "P001", Price: 100})
-found, _ := db.Use[Product]().Where(oro.Field("Code").Eq("P001")).First(ctx)
-```
+db.Use[Product]()      // *Product / []Product
+db.Table("products")  // oro.Map
+db.Raw("select ...")  // Map or MapTo[T]()`} />
+  </div>
 </div>
 
 <div class="dux-cta">
-  <h2>一行 <code>go get</code> 即可开始</h2>
+  <h2>一行 go get 即可开始</h2>
   <p>打开数据库、注册模型、同步结构，几分钟内跑通你的第一条类型化查询。</p>
   <div class="dux-cta__actions">
-    <a class="dux-btn dux-btn--primary" href="/zh-cn/quick-start/"><span>快速开始</span><span aria-hidden="true" class="dux-btn__arrow">→</span></a>
-    <a class="dux-btn dux-btn--ghost" href="/zh-cn/reference/api/"><span>浏览 API</span></a>
+    <a class="dux-btn dux-btn--primary" href="quick-start/"><span>快速开始</span><span aria-hidden="true" class="dux-btn__arrow">→</span></a>
+    <a class="dux-btn dux-btn--ghost" href="reference/api/"><span>浏览 API</span></a>
   </div>
 </div>
 
@@ -120,23 +95,26 @@ found, _ := db.Use[Product]().Where(oro.Field("Code").Eq("P001")).First(ctx)
   <div class="dux-section-head">
     <span class="eyebrow">文档</span>
     <h2>从这里开始</h2>
+    <p>按这个顺序读，能最快理解 Oro 的使用方式：先跑通，再定义模型，最后掌握条件组合。</p>
   </div>
 
-<LinkCard title="快速开始" href="/zh-cn/quick-start/" description="打开 SQLite，注册模型，同步结构，然后运行泛型 CRUD。" />
-<LinkCard title="模型定义" href="/zh-cn/guides/model-definition/" description="定义字段、索引、隐藏字段、空值和模型级配置。" />
-<LinkCard title="查询条件" href="/zh-cn/guides/where/" description="字段条件、分组回调、条件回调和子查询的完整语法。" />
+  <div class="dux-doc-links not-content">
+    <a href="quick-start/"><em>01</em><strong>快速开始</strong><span>打开 SQLite，注册模型，同步结构，然后运行泛型 CRUD。</span></a>
+    <a href="guides/model-definition/"><em>02</em><strong>模型定义</strong><span>定义字段、索引、隐藏字段、空值和模型级配置。</span></a>
+    <a href="guides/where/"><em>03</em><strong>查询条件</strong><span>字段条件、分组回调、条件回调和子查询的完整语法。</span></a>
+  </div>
 </div>
 
-<footer class="not-content mt-[clamp(3.5rem,7vw,6rem)] flex flex-wrap items-center justify-between gap-x-8 gap-y-4 border-t border-line pt-8">
-  <div class="flex flex-col gap-1">
-    <span class="font-bold tracking-[-0.02em] text-ink">Oro</span>
-    <span class="text-[0.85rem] text-muted">面向 Go 的人性化泛型 ORM。</span>
+<footer class="dux-footer not-content">
+  <div class="dux-footer__brand">
+    <span class="dux-footer__logo">Oro</span>
+    <span class="dux-footer__tagline">面向 Go 的人性化泛型 ORM。</span>
   </div>
-  <nav class="flex flex-wrap gap-5" aria-label="页脚">
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/zh-cn/quick-start/">快速开始</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/zh-cn/guides/model-definition/">指南</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="/zh-cn/reference/api/">API</a>
-    <a class="text-[0.9rem] text-muted no-underline hover:text-ink" href="https://github.com/duxweb/oro">GitHub</a>
+  <nav class="dux-footer__nav" aria-label="页脚">
+    <a href="quick-start/">快速开始</a>
+    <a href="guides/model-definition/">指南</a>
+    <a href="reference/api/">API</a>
+    <a href="https://github.com/duxweb/oro">GitHub</a>
   </nav>
-  <p class="m-0 mt-1 w-full text-[0.8rem] text-muted">© 2026 Oro · 基于 MIT 协议开源。</p>
+  <p class="dux-footer__copy">© 2026 Oro · 基于 MIT 协议开源。</p>
 </footer>

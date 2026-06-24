@@ -1,0 +1,258 @@
+---
+title: 裸表与原生 SQL
+description: 使用 Table、Raw、MapTo、表前缀、子查询和已有 SQL 能力。
+---
+
+`Table` 和 `Raw` 是模型查询之外的两个低层入口。它们让 Oro 可以覆盖动态表、报表、维护脚本、历史 SQL 和数据库特性。
+
+使用原则：
+
+- 优先用 `Use[T]()` 表达模型业务；
+- 不方便建模型或动态表名时用 `Table`；
+- ORM 表达不了的数据库特性用 `Raw`。
+
+## Table 查询
+
+```go
+rows, err := db.Table("products").
+    Where("price", ">=", 100).
+    OrderByDesc("id").
+    Limit(20).
+    Get(ctx)
+```
+
+`Table` 使用数据库列名，返回 `oro.Map` 或 `[]oro.Map`。
+
+```go
+for _, row := range rows {
+    code := row["code"]
+    price := row["price"]
+    _ = code
+    _ = price
+}
+```
+
+## Table 写入
+
+```go
+row, err := db.Table("products").Create(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+})
+```
+
+批量创建：
+
+```go
+result, err := db.Table("products").CreateMany(ctx, []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+})
+
+ids, err := result.IDs[uint64]()
+```
+
+需要完整返回行：
+
+```go
+rows, err := db.Table("products").CreateManyResult(ctx, values)
+```
+
+更新和删除：
+
+```go
+affected, err := db.Table("products").
+    Where("code", "P001").
+    Update(ctx, oro.Map{"price": 120})
+
+removed, err := db.Table("products").
+    Where("status", "archived").
+    Delete(ctx)
+```
+
+## 字段名规则
+
+| 入口 | 字段名 |
+| --- | --- |
+| `Use[T]()` | Go 字段名，如 `CreatedAt` |
+| `Table(name)` | 数据库列名，如 `created_at` |
+| `Raw(sql)` | 你自己写 SQL，完全由 SQL 决定 |
+| `MapTo[T]()` | 根据列名映射到结构体字段 |
+
+不要在 `Table` 里写 Go 字段名，也不要在 `Use[T]()` 里写数据库列名。
+
+## MapTo
+
+`MapTo[T]()` 把 `Table` 或 `Raw` 的 `oro.Map` 映射到结构体。
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+view, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    First(ctx)
+```
+
+多条：
+
+```go
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+映射规则：
+
+- 默认 `snake_case` 列名映射 Go 字段；
+- 如果目标结构体本身是已注册模型，会参考字段定义；
+- 不依赖 `db` tag；
+- JSON 输出名称仍然由标准 `json` tag 控制。
+
+## Raw 查询
+
+```go
+rows, err := db.Raw("select id, code from products where price >= ?", 100).Get(ctx)
+```
+
+Raw 查询返回 `[]oro.Map`。
+
+单条：
+
+```go
+row, err := db.Raw("select id, code from products where id = ?", id).First(ctx)
+```
+
+查不到时 `First` 返回 `nil, nil`。
+
+## Raw MapTo
+
+```go
+views, err := db.Raw("select id, code, price from products where price >= ?", 100).
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+Raw + DTO 适合报表、复杂 join、历史 SQL 迁移过程。
+
+## Raw Exec
+
+```go
+affected, err := db.Raw(
+    "update products set price = price + ? where id = ?",
+    10,
+    id,
+).Exec(ctx)
+```
+
+`Exec` 返回影响行数。
+
+默认不建议拼接用户输入。所有外部输入都应该作为参数传入。
+
+## 表前缀
+
+`TablePrefix` 会作用于 `Use` 和 `Table`，但不会改写 Raw SQL。
+
+```go
+db, err := oro.Open(oro.Config{
+    TablePrefix: "app_",
+})
+```
+
+```go
+rows, err := db.Table("products").Get(ctx)
+// 实际查询 app_products
+```
+
+Raw 需要手动获取物理表名：
+
+```go
+physical := db.TableName("products")
+rows, err := db.Raw("select * from "+physical+" where id = ?", id).Get(ctx)
+```
+
+`TableName` 会处理前缀、命名空间和重复前缀判断。
+
+## 子查询
+
+`Table` 查询可以作为子查询源。
+
+```go
+paidUsers := db.Table("orders").
+    Select("user_id").
+    Where("status", "paid")
+
+users, err := db.Table("users").
+    WhereIn("id", oro.Query(paidUsers)).
+    Get(ctx)
+```
+
+也可以作为 `From`：
+
+```go
+rows, err := db.From(oro.Query(paidUsers).As("paid_users")).Get(ctx)
+```
+
+## Join
+
+```go
+rows, err := db.Table("orders").As("o").
+    LeftJoin("users", func(j *oro.Join) {
+        j.As("u").OnColumn("u.id", "o.user_id")
+    }).
+    Select("o.id", "u.name", "o.total").
+    Where("o.status", "paid").
+    Get(ctx)
+```
+
+复杂 join 如果仍然难以表达，可以降级到 Raw。
+
+## 缓存和超时
+
+Table 和 Raw 都支持查询缓存与超时。
+
+```go
+rows, err := db.Table("products").
+    Cache(time.Minute).
+    CacheTags("products").
+    Timeout(2 * time.Second).
+    Get(ctx)
+```
+
+```go
+rows, err := db.Raw("select id, code from "+db.TableName("products")).
+    Cache(time.Minute).
+    CacheKey("product-options").
+    Get(ctx)
+```
+
+事务内和带锁查询不会使用查询结果缓存。
+
+## 多语句 Raw
+
+默认不建议执行多语句 Raw。确实需要执行维护脚本时，必须显式开启：
+
+```go
+db, err := oro.Open(oro.Config{
+    AllowRawMultiStatement: true,
+})
+```
+
+多语句应只用于可信脚本，不能拼接用户输入。
+
+## 选择方式
+
+| 场景 | 推荐 |
+| --- | --- |
+| 正常业务模型 | `Use[T]()` |
+| 动态表名 | `Table(name)` |
+| 后台报表 | `Table` + `Select`/`Join` 或 `Raw` |
+| 只想返回 DTO | `Table(...).MapTo[T]()` |
+| 数据库专有函数 | `oro.Raw(...)` 或 `db.Raw(...)` |
+| 维护脚本 | `Raw(...).Exec(ctx)` |
+| 有表前缀的 Raw | `db.TableName(name)` |

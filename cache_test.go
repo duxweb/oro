@@ -8,6 +8,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 func openSQLiteCacheTestDB(t *testing.T) (*oro.DB, context.Context) {

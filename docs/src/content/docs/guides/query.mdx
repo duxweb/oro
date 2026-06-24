@@ -1,0 +1,140 @@
+---
+title: Query
+description: First, Find, Get, sorting, limits, DTO mapping, cache, timeout, and return rules.
+---
+
+Oro follows one return rule: “not found” is not an error. SQL, connection, scan, constraint, and transaction failures return errors.
+
+## Query entries
+
+```go
+db.Use[Product]()      // model query, Go field names
+db.Table("products")   // table query, database column names
+db.Raw("select ...")   // raw SQL
+```
+
+Model queries return structs. Table and Raw queries return `oro.Map` by default.
+
+## First
+
+```go
+product, err := db.Use[Product]().Where("Code", "P001").First(ctx)
+if err != nil {
+    return err
+}
+if product == nil {
+    return nil
+}
+```
+
+`First` returns one row or `nil`. Add `OrderBy` when the result must be stable:
+
+```go
+latest, err := db.Use[Product]().OrderByDesc("ID").First(ctx)
+```
+
+## Find
+
+```go
+product, err := db.Use[Product]().Find(ctx, id)
+```
+
+`Find` is a primary-key lookup. Missing rows return `nil, nil`.
+
+## Get
+
+```go
+products, err := db.Use[Product]().
+    Where("Price", ">=", 100).
+    Get(ctx)
+```
+
+`Get` returns a slice. No rows means an empty slice.
+
+## Field name rule
+
+| Query type | Names |
+| --- | --- |
+| `Use[T]()` | Go field names, e.g. `CreatedAt` |
+| `Table(name)` | database columns, e.g. `created_at` |
+| `Raw(sql)` | SQL decides |
+
+```go
+products, err := db.Use[Product]().Where("CreatedAt", ">=", start).Get(ctx)
+rows, err := db.Table("products").Where("created_at", ">=", start).Get(ctx)
+```
+
+## Sorting and limits
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    OrderByDesc("ID").
+    Limit(20).
+    Offset(40).
+    Get(ctx)
+```
+
+Raw ordering is available for expressions:
+
+```go
+rows, err := db.Table("orders").OrderByRaw("count(*) desc").Get(ctx)
+```
+
+## Select and DTOs
+
+Model query:
+
+```go
+products, err := db.Use[Product]().Select("ID", "Code", "Price").Get(ctx)
+```
+
+Table query mapped to a DTO:
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+views, err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Get(ctx)
+```
+
+Mapping uses field definitions and snake_case conversion. It does not require `db` tags.
+
+## Aggregates
+
+```go
+count, err := db.Use[Product]().Where("Status", "active").Count(ctx)
+exists, err := db.Use[Product]().Where("Code", "P001").Exists(ctx)
+total, err := db.Use[Order]().Sum(ctx, "Amount")
+maxID, err := db.Use[Order]().Max[uint64](ctx, "ID")
+```
+
+## Cache and timeout
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    Cache(30 * time.Second).
+    CacheTags("products").
+    Timeout(2 * time.Second).
+    Get(ctx)
+```
+
+Cache is opt-in per query. Timeout is query-local and wraps the context used for SQL execution.
+
+## Raw queries
+
+```go
+rows, err := db.Raw(
+    "select * from "+db.TableName("products")+" where price >= ?",
+    100,
+).Get(ctx)
+```
+
+Use `db.TableName` when table prefixes are configured.

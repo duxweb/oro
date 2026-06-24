@@ -25,10 +25,14 @@ import (
     "github.com/duxweb/oro/driver/sqlite"
     "github.com/duxweb/oro/driver/mysql"
     "github.com/duxweb/oro/driver/pgsql"
+
+    _ "github.com/go-sql-driver/mysql"
+    _ "github.com/jackc/pgx/v5/stdlib"
+    _ "modernc.org/sqlite" // 或 _ "github.com/mattn/go-sqlite3"
 )
 ```
 
-驱动是基于 `database/sql` 的适配层。ORM 层不绑定具体日志库或数据库连接实现细节。
+驱动是基于 `database/sql` 的适配层。Oro 不会主动注册具体 SQL 驱动，应用通过普通 blank import 自己选择具体实现，也可以通过 `Wrap` 传入已有 `*sql.DB`。
 
 ## SQLite
 

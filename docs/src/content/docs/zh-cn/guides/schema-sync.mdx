@@ -1,45 +1,231 @@
 ---
 title: 结构同步
-description: 不写迁移文件，直接把注册模型同步为数据表。
+description: 不写迁移文件，直接把注册模型安全同步为数据表。
 ---
 
-Oro 使用模型定义作为结构来源。
+Oro 的结构同步以模型定义为结构来源，自动执行安全的向前变更，同时明确拒绝危险变更，避免“自动同步”变成隐式删数据。
+
+## 基础用法
+
+先注册模型，再执行同步：
 
 ```go
-if err := db.Register(Product{}, User{}, ArticleTag{}); err != nil {
+if err := db.Register(Product{}, User{}, Article{}, ArticleTag{}); err != nil {
     return err
 }
+
 if err := db.Sync(ctx); err != nil {
     return err
 }
 ```
 
-## 自动执行的安全变更
+`Register` 做两件事：
 
-- 创建缺失表；
-- 添加缺失字段；
-- 创建索引和唯一索引；
-- 创建驱动支持的全文索引；
-- 维护内部结构快照用于后续 diff。
+- 解析模型字段、表名、连接、租户、分片和索引；
+- 注册模型关系，供 `With`、`For`、`WhereHas`、序列化等功能使用。
 
-## 拒绝的危险变更
+`Sync` 只同步已注册模型。
 
-- 删除字段；
-- 缩窄字段类型；
-- 收紧 nullable 约束；
-- 不明确的类型变更；
-- 无法判断的字段重命名。
+## 模型结构来源
 
-原则很简单：自动同步只做安全的向前变更。破坏性数据操作应该由显式应用代码或人工数据库操作完成。
+Oro 不从 tag 推导数据库结构，结构定义集中在 `Define`。
 
-## 字段类型变更
+```go
+type Product struct {
+    oro.Model
+    Code   string
+    Price  uint
+    Status string
+}
 
-兼容的扩大类型可以由方言在安全时处理。不安全变更会被拒绝，因为不同数据库的类型转换和数据丢失行为并不一致。
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Size(64).Unique()
+    s.Field("Price").Uint().Default(0)
+    s.Field("Status").String().Size(32).Default("active").Index()
+}
+```
 
-推荐流程：新增字段、显式回填、部署读取新字段的代码，然后在安全窗口手动移除旧字段。
+没有显式 `Table` 时，Oro 使用模型名推导表名；没有显式 `Column` 时，Oro 使用 Go 字段名的 snake_case 作为列名。
 
-## 外键
+## 会自动执行的变更
 
-数据库级外键默认关闭。关联首先是 ORM 元数据和查询行为。需要数据库级约束时，再通过字段或同步配置显式开启。
+`Sync` 默认只做不会破坏已有数据的变更：
 
-这样能让 SQLite、MySQL、PostgreSQL、分片表和模块化项目都保持同步策略稳定。
+| 变更 | 行为 |
+| --- | --- |
+| 表不存在 | 创建表 |
+| 字段不存在 | 添加字段 |
+| 索引不存在 | 创建普通索引 |
+| 唯一索引不存在 | 创建唯一索引 |
+| 全文索引不存在 | 在驱动支持时创建全文索引 |
+| 字段安全扩大 | 在方言确认安全时执行 |
+| 字段重命名 | 通过历史快照明确识别时执行 |
+
+这适合本地开发、测试环境、早期产品和插件化模块自动装表。
+
+## 会拒绝的危险变更
+
+下面这些情况会返回 `oro.ErrUnsafeSchemaChange` 或 `oro.ErrAmbiguousSchemaChange`：
+
+| 变更 | 原因 |
+| --- | --- |
+| 删除字段 | 可能丢数据 |
+| 删除索引或全文索引 | 可能影响线上查询计划 |
+| 字段类型缩窄 | 可能截断或转换失败 |
+| nullable 收紧为 not null | 现有数据可能不满足 |
+| 不明确的类型变更 | 各数据库行为差异大 |
+| 无法唯一判断的重命名 | 可能误把新字段当旧字段改名 |
+
+Oro 的原则是：自动同步只能做确定安全的事，数据破坏类变更必须显式处理。
+
+## 字段重命名
+
+Oro 会维护内部结构快照表，用于判断“旧字段消失、新字段出现”是否是一次明确重命名。
+
+例如第一次同步：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").Column("old_code").String()
+}
+```
+
+后续改为：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").Column("code").String()
+}
+```
+
+如果快照能明确确认这是同一个 Go 字段的列名变化，`Sync` 可以生成 rename column。若同时存在多个候选或历史信息不足，会拒绝并返回歧义错误。
+
+## 字段类型变更策略
+
+字段类型变更分三类：
+
+| 类型 | 处理 |
+| --- | --- |
+| 等价类型 | 忽略，例如驱动返回的类型别名 |
+| 安全扩大 | 方言支持时执行，例如长度扩大 |
+| 不安全变更 | 拒绝，例如 string 缩短、decimal 精度缩小、nullable 收紧 |
+
+推荐线上流程：
+
+1. 新增字段；
+2. 部署写新字段的代码；
+3. 显式回填历史数据；
+4. 切换读取到新字段；
+5. 在维护窗口手动删除旧字段。
+
+这比自动修改复杂字段更可控。
+
+## 索引和全文索引
+
+字段级索引：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Field("Code").String().Unique()
+    s.Field("Status").String().Index()
+    s.Field("Name").String().FullText()
+}
+```
+
+组合索引：
+
+```go
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.Index("articles_status_created_idx", "Status", "CreatedAt")
+    s.Unique("articles_slug_tenant_unique", "Slug", "TenantID")
+    s.FullText("articles_search_fulltext", "Title", "Content")
+}
+```
+
+索引字段使用 Go 字段名，Oro 会映射到数据库列名。
+
+## 表前缀和快照表
+
+如果配置了表前缀，`Sync` 会统一使用物理表名：
+
+```go
+db, err := oro.Open(oro.Config{
+    TablePrefix: "app_",
+})
+```
+
+- `products` 会同步为 `app_products`；
+- 内部结构快照表也会使用同一前缀；
+- Raw SQL 不会自动处理前缀，需要使用 `db.TableName("products")`。
+
+## 多连接和模型连接
+
+模型可以指定默认连接：
+
+```go
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Connection("catalog")
+    s.Table("products")
+}
+```
+
+`db.Sync(ctx)` 会按模型连接分别同步。也可以手动指定连接：
+
+```go
+err := db.Connection("tenant_1").Sync(ctx)
+```
+
+手动连接适合多租户独立库或初始化脚本。
+
+## 租户和分片
+
+租户字段和分片字段也是表结构的一部分：
+
+```go
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Tenant("TenantID", "AppID")
+    s.Shard("orders", "TenantID")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("AppID").UnsignedBigInt().Index()
+}
+```
+
+分片模型会对配置中的分片连接同步目标表。字段定义仍然只写一次。
+
+## 外键策略
+
+数据库级外键默认不自动开启。Oro 的关联首先是 ORM 元数据和查询行为：
+
+- `BelongsTo`、`HasOne`、`HasMany`、`ManyToMany` 用于查询和预加载；
+- 外键列通过普通字段定义；
+- 是否加数据库级外键约束交给应用显式控制。
+
+这个选择更适合 SQLite/MySQL/PostgreSQL 混用、分片表、模块化项目和插件安装场景。
+
+## 生产环境建议
+
+参考主流 ORM 的经验，自动同步在生产环境要谨慎使用：
+
+| 场景 | 建议 |
+| --- | --- |
+| 本地开发 | 可以启动时自动 `Sync` |
+| CI 测试 | 每次测试前 `Sync` |
+| 初次安装 | 可以自动 `Sync` 创建表 |
+| 生产滚动发布 | 建议先跑同步检查或在维护流程中执行 |
+| 破坏性变更 | 不依赖 `Sync`，写显式 SQL 或运维脚本 |
+
+Oro 不要求为每次结构调整维护单独的迁移文件，但这不表示线上结构变更可以完全无审查。
+
+## 错误处理
+
+```go
+if err := db.Sync(ctx); err != nil {
+    if errors.Is(err, oro.ErrUnsafeSchemaChange) {
+        // 输出同步计划或提示人工处理
+    }
+    return err
+}
+```
+
+`Sync` 错误通常会带上表、字段、SQL 或原始驱动错误，方便定位。

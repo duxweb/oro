@@ -1,0 +1,67 @@
+---
+title: Serialization
+description: API-safe serialization, hidden fields, loaded relations, nullable values, and JSON behavior.
+---
+
+Oro does not replace Go's JSON package. It only provides an optional ORM-aware serialization layer for hidden fields and loaded relations.
+
+## Normal JSON
+
+A model is still a Go struct. `encoding/json` works as usual and follows your JSON tags.
+
+```go
+bytes, err := json.Marshal(product)
+```
+
+## Oro serialization
+
+```go
+payload := oro.Serialize(product)
+```
+
+`Serialize` applies ORM metadata:
+
+- fields marked `Hidden()` are omitted by default;
+- loaded relations can be included;
+- `oro.Null[T]` serializes naturally as a value or `null`;
+- virtual fields can be included when present.
+
+## Hidden fields
+
+```go
+func (User) Define(s *oro.SchemaBuilder) {
+    s.Field("PasswordHash").String().Hidden()
+}
+```
+
+```go
+payload := oro.Serialize(user)
+payloadWithHidden := oro.Serialize(user, oro.ShowHidden())
+```
+
+Use `ShowHidden` only for internal tooling.
+
+## Relations
+
+Relations are not embedded in the struct, so relation serialization reads the loaded relation state:
+
+```go
+article, err := db.Use[Article]().With(Article{}.Comments()).First(ctx)
+payload := oro.Serialize(article)
+```
+
+If a relation was not loaded, serialization does not query it implicitly.
+
+## DTOs
+
+For public APIs with strict shape requirements, DTOs are still the best boundary:
+
+```go
+type ProductResponse struct {
+    ID    uint64 `json:"id"`
+    Code  string `json:"code"`
+    Price uint   `json:"price"`
+}
+```
+
+Use `Serialize` for convenient ORM-aware output, and DTOs for stable external contracts.

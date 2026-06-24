@@ -1,0 +1,245 @@
+---
+title: 分页与流式读取
+description: Page、Items、Total、Pages、Chunk、Each 和 Stream 的使用方式。
+---
+
+Oro 的分页器是惰性的：`Paginate(size)` 只保存查询和每页数量，不立即执行 SQL。你可以按接口需要决定是否查询总数。
+
+## 基础分页
+
+```go
+pager := db.Use[Product]().
+    Where("Status", "active").
+    OrderByDesc("ID").
+    Paginate(20)
+
+page, err := pager.Page(ctx, 1)
+if err != nil {
+    return err
+}
+```
+
+`Page(ctx, n)` 会执行两类查询：
+
+- 一次 `count(*)` 获取总数；
+- 一次带 `limit/offset` 的列表查询。
+
+返回结构：
+
+```go
+type Page[T any] struct {
+    Items []T   `json:"items"`
+    Total int64 `json:"total"`
+    Page  int   `json:"page"`
+    Size  int   `json:"size"`
+    Pages int   `json:"pages"`
+}
+```
+
+## 只获取列表
+
+很多接口不需要总数，例如“加载更多”。这时不要调用 `Page`，直接调用 `Items`。
+
+```go
+items, err := pager.Items(ctx, 1)
+```
+
+`Items` 只执行列表查询，不执行 `count(*)`。
+
+## 分开获取总数和页数
+
+```go
+total, err := pager.Total(ctx)
+pages, err := pager.Pages(ctx)
+```
+
+`Total` 和 `Pages` 都需要执行总数查询。缓存与否由你自己的接口层决定，Oro 不会隐式缓存总数。
+
+## 页码规则
+
+```go
+pager := db.Use[Product]().Paginate(20)
+```
+
+| 参数 | 规则 |
+| --- | --- |
+| `size` | 必须大于 0 |
+| `page` | 从 1 开始 |
+| 查不到 | `Items` 返回空切片，`Page.Total` 为 0 |
+
+无效参数会返回 `oro.ErrInvalidArgument`。
+
+## 裸表分页
+
+```go
+pager := db.Table("products").
+    Where("status", "active").
+    OrderByDesc("id").
+    Paginate(20)
+
+rows, err := pager.Items(ctx, 1)
+```
+
+裸表分页返回 `[]oro.Map`。
+
+需要 DTO：
+
+```go
+type ProductView struct {
+    ID    uint64
+    Code  string
+    Price uint
+}
+
+page, err := db.Table("products").
+    Select("id", "code", "price").
+    OrderByDesc("id").
+    MapTo[ProductView]().
+    Paginate(20).
+    Page(ctx, 1)
+```
+
+## Raw 查询分页
+
+Raw 查询没有链式 `Paginate`。建议自己写分页 SQL，或者优先用 `Table`/`Use` 构造查询。
+
+```go
+rows, err := db.Raw(
+    "select id, code from "+db.TableName("products")+" order by id desc limit ? offset ?",
+    20,
+    0,
+).Get(ctx)
+```
+
+Raw SQL 需要自己处理表前缀，使用 `db.TableName("products")`。
+
+## 排序要求
+
+分页最好始终带稳定排序：
+
+```go
+pager := db.Use[Product]().OrderByDesc("ID").Paginate(20)
+```
+
+原因：
+
+- 没有排序时，不同数据库可能返回不同顺序；
+- 数据变化时 offset 分页可能重复或漏数据；
+- 跨分片分页/First 更需要明确排序，否则无法合并结果。
+
+当前版本先提供 offset 分页，不做游标分页。后续如果需要高并发大数据分页，可以再补 cursor/keyset pagination。
+
+## Chunk 分块读取
+
+`Chunk` 适合后台任务：每批读取固定数量，处理完再读下一批。
+
+```go
+err := db.Use[Product]().
+    OrderBy("ID").
+    Chunk(ctx, 1000, func(items []*Product) error {
+        for _, item := range items {
+            // 处理数据
+            _ = item
+        }
+        return nil
+    })
+```
+
+`Chunk` 的特点：
+
+- 不一次性加载全部数据；
+- 回调返回错误会停止后续读取；
+- 模型查询在可能时使用主键排序；
+- 裸表查询建议显式 `OrderBy`。
+
+裸表分块：
+
+```go
+err := db.Table("products").
+    OrderBy("id").
+    Chunk(ctx, 1000, func(rows []oro.Map) error {
+        return nil
+    })
+```
+
+## Each 逐行处理
+
+`Each` 是 `Chunk` 的轻量封装，适合逐行处理。
+
+```go
+err := db.Use[Product]().OrderBy("ID").Each(ctx, func(product *Product) error {
+    return nil
+})
+```
+
+如果需要批量写出、批量调用外部接口或批量提交事务，优先用 `Chunk`。
+
+## Stream 流式读取
+
+`Stream` 直接持有底层 rows，适合导出和边读边写。
+
+```go
+stream, err := db.Use[Product]().Where("Status", "active").Stream(ctx)
+if err != nil {
+    return err
+}
+defer stream.Close()
+
+for stream.Next() {
+    product := stream.Value()
+    _ = product
+}
+
+if err := stream.Err(); err != nil {
+    return err
+}
+```
+
+使用规则：
+
+- 必须 `defer stream.Close()`；
+- 循环结束后检查 `stream.Err()`；
+- 不要把 stream 跨 goroutine 共享；
+- 长时间导出要设置 `Timeout` 或使用更长的 context。
+
+裸表和 Raw 也支持 Stream：
+
+```go
+stream, err := db.Table("products").Stream(ctx)
+stream, err := db.Raw("select * from "+db.TableName("products")).Stream(ctx)
+```
+
+## MapTo 与流式读取
+
+`Table(...).MapTo[T]()` 可以映射为结构体后再分页、分块或流式读取。
+
+```go
+err := db.Table("products").
+    Select("id", "code", "price").
+    MapTo[ProductView]().
+    Chunk(ctx, 500, func(items []*ProductView) error {
+        return nil
+    })
+```
+
+`Raw(...).MapTo[T]()` 支持 `First`、`Get` 和 `Stream`；Raw 没有链式 `Paginate`、`Chunk`、`Each`。映射规则使用字段定义和 snake_case 转换，不依赖 `db` tag。
+
+## 选择方式
+
+| 场景 | 推荐 |
+| --- | --- |
+| 普通后台列表 | `Paginate().Page()` |
+| 移动端加载更多 | `Paginate().Items()` |
+| 只显示总数 | `Paginate().Total()` 或 `Count()` |
+| 后台批处理 | `Chunk()` |
+| 逐行处理 | `Each()` |
+| 大文件导出 | `Stream()` |
+| 原生复杂 SQL | `Raw` 手写 limit/offset |
+
+## 性能注意
+
+- `Page` 会查询总数，不需要总数时不要调用；
+- `count(*)` 在复杂 join/group 下可能很贵；
+- `Chunk` 比一次性 `Get` 更稳；
+- `Stream` 占用一个连接直到关闭，不能长时间忘记释放；
+- 大 offset 分页在大表上会变慢，后续可以根据业务补游标分页方案。

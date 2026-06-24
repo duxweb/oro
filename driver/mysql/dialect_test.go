@@ -397,7 +397,7 @@ func TestCompileSchemaCreateTable(t *testing.T) {
 			Name: "products",
 			Columns: []oro.ColumnSpec{
 				{ColumnName: "id", Type: "uint64", Primary: true},
-				{ColumnName: "code", Type: "string", Size: 64, Nullable: true},
+				{ColumnName: "code", Type: "string", Size: 64, Nullable: true, Comment: "product code"},
 				{ColumnName: "price", Type: "decimal", Precision: 12, Scale: 2, Default: &oro.DefaultSpec{Value: 0}},
 				{ColumnName: "meta", Type: "json", Nullable: true},
 				{ColumnName: "created_at", Type: "time.Time", Nullable: true},
@@ -407,7 +407,27 @@ func TestCompileSchemaCreateTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "create table if not exists `products` (`id` bigint unsigned primary key auto_increment, `code` varchar(64), `price` decimal(12,2) not null default 0, `meta` json, `created_at` datetime)"
+	want := "create table if not exists `products` (`id` bigint unsigned primary key auto_increment, `code` varchar(64) comment 'product code', `price` decimal(12,2) not null default 0, `meta` json, `created_at` datetime)"
+	if len(statements) != 1 || statements[0].SQL != want {
+		t.Fatalf("got %#v, want %q", statements, want)
+	}
+}
+
+func TestCompileSchemaAddColumnWithComment(t *testing.T) {
+	statements, err := (dialect{}).CompileSchema(oro.SchemaChange{
+		Kind:  oro.SchemaAddColumn,
+		Table: oro.TableSpec{Name: "products"},
+		Column: oro.ColumnSpec{
+			ColumnName: "stock",
+			Type:       "uint",
+			Nullable:   true,
+			Comment:    "stock's value",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "alter table `products` add column `stock` int unsigned comment 'stock''s value'"
 	if len(statements) != 1 || statements[0].SQL != want {
 		t.Fatalf("got %#v, want %q", statements, want)
 	}

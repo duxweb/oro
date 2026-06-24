@@ -1,0 +1,290 @@
+---
+title: 条件表达式
+description: Where 参数规则、Field 条件、JSON 条件、全文索引、分组、子查询和列比较参考。
+---
+
+Oro 条件设计目标是“看一眼知道在做什么”，同时保留必要的 SQL 表达力。
+
+## Where 参数规则
+
+`Where` 支持三种形态：
+
+```go
+Where("Price", 100)              // Price = 100
+Where("Price", ">=", 100)       // Price >= 100
+Where(oro.Field("Price").Gte(100))
+```
+
+模型查询使用 Go 字段名；裸表查询使用数据库列名。
+
+`Where` 不接受函数回调。需要回调时使用 `WhereGroup`、`OrWhereGroup` 或 `WhereWhen`。
+
+`Where` 也可以一次接收多个条件对象，默认按 AND 追加：
+
+```go
+query.Where(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Price").Gte(100),
+)
+```
+
+回调不要传给 `Where`。正确写法是显式使用分组：
+
+```go
+query.WhereGroup(func(w *oro.WhereBuilder) {
+    w.Where("Status", "active")
+})
+```
+
+## Field 表达式完整方法
+
+`oro.Field(name)` 返回字段表达式，主要用于 `Where(...)`、`OrWhere(...)`、`WhereGroup(...)` 这类接收条件对象的位置。
+
+```go
+db.Use[Product]().Where(oro.Field("Code").Eq("P001"))
+db.Table("products").Where(oro.Field("code").Eq("P001"))
+```
+
+模型查询中 `name` 使用 Go 字段名；裸表查询中 `name` 使用数据库列名。
+
+`oro.Column(name)` 是 `oro.Field(name)` 的语义别名，不改变字段解析规则。模型查询仍写 Go 字段名；裸表查询仍写数据库列名。它只适合在 `Table` 或 SQL 周边代码里强调“这里是列语义”。
+
+```go
+products, err := db.Use[Product]().
+    Where(
+        oro.Field("Price").Gte(100),
+        oro.Field("Status").Eq("active"),
+    ).
+    Get(ctx)
+```
+
+### 值比较
+
+| 方法 | SQL 语义 |
+| --- | --- |
+| `Eq(value)` | `=` |
+| `NotEq(value)` | `!=` |
+| `Gt(value)` | `>` |
+| `Gte(value)` | `>=` |
+| `Lt(value)` | `<` |
+| `Lte(value)` | `<=` |
+| `Like(value)` | `LIKE` |
+| `NotLike(value)` | `NOT LIKE` |
+| `In(values...)` | `IN` |
+| `NotIn(values...)` | `NOT IN` |
+| `Between(start, end)` | `BETWEEN` |
+| `IsNull()` | `IS NULL` |
+| `IsNotNull()` | `IS NOT NULL` |
+
+`In(values...)` 和 `NotIn(values...)` 用于值列表；`WhereIn(field, oro.Query(...))` 用于子查询，两者不要混用。
+
+### 列比较
+
+条件对象：
+
+```go
+query.Where(oro.Field("UpdatedAt").GtCol("CreatedAt"))
+```
+
+可用方法：
+
+| 方法 | SQL 语义 |
+| --- | --- |
+| `EqCol(right)` | `left = right` |
+| `NotEqCol(right)` | `left != right` |
+| `GtCol(right)` | `left > right` |
+| `GteCol(right)` | `left >= right` |
+| `LtCol(right)` | `left < right` |
+| `LteCol(right)` | `left <= right` |
+
+链式方法：
+
+```go
+query.WhereColumn("UpdatedAt", ">", "CreatedAt")
+```
+
+### Select 别名
+
+`oro.As(field, alias)` 用于 `Select(...)` 中给字段起别名，返回的也是 `FieldExpr`。它同样遵循入口规则：模型查询中未限定字段写 Go 字段名，裸表查询中写数据库列名；`"o.status"` 这类带别名限定的字段按 SQL 处理。
+
+```go
+rows, err := db.Table("orders").As("o").
+    Select(
+        oro.As("o.status", "status"),
+        oro.Count("*").As("total"),
+    ).
+    GroupBy("o.status").
+    Get(ctx)
+```
+
+字段表达式方法归类：
+
+| 分类 | 方法 |
+| --- | --- |
+| 构造 | `oro.Field(name)`、`oro.Column(name)`、`oro.As(field, alias)` |
+| 值比较 | `Eq`、`NotEq`、`Gt`、`Gte`、`Lt`、`Lte` |
+| 模糊匹配 | `Like`、`NotLike` |
+| 集合 | `In`、`NotIn` |
+| 范围 | `Between` |
+| NULL | `IsNull`、`IsNotNull` |
+| 列比较 | `EqCol`、`NotEqCol`、`GtCol`、`GteCol`、`LtCol`、`LteCol` |
+
+统一使用 Go 代码中常见的短方法：`Gte`、`Lte`、`NotEq`。
+
+## 分组
+
+`WhereGroup` 明确表达括号条件。
+
+```go
+products, err := db.Use[Product]().
+    Where("Status", "active").
+    WhereGroup(func(w *oro.WhereBuilder) {
+        w.Where("Price", ">=", 100).
+            OrWhere("Code", "like", "VIP%")
+    }).
+    Get(ctx)
+```
+
+OR 分组：
+
+```go
+query.OrWhereGroup(func(w *oro.WhereBuilder) {
+    w.Where("Status", "draft").Where("Price", 0)
+})
+```
+
+多层嵌套：
+
+```go
+query.WhereGroup(func(w *oro.WhereBuilder) {
+    w.Where("Status", "active").
+        OrWhereGroup(func(or *oro.WhereBuilder) {
+            or.Where("Status", "draft").
+                WhereGroup(func(nested *oro.WhereBuilder) {
+                    nested.Where("OwnerID", userID).
+                        OrWhere("Visibility", "public")
+                })
+        })
+})
+```
+
+`WhereBuilder` 可用方法：
+
+| 方法 | SQL 语义 |
+| --- | --- |
+| `Where` / `OrWhere` | AND / OR 条件 |
+| `WhereGroup` / `OrWhereGroup` | AND / OR 括号分组 |
+| `WhereWhen` | 条件成立时追加 AND 分组 |
+| `WhereColumn` / `OrWhereColumn` | 列比较 |
+| `WhereIn` / `OrWhereIn` | `IN (subquery)` |
+| `WhereExists` / `OrWhereExists` | `EXISTS (subquery)` |
+| `WhereRaw` / `OrWhereRaw` | 原生条件片段 |
+
+## 条件对象函数
+
+除了 `Field`、`JSON`、`FullText` 之外，Oro 也提供几个直接创建条件对象的函数，适合封装可复用条件。
+
+| 函数 | 用途 |
+| --- | --- |
+| `oro.And(conditions...)` | 条件对象 AND 分组 |
+| `oro.Or(conditions...)` | 条件对象 OR 分组 |
+| `oro.Not(condition)` | NOT 条件 |
+| `oro.Exists(oro.Query(query))` | EXISTS 子查询条件 |
+| `oro.RawCondition(sql, args...)` | 原生条件对象 |
+| `oro.Raw(sql, args...)` | Raw 表达式，也可作为 `Where` 条件 |
+
+示例：
+
+```go
+activeOrDraft := oro.Or(
+    oro.Field("Status").Eq("active"),
+    oro.Field("Status").Eq("draft"),
+)
+
+products, err := db.Use[Product]().
+    Where("TenantID", tenantID).
+    Where(activeOrDraft).
+    Where(oro.Not(oro.Field("DeletedAt").IsNotNull())).
+    Get(ctx)
+```
+
+`RawCondition` / `Raw` 是逃生口。能用 `Field`、`JSON`、`FullText`、`WhereColumn` 表达时，优先用结构化条件。
+
+## 条件回调
+
+`WhereWhen` 只在条件成立时追加一个分组。
+
+```go
+query := db.Use[Product]().Where("Status", "active")
+
+query = query.WhereWhen(keyword != "", func(w *oro.WhereBuilder) {
+    w.Where("Code", "like", "%"+keyword+"%").
+        OrWhere("Name", "like", "%"+keyword+"%")
+})
+```
+
+`WhereWhen` 的第二个参数固定为回调，避免把条件判断和字段条件混在一起。
+
+## Raw 条件
+
+```go
+rows, err := db.Table("orders").
+    WhereRaw("json_extract(meta, '$.source') = ?", "app").
+    Get(ctx)
+```
+
+Raw 条件用于数据库特性或临时逃生口。优先使用结构化条件，便于跨库。
+
+## 子查询条件
+
+```go
+paidUsers := db.Table("orders").Select("user_id").Where("status", "paid")
+
+users, err := db.Table("users").
+    WhereIn("id", oro.Query(paidUsers)).
+    Get(ctx)
+```
+
+`WhereExists`：
+
+```go
+orders := db.Table("orders").Select(oro.Raw("1")).WhereColumn("orders.user_id", "users.id")
+
+users, err := db.Table("users").WhereExists(oro.Query(orders)).Get(ctx)
+```
+
+## JSON 条件
+
+```go
+products, err := db.Use[Product]().
+    Where(oro.JSON("Meta").Path("seo", "title").Eq("Oro")).
+    Get(ctx)
+```
+
+| 方法 | 用途 |
+| --- | --- |
+| `oro.JSON(field).Path(parts...)` | 指定 JSON 路径 |
+| `Eq(value)` / `NotEq(value)` | JSON 路径值比较 |
+| `IsNull()` / `IsNotNull()` | JSON 路径空值判断 |
+| `Exists()` | 路径存在 |
+| `Contains(value)` | JSON 包含 |
+
+## 全文索引条件
+
+```go
+articles, err := db.Use[Article]().
+    Where(oro.FullText("Title", "Content").Match("generic orm")).
+    Select("ID", "Title", oro.FullText("Title", "Content").Score("generic orm").As("score")).
+    OrderByDesc("score").
+    Get(ctx)
+```
+
+全文索引需要先在模型定义里声明：
+
+```go
+func (Article) Define(s *oro.SchemaBuilder) {
+    s.FullText("articles_search_fulltext", "Title", "Content")
+}
+```
+
+不同数据库全文检索语法差异较大，Oro 会按方言编译成对应 SQL。

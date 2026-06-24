@@ -1,0 +1,52 @@
+---
+title: Logging
+description: SQL logging, slow query logging, logger interface, and slog integration.
+---
+
+Oro logging is interface-based so applications can plug in `slog`, Zap, Zerolog, or a test logger.
+
+## Configure logging
+
+```go
+db, err := oro.Open(oro.Config{
+    Logger: oro.NewSlogLogger(slog.Default()),
+    LogLevel: oro.LogLevelInfo,
+    SlowQueryThreshold: 200 * time.Millisecond,
+    Connections: connections,
+})
+```
+
+Logging is configured at the ORM level and applies to all connections unless a connection overrides it.
+
+## What is logged
+
+Depending on level and configuration, Oro can log:
+
+- SQL statement;
+- arguments, with sensitive values redacted when configured;
+- duration;
+- rows affected;
+- connection name;
+- model or table;
+- slow query marker;
+- error context.
+
+## Query debug
+
+Use query-local debug only when investigating a specific path:
+
+```go
+rows, err := db.Use[Product]().
+    Debug().
+    Where("Status", "active").
+    Get(ctx)
+```
+
+Do not enable verbose SQL logs globally in high-traffic production environments unless sampling or slow-query thresholds are configured.
+
+## Recommended production setup
+
+- Log failed SQL operations at error level.
+- Log slow queries with a threshold.
+- Avoid logging sensitive arguments.
+- Attach request IDs and tenant IDs through context-aware loggers.
