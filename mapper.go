@@ -25,7 +25,6 @@ func (mapper reflectMapper) MapModel(schema *ModelSchema, row Map, dest any) err
 	if err := mapRowToStruct(row, dest, schema); err != nil {
 		return err
 	}
-	ensureModelState(dest)
 	return nil
 }
 
@@ -91,23 +90,6 @@ func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
 	}
 
 	return nil
-}
-
-func ensureModelState(dest any) {
-	value := reflect.ValueOf(dest)
-	if !value.IsValid() || value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	structValue := value.Elem()
-	if structValue.Kind() != reflect.Struct {
-		return
-	}
-	modelField := structValue.FieldByName("Model")
-	if !modelField.IsValid() || !modelField.CanAddr() || modelField.Type() != reflect.TypeOf(Model{}) {
-		return
-	}
-	model := modelField.Addr().Interface().(*Model)
-	model.ensureRelationState()
 }
 
 func structTypeOfDest(dest any) (reflect.Type, error) {
@@ -182,7 +164,7 @@ func assignValue(dest reflect.Value, value any) error {
 			if err != nil {
 				return err
 			}
-			dest.Set(reflect.ValueOf(timeValue))
+			setTimeValue(dest, timeValue)
 			return nil
 		}
 		intValue, err := toInt64(value)
@@ -243,7 +225,7 @@ func assignValue(dest reflect.Value, value any) error {
 			if err != nil {
 				return err
 			}
-			dest.Set(reflect.ValueOf(timeValue))
+			setTimeValue(dest, timeValue)
 			return nil
 		}
 		return assignJSONValue(dest, value)
@@ -254,6 +236,16 @@ func assignValue(dest reflect.Value, value any) error {
 	}
 
 	return nil
+}
+
+func setTimeValue(dest reflect.Value, value time.Time) {
+	if dest.CanAddr() && dest.Addr().CanInterface() {
+		if target, ok := dest.Addr().Interface().(*time.Time); ok {
+			*target = value
+			return
+		}
+	}
+	dest.Set(reflect.ValueOf(value))
 }
 
 func scannerFor(dest reflect.Value) (sql.Scanner, bool) {

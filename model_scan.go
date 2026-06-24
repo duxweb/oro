@@ -48,22 +48,41 @@ func (cache *modelScanCache) set(key string, plan cachedModelScanPlan) {
 	cache.items.Set(key, plan)
 }
 
-func modelRowsDirectAvailable(db *DB, spec QuerySpec) bool {
-	if cacheEnabled(db, spec) {
+func structRowsDirectAvailable(db *DB, spec QuerySpec) bool {
+	if db == nil || db.runtime == nil || cacheEnabled(db, spec) {
 		return false
 	}
-	_, ok := db.runtime.Executor.(sqlExecutor)
-	return ok
+	return usesDefaultExecutor(db) && usesDefaultMapper(db)
+}
+
+func usesDefaultMapper(db *DB) bool {
+	if db == nil || db.runtime == nil {
+		return false
+	}
+	switch db.runtime.Mapper.(type) {
+	case reflectMapper:
+		return true
+	default:
+		return false
+	}
 }
 
 func queryModelRowsDirect[T any](ctx context.Context, db *DB, spec QuerySpec, schema *ModelSchema) ([]*T, error) {
+	return queryStructRowsDirect[T](ctx, db, spec, schema)
+}
+
+func queryStructRowsDirect[T any](ctx context.Context, db *DB, spec QuerySpec, schema *ModelSchema) ([]*T, error) {
 	rows, err := openModelRowsPrepared(ctx, db, spec)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	mappers, values, dests, err := modelScanPlan(rows, schema)
+	destType, err := structTypeOfGeneric[T]()
+	if err != nil {
+		return nil, err
+	}
+	mappers, values, dests, err := modelScanPlan(rows, schema, destType)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +90,7 @@ func queryModelRowsDirect[T any](ctx context.Context, db *DB, spec QuerySpec, sc
 	models := make([]*T, 0, resultCapacity(spec.Limit))
 	for rows.Next() {
 		model := new(T)
-		if err := scanModelRow(rows, model, schema, mappers, values, dests); err != nil {
+		if err := scanStructRow(rows, model, schema, mappers, values, dests); err != nil {
 			return nil, err
 		}
 		models = append(models, model)
@@ -83,9 +102,51 @@ func queryModelRowsDirect[T any](ctx context.Context, db *DB, spec QuerySpec, sc
 }
 
 func queryModelFirstDirect[T any](ctx context.Context, db *DB, spec QuerySpec, schema *ModelSchema) (*T, error) {
+	return queryStructFirstDirect[T](ctx, db, spec, schema)
+}
+
+func queryStructFirstDirect[T any](ctx context.Context, db *DB, spec QuerySpec, schema *ModelSchema) (*T, error) {
 	limit := 1
 	spec.Limit = &limit
-	models, err := queryModelRowsDirect[T](ctx, db, spec, schema)
+	models, err := queryStructRowsDirect[T](ctx, db, spec, schema)
+	if err != nil || len(models) == 0 {
+		return nil, err
+	}
+	return models[0], nil
+}
+
+func queryRawStructRowsDirect[T any](ctx context.Context, db *DB, raw RawSpec, timeout time.Duration, schema *ModelSchema) ([]*T, error) {
+	rows, err := openRawRowsDirect(ctx, db, raw, timeout)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	destType, err := structTypeOfGeneric[T]()
+	if err != nil {
+		return nil, err
+	}
+	mappers, values, dests, err := modelScanPlan(rows, schema, destType)
+	if err != nil {
+		return nil, err
+	}
+
+	models := make([]*T, 0)
+	for rows.Next() {
+		model := new(T)
+		if err := scanStructRow(rows, model, schema, mappers, values, dests); err != nil {
+			return nil, err
+		}
+		models = append(models, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, &Error{Op: "query", Kind: err, Cause: err}
+	}
+	return models, nil
+}
+
+func queryRawStructFirstDirect[T any](ctx context.Context, db *DB, raw RawSpec, timeout time.Duration, schema *ModelSchema) (*T, error) {
+	models, err := queryRawStructRowsDirect[T](ctx, db, raw, timeout, schema)
 	if err != nil || len(models) == 0 {
 		return nil, err
 	}
@@ -120,13 +181,29 @@ func openModelRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) (*modelR
 	if err != nil {
 		return nil, err
 	}
+	return openCompiledRows(ctx, db, conn, spec, compiled, "query")
+}
+
+func openRawRowsDirect(ctx context.Context, db *DB, raw RawSpec, timeout time.Duration) (*modelRows, error) {
+	conn, err := connectionForQuery(db, db.session.connection)
+	if err != nil {
+		return nil, err
+	}
+	spec := QuerySpec{
+		Connection: db.session.connection,
+		Timeout:    int64(timeout),
+	}
+	return openCompiledRows(ctx, db, conn, spec, CompiledSQL{SQL: raw.SQL, Args: raw.Args}, "raw")
+}
+
+func openCompiledRows(ctx context.Context, db *DB, conn *Connection, spec QuerySpec, compiled CompiledSQL, operation string) (*modelRows, error) {
 	ctx, cancel := withOperationTimeout(ctx, queryTimeout(db, spec))
 	querier, ok := execForReadRuntime(db, conn, spec).(sqlQuerier)
 	if !ok {
 		cancel()
-		return nil, &Error{Op: "query", Kind: ErrInvalidArgument}
+		return nil, &Error{Op: operation, Kind: ErrInvalidArgument}
 	}
-	if err := emitSQLEvent(ctx, db, spec, BeforeSQL, compiled, "query", 0, 0, nil); err != nil {
+	if err := emitSQLEvent(ctx, db, spec, BeforeSQL, compiled, operation, 0, 0, nil); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -134,11 +211,11 @@ func openModelRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) (*modelR
 	rows, err := querier.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
 		cancel()
-		queryErr := translateQueryError(conn, wrapContextError("query", err))
-		_ = emitSQLEvent(ctx, db, spec, AfterSQL, compiled, "query", 0, time.Since(startedAt), queryErr)
+		queryErr := translateQueryError(conn, wrapContextError(operation, err))
+		_ = emitSQLEvent(ctx, db, spec, AfterSQL, compiled, operation, 0, time.Since(startedAt), queryErr)
 		return nil, queryErr
 	}
-	return &modelRows{Rows: rows, ctx: ctx, cancel: cancel, db: db, spec: spec, compiled: compiled, startedAt: startedAt}, nil
+	return &modelRows{Rows: rows, ctx: ctx, cancel: cancel, db: db, spec: spec, compiled: compiled, operation: operation, startedAt: startedAt}, nil
 }
 
 type modelRows struct {
@@ -148,6 +225,7 @@ type modelRows struct {
 	db        *DB
 	spec      QuerySpec
 	compiled  CompiledSQL
+	operation string
 	startedAt time.Time
 	count     int64
 	closed    bool
@@ -159,7 +237,7 @@ func (rows *modelRows) Close() error {
 	}
 	rows.closed = true
 	err := rows.Rows.Close()
-	_ = emitSQLEvent(rows.ctx, rows.db, rows.spec, AfterSQL, rows.compiled, "query", rows.count, time.Since(rows.startedAt), err)
+	_ = emitSQLEvent(rows.ctx, rows.db, rows.spec, AfterSQL, rows.compiled, rows.operation, rows.count, time.Since(rows.startedAt), err)
 	rows.cancel()
 	return err
 }
@@ -172,45 +250,79 @@ func (rows *modelRows) Next() bool {
 	return ok
 }
 
-func modelScanPlan(rows *modelRows, schema *ModelSchema) ([]modelColumnMapper, []any, []any, error) {
+func modelScanPlan(rows *modelRows, schema *ModelSchema, destType reflect.Type) ([]modelColumnMapper, []any, []any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, nil, nil, &Error{Op: "scan", Kind: ErrScan, Cause: err}
 	}
-	if key, ok := modelScanPlanKey(schema, rows.compiled.SQL, columns); ok {
+	if key, ok := modelScanPlanKey(schema, destType, rows.compiled.SQL, columns); ok {
 		if plan, ok := rows.db.runtime.ScanCache.get(key); ok {
 			values, dests := modelScanBuffers(plan.columns)
 			return plan.mappers, values, dests, nil
 		}
-		mappers, values, dests, err := buildModelScanPlan(rows, schema, columns)
+		mappers, values, dests, err := buildModelScanPlan(rows, schema, destType, columns)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		rows.db.runtime.ScanCache.set(key, cachedModelScanPlan{mappers: mappers, columns: len(columns)})
 		return mappers, values, dests, nil
 	}
-	return buildModelScanPlan(rows, schema, columns)
+	return buildModelScanPlan(rows, schema, destType, columns)
 }
 
-func buildModelScanPlan(rows *modelRows, schema *ModelSchema, columns []string) ([]modelColumnMapper, []any, []any, error) {
+func buildModelScanPlan(rows *modelRows, schema *ModelSchema, destType reflect.Type, columns []string) ([]modelColumnMapper, []any, []any, error) {
 	columnTypes, _ := rows.ColumnTypes()
 	mappers := make([]modelColumnMapper, len(columns))
+	dtoFields := map[string]reflect.StructField(nil)
+	if schema == nil {
+		dtoFields = structFieldsByColumn(destType)
+	}
 	for index, column := range columns {
-		field, ok := schema.FieldByDB[column]
-		if ok && len(field.Index) > 0 {
-			mappers[index].fieldIndex = field.Index
-			mappers[index].fieldName = field.Name
-			if fieldType := fieldTypeByIndex(schema, field.Index); fieldType != nil {
-				mappers[index].fieldType = fieldType
-				mappers[index].fieldKind = fieldType.Kind()
-			}
-		}
+		applyColumnMapper(&mappers[index], schema, dtoFields, column)
 		if index < len(columnTypes) && columnTypes[index] != nil {
 			mappers[index].dbType = strings.ToLower(columnTypes[index].DatabaseTypeName())
 		}
 	}
 	values, dests := modelScanBuffers(len(columns))
 	return mappers, values, dests, nil
+}
+
+func applyColumnMapper(mapper *modelColumnMapper, schema *ModelSchema, dtoFields map[string]reflect.StructField, column string) {
+	if schema != nil {
+		field, ok := schema.FieldByDB[column]
+		if ok && len(field.Index) > 0 {
+			mapper.fieldIndex = field.Index
+			mapper.fieldName = field.Name
+			if fieldType := fieldTypeByIndex(schema, field.Index); fieldType != nil {
+				mapper.fieldType = fieldType
+				mapper.fieldKind = fieldType.Kind()
+			}
+		}
+		return
+	}
+
+	field, ok := dtoFields[column]
+	if !ok || len(field.Index) == 0 {
+		return
+	}
+	mapper.fieldIndex = field.Index
+	mapper.fieldName = field.Name
+	mapper.fieldType = field.Type
+	mapper.fieldKind = field.Type.Kind()
+}
+
+func structFieldsByColumn(destType reflect.Type) map[string]reflect.StructField {
+	fields := map[string]reflect.StructField{}
+	if destType == nil {
+		return fields
+	}
+	for _, field := range reflect.VisibleFields(destType) {
+		if !field.IsExported() {
+			continue
+		}
+		fields[Snake(field.Name)] = field
+	}
+	return fields
 }
 
 func modelScanBuffers(size int) ([]any, []any) {
@@ -222,14 +334,24 @@ func modelScanBuffers(size int) ([]any, []any) {
 	return values, dests
 }
 
-func modelScanPlanKey(schema *ModelSchema, sql string, columns []string) (string, bool) {
-	if schema == nil || sql == "" || len(columns) == 0 {
+func modelScanPlanKey(schema *ModelSchema, destType reflect.Type, sql string, columns []string) (string, bool) {
+	if sql == "" || len(columns) == 0 {
 		return "", false
 	}
 	builder := strings.Builder{}
-	builder.WriteString(schema.Name)
-	builder.WriteByte('|')
-	builder.WriteString(schema.Table)
+	if schema != nil {
+		builder.WriteString("schema:")
+		builder.WriteString(schema.Name)
+		builder.WriteByte('|')
+		builder.WriteString(schema.Table)
+	} else if destType != nil {
+		builder.WriteString("dto:")
+		builder.WriteString(destType.PkgPath())
+		builder.WriteByte('|')
+		builder.WriteString(destType.String())
+	} else {
+		return "", false
+	}
 	builder.WriteByte('|')
 	builder.WriteString(sql)
 	for _, column := range columns {
@@ -240,10 +362,21 @@ func modelScanPlanKey(schema *ModelSchema, sql string, columns []string) (string
 }
 
 func scanModelRow[T any](rows *modelRows, model *T, schema *ModelSchema, mappers []modelColumnMapper, values []any, dests []any) error {
+	return scanStructRow(rows, model, schema, mappers, values, dests)
+}
+
+func scanStructRow(rows *modelRows, dest any, schema *ModelSchema, mappers []modelColumnMapper, values []any, dests []any) error {
 	if err := rows.Scan(dests...); err != nil {
 		return &Error{Op: "scan", Kind: ErrScan, Cause: err}
 	}
-	structValue := reflect.ValueOf(model).Elem()
+	destValue := reflect.ValueOf(dest)
+	if !destValue.IsValid() || destValue.Kind() != reflect.Pointer || destValue.IsNil() {
+		return &Error{Op: "map", Kind: ErrInvalidArgument}
+	}
+	structValue := destValue.Elem()
+	if structValue.Kind() != reflect.Struct {
+		return &Error{Op: "map", Kind: ErrInvalidArgument}
+	}
 	for index, mapper := range mappers {
 		if len(mapper.fieldIndex) == 0 {
 			continue
@@ -256,20 +389,15 @@ func scanModelRow[T any](rows *modelRows, model *T, schema *ModelSchema, mappers
 			return &Error{Op: "map", Kind: ErrScan, Field: mapper.fieldName, Cause: err}
 		}
 	}
-	ensureModelStateForSchema(structValue, schema)
 	return nil
 }
 
-func ensureModelStateForSchema(structValue reflect.Value, schema *ModelSchema) {
-	if schema == nil || len(schema.ModelIndex) == 0 {
-		return
+func structTypeOfGeneric[T any]() (reflect.Type, error) {
+	destType := reflect.TypeOf((*T)(nil)).Elem()
+	if destType.Kind() != reflect.Struct {
+		return nil, &Error{Op: "map", Kind: ErrInvalidArgument}
 	}
-	modelField := structValue.FieldByIndex(schema.ModelIndex)
-	if !modelField.IsValid() || !modelField.CanAddr() || modelField.Type() != reflect.TypeOf(Model{}) {
-		return
-	}
-	model := modelField.Addr().Interface().(*Model)
-	model.ensureRelationState()
+	return destType, nil
 }
 
 func fieldTypeByIndex(schema *ModelSchema, index []int) reflect.Type {
@@ -299,11 +427,11 @@ func assignScannedModelValue(dest reflect.Value, value any, mapper modelColumnMa
 	if mapper.fieldType == timeType {
 		switch typedValue := value.(type) {
 		case time.Time:
-			dest.Set(reflect.ValueOf(typedValue))
+			setTimeValue(dest, typedValue)
 			return nil
 		case string:
 			if parsed, ok := parseTimeString(typedValue); ok {
-				dest.Set(reflect.ValueOf(parsed))
+				setTimeValue(dest, parsed)
 				return nil
 			}
 		}

@@ -49,6 +49,37 @@ func (integrationStock) Define(s *oro.SchemaBuilder) {
 	s.Field("Version").Uint().Default(1).OptimisticLock()
 }
 
+type integrationMappedDTO struct {
+	Code  string
+	Price uint
+}
+
+type integrationCustomMapperFactory struct {
+	oro.DefaultFactory
+}
+
+func (integrationCustomMapperFactory) NewMapper(rt *oro.Runtime) oro.Mapper {
+	return integrationCustomMapper{}
+}
+
+type integrationCustomMapper struct{}
+
+func (integrationCustomMapper) MapModel(schema *oro.ModelSchema, row oro.Map, dest any) error {
+	if product, ok := dest.(*integrationProduct); ok {
+		product.Code = "mapped-model"
+		product.Price = 777
+	}
+	return nil
+}
+
+func (integrationCustomMapper) MapDTO(row oro.Map, dest any) error {
+	if dto, ok := dest.(*integrationMappedDTO); ok {
+		dto.Code = "mapped-dto"
+		dto.Price = 888
+	}
+	return nil
+}
+
 type integrationOrderView struct {
 	ID       uint64
 	UserName string
@@ -1135,6 +1166,66 @@ func TestSQLiteCountExistsAndMapTo(t *testing.T) {
 	}
 	if len(rawViews) != 2 || rawViews[1].Code != "A007" {
 		t.Fatalf("unexpected raw mapped views %#v", rawViews)
+	}
+}
+
+func TestSQLiteCustomMapperDisablesStructDirectScan(t *testing.T) {
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Factory: integrationCustomMapperFactory{},
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := db.Raw(`
+		create table products (
+			id integer primary key autoincrement,
+			code text not null unique,
+			price integer not null,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)
+	`).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Register(integrationProduct{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Table("products").Create(ctx, oro.Map{"code": "CM001", "price": 10}); err != nil {
+		t.Fatal(err)
+	}
+
+	model, err := db.Use[integrationProduct]().First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model == nil || model.Code != "mapped-model" || model.Price != 777 {
+		t.Fatalf("expected custom model mapper, got %#v", model)
+	}
+
+	tableDTO, err := db.Table("products").MapTo[integrationMappedDTO]().First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tableDTO == nil || tableDTO.Code != "mapped-dto" || tableDTO.Price != 888 {
+		t.Fatalf("expected custom table DTO mapper, got %#v", tableDTO)
+	}
+
+	rawDTO, err := db.Raw("select code, price from products").MapTo[integrationMappedDTO]().First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawDTO == nil || rawDTO.Code != "mapped-dto" || rawDTO.Price != 888 {
+		t.Fatalf("expected custom raw DTO mapper, got %#v", rawDTO)
 	}
 }
 

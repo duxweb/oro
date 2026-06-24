@@ -38,6 +38,13 @@ func (query *TypedRawQuery[T]) Timeout(timeout time.Duration) *TypedRawQuery[T] 
 }
 
 func (query *TypedTableQuery[T]) First(ctx context.Context) (*T, error) {
+	if structRowsDirectAvailable(query.query.db, query.query.spec) && !query.query.allShards {
+		spec, schema, err := typedTableScanSpec[T](query.query)
+		if err != nil {
+			return nil, err
+		}
+		return queryStructFirstDirect[T](ctx, query.query.db, spec, schema)
+	}
 	row, err := query.query.First(ctx)
 	if err != nil || row == nil {
 		return nil, err
@@ -46,6 +53,13 @@ func (query *TypedTableQuery[T]) First(ctx context.Context) (*T, error) {
 }
 
 func (query *TypedTableQuery[T]) Get(ctx context.Context) ([]*T, error) {
+	if structRowsDirectAvailable(query.query.db, query.query.spec) && !query.query.allShards {
+		spec, schema, err := typedTableScanSpec[T](query.query)
+		if err != nil {
+			return nil, err
+		}
+		return queryStructRowsDirect[T](ctx, query.query.db, spec, schema)
+	}
 	rows, err := query.query.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -292,6 +306,10 @@ func (query *TypedTableQuery[T]) UpsertMany(ctx context.Context, values []Map, o
 }
 
 func (query *TypedRawQuery[T]) First(ctx context.Context) (*T, error) {
+	if structRowsDirectAvailable(query.query.db, QuerySpec{Cache: query.query.cache}) {
+		schema := typedSchema[T](query.query.db)
+		return queryRawStructFirstDirect[T](ctx, query.query.db, query.query.raw, query.query.timeout, schema)
+	}
 	row, err := query.query.First(ctx)
 	if err != nil || row == nil {
 		return nil, err
@@ -300,6 +318,10 @@ func (query *TypedRawQuery[T]) First(ctx context.Context) (*T, error) {
 }
 
 func (query *TypedRawQuery[T]) Get(ctx context.Context) ([]*T, error) {
+	if structRowsDirectAvailable(query.query.db, QuerySpec{Cache: query.query.cache}) {
+		schema := typedSchema[T](query.query.db)
+		return queryRawStructRowsDirect[T](ctx, query.query.db, query.query.raw, query.query.timeout, schema)
+	}
 	rows, err := query.query.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -338,4 +360,24 @@ func mapDTOs[T any](db *DB, rows []Map) ([]*T, error) {
 		values = append(values, value)
 	}
 	return values, nil
+}
+
+func typedTableScanSpec[T any](query *TableQuery) (QuerySpec, *ModelSchema, error) {
+	spec, err := tableShardSpec(query)
+	if err != nil {
+		return QuerySpec{}, nil, err
+	}
+	return spec, typedSchema[T](query.db), nil
+}
+
+func typedSchema[T any](db *DB) *ModelSchema {
+	if db == nil || db.runtime == nil || db.runtime.Registry == nil {
+		return nil
+	}
+	destType, err := structTypeOfGeneric[T]()
+	if err != nil {
+		return nil
+	}
+	schema, _ := db.runtime.Registry.GetType(destType)
+	return schema
 }

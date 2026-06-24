@@ -357,7 +357,7 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 		}
 		return models[0], nil
 	}
-	if modelRowsDirectAvailable(query.db, spec) {
+	if structRowsDirectAvailable(query.db, spec) {
 		model, err := queryModelFirstDirect[T](ctx, query.db, spec, schema)
 		if err != nil || model == nil {
 			return nil, err
@@ -395,7 +395,7 @@ func (query *ModelQuery[T]) Get(ctx context.Context) ([]*T, error) {
 	if query.allShards {
 		return query.getAllShards(ctx, spec, schema)
 	}
-	if modelRowsDirectAvailable(query.db, spec) {
+	if structRowsDirectAvailable(query.db, spec) {
 		models, err := queryModelRowsDirect[T](ctx, query.db, spec, schema)
 		if err != nil {
 			return nil, err
