@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://duxweb.github.io/oro/zh-cn/">官网</a> &middot;
-  <a href="https://duxweb.github.io/oro/zh-cn/quick-start/">文档</a> &middot;
+  <a href="https://duxweb.github.io/oro/">文档</a> &middot;
   <a href="#快速开始">快速开始</a> &middot;
   <a href="#性能基准">性能基准</a> &middot;
   <a href="https://github.com/duxweb/oro/issues">反馈</a>

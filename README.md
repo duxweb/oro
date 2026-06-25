@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://duxweb.github.io/oro/">Website</a> &middot;
-  <a href="https://duxweb.github.io/oro/quick-start/">Docs</a> &middot;
+  <a href="https://duxweb.github.io/oro/">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#benchmarks">Benchmarks</a> &middot;
   <a href="https://github.com/duxweb/oro/issues">Feedback</a>
