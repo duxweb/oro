@@ -81,7 +81,13 @@ type Tree[T any] struct {
 
 type Node[T any] struct {
 	Model    *T
+	Depth    int
 	Children []*Node[T]
+}
+
+type RelativeNode[T any] struct {
+	Model *T
+	Depth int
 }
 
 func Use[T any](db *oro.DB, options ...Option) *Tree[T] {
@@ -316,6 +322,42 @@ func (tree *Tree[T]) Descendants(ctx context.Context, nodeID any) ([]*T, error) 
 
 func (tree *Tree[T]) DescendantsAndSelf(ctx context.Context, nodeID any) ([]*T, error) {
 	return tree.FlatSubtree(ctx, nodeID)
+}
+
+func (tree *Tree[T]) DescendantsWithDepth(ctx context.Context, nodeID any) ([]*RelativeNode[T], error) {
+	node, models, err := tree.descendants(ctx, nodeID, false)
+	if err != nil {
+		return nil, err
+	}
+	return tree.relativeNodes(models, node.Depth)
+}
+
+func (tree *Tree[T]) DescendantsAndSelfWithDepth(ctx context.Context, nodeID any) ([]*RelativeNode[T], error) {
+	node, models, err := tree.descendants(ctx, nodeID, true)
+	if err != nil {
+		return nil, err
+	}
+	return tree.relativeNodes(models, node.Depth)
+}
+
+func (tree *Tree[T]) DescendantsWithinDepth(ctx context.Context, nodeID any, maxDepth int) ([]*T, error) {
+	_, models, err := tree.descendantsWithinDepth(ctx, nodeID, maxDepth, false)
+	return models, err
+}
+
+func (tree *Tree[T]) DescendantsAndSelfWithinDepth(ctx context.Context, nodeID any, maxDepth int) ([]*T, error) {
+	_, models, err := tree.descendantsWithinDepth(ctx, nodeID, maxDepth, true)
+	return models, err
+}
+
+func (tree *Tree[T]) DescendantsAtDepth(ctx context.Context, nodeID any, depth int) ([]*T, error) {
+	_, models, err := tree.descendantsAtDepth(ctx, nodeID, depth, false)
+	return models, err
+}
+
+func (tree *Tree[T]) DescendantsAndSelfAtDepth(ctx context.Context, nodeID any, depth int) ([]*T, error) {
+	_, models, err := tree.descendantsAtDepth(ctx, nodeID, depth, true)
+	return models, err
 }
 
 func (tree *Tree[T]) IsRoot(ctx context.Context, nodeID any) (bool, error) {

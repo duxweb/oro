@@ -71,6 +71,38 @@ func (query *Query[T]) DescendantsOf(ctx context.Context, nodeID any) (*Query[T]
 	return &clone, nil
 }
 
+func (query *Query[T]) DescendantsWithinDepthOf(ctx context.Context, nodeID any, maxDepth int) (*Query[T], error) {
+	if maxDepth < 0 {
+		return query.empty(), &oro.Error{Op: "nestedset.descendants", Kind: oro.ErrInvalidArgument, Field: "depth"}
+	}
+	node, err := query.tree.node(ctx, nodeID)
+	if err != nil || node == nil {
+		return query.empty(), err
+	}
+	clone := *query
+	clone.query = clone.query.
+		Where(query.tree.config.LeftField, ">", node.Lft).
+		Where(query.tree.config.RightField, "<", node.Rgt).
+		Where(query.tree.config.DepthField, "<=", node.Depth+maxDepth)
+	return &clone, nil
+}
+
+func (query *Query[T]) DescendantsAtDepthOf(ctx context.Context, nodeID any, depth int) (*Query[T], error) {
+	if depth < 0 {
+		return query.empty(), &oro.Error{Op: "nestedset.descendants", Kind: oro.ErrInvalidArgument, Field: "depth"}
+	}
+	node, err := query.tree.node(ctx, nodeID)
+	if err != nil || node == nil || depth == 0 {
+		return query.empty(), err
+	}
+	clone := *query
+	clone.query = clone.query.
+		Where(query.tree.config.LeftField, ">", node.Lft).
+		Where(query.tree.config.RightField, "<", node.Rgt).
+		Where(query.tree.config.DepthField, node.Depth+depth)
+	return &clone, nil
+}
+
 func (query *Query[T]) DescendantsAndSelfOf(ctx context.Context, nodeID any) (*Query[T], error) {
 	node, err := query.tree.node(ctx, nodeID)
 	if err != nil || node == nil {

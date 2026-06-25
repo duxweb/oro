@@ -138,6 +138,33 @@ descendantsAndSelf, err := tree.DescendantsAndSelf(ctx, nodeID)
 
 Single-node reads return `nil, nil` when not found. Multi-node reads return an empty slice.
 
+## Relative depth
+
+Database `Depth` is absolute inside the whole tree. For business UIs such as distribution trees, use relative depth helpers where the current node is `0`, direct children are `1`, and grandchildren are `2`.
+
+```go
+rows, err := tree.DescendantsWithDepth(ctx, nodeID)
+rows, err := tree.DescendantsAndSelfWithDepth(ctx, nodeID)
+```
+
+They return:
+
+```go
+type RelativeNode[T any] struct {
+    Model *T
+    Depth int // relative depth
+}
+```
+
+Limit descendants by relative depth:
+
+```go
+items, err := tree.DescendantsWithinDepth(ctx, nodeID, 2) // children and grandchildren
+items, err := tree.DescendantsAtDepth(ctx, nodeID, 1)     // direct children only
+```
+
+`DescendantsAndSelfWithinDepth` and `DescendantsAndSelfAtDepth` include the current node. These methods still use SQL bounds and depth conditions; they do not load the whole table first.
+
 ## Predicates
 
 ```go

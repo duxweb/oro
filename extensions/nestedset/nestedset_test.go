@@ -88,12 +88,39 @@ func TestNestedSetCreateAndRead(t *testing.T) {
 	}
 	assertNames(t, descendants, []string{"first", "second", "grand"})
 
+	depthRows, err := tree.DescendantsWithDepth(ctx, root.ID)
+	if err != nil {
+		t.Fatalf("descendants with depth: %v", err)
+	}
+	assertRelativeDepths(t, depthRows, map[string]int{"first": 1, "second": 1, "grand": 2})
+
+	withinOne, err := tree.DescendantsWithinDepth(ctx, root.ID, 1)
+	if err != nil {
+		t.Fatalf("descendants within depth: %v", err)
+	}
+	assertNames(t, withinOne, []string{"first", "second"})
+
+	atTwo, err := tree.DescendantsAtDepth(ctx, root.ID, 2)
+	if err != nil {
+		t.Fatalf("descendants at depth: %v", err)
+	}
+	assertNames(t, atTwo, []string{"grand"})
+
+	selfDepthRows, err := tree.DescendantsAndSelfWithDepth(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("descendants and self with depth: %v", err)
+	}
+	assertRelativeDepths(t, selfDepthRows, map[string]int{"second": 0, "grand": 1})
+
 	nodes, err := tree.Tree(ctx)
 	if err != nil {
 		t.Fatalf("tree: %v", err)
 	}
 	if len(nodes) != 1 || nodes[0].Model.Name != "root" || len(nodes[0].Children) != 2 || len(nodes[0].Children[1].Children) != 1 {
 		t.Fatalf("unexpected nested tree: %#v", nodes)
+	}
+	if nodes[0].Depth != 0 || nodes[0].Children[1].Depth != 1 || nodes[0].Children[1].Children[0].Depth != 2 {
+		t.Fatalf("unexpected relative node depths: %#v", nodes)
 	}
 
 	valid, err := tree.Check(ctx)
@@ -289,6 +316,22 @@ func assertNames(t *testing.T, models []*category, names []string) {
 	for index, model := range models {
 		if model.Name != names[index] {
 			t.Fatalf("models[%d] = %s, want %s", index, model.Name, names[index])
+		}
+	}
+}
+
+func assertRelativeDepths(t *testing.T, rows []*nestedset.RelativeNode[category], expected map[string]int) {
+	t.Helper()
+	if len(rows) != len(expected) {
+		t.Fatalf("relative row len = %d, want %d", len(rows), len(expected))
+	}
+	for _, row := range rows {
+		depth, ok := expected[row.Model.Name]
+		if !ok {
+			t.Fatalf("unexpected relative row %s", row.Model.Name)
+		}
+		if row.Depth != depth {
+			t.Fatalf("%s relative depth = %d, want %d", row.Model.Name, row.Depth, depth)
 		}
 	}
 }

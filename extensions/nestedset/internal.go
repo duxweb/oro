@@ -463,7 +463,7 @@ func buildNodes[T any](config Config, models []*T) ([]*Node[T], error) {
 		if depth < 0 {
 			depth = 0
 		}
-		node := &Node[T]{Model: model}
+		node := &Node[T]{Model: model, Depth: depth}
 		for len(stack) > depth {
 			stack = stack[:len(stack)-1]
 		}
@@ -476,6 +476,92 @@ func buildNodes[T any](config Config, models []*T) ([]*Node[T], error) {
 		stack = append(stack, node)
 	}
 	return roots, nil
+}
+
+func (tree *Tree[T]) descendants(ctx context.Context, nodeID any, includeSelf bool) (*treeRow, []*T, error) {
+	node, err := tree.node(ctx, nodeID)
+	if err != nil || node == nil {
+		return nil, []*T{}, err
+	}
+	leftOp := ">"
+	rightOp := "<"
+	if includeSelf {
+		leftOp = ">="
+		rightOp = "<="
+	}
+	models, err := tree.query().
+		Where(tree.config.LeftField, leftOp, node.Lft).
+		Where(tree.config.RightField, rightOp, node.Rgt).
+		OrderBy(tree.config.LeftField).
+		Get(ctx)
+	return node, models, err
+}
+
+func (tree *Tree[T]) descendantsWithinDepth(ctx context.Context, nodeID any, maxDepth int, includeSelf bool) (*treeRow, []*T, error) {
+	if maxDepth < 0 {
+		return nil, []*T{}, &oro.Error{Op: "nestedset.descendants", Kind: oro.ErrInvalidArgument, Field: "depth"}
+	}
+	node, err := tree.node(ctx, nodeID)
+	if err != nil || node == nil {
+		return nil, []*T{}, err
+	}
+	minDepth := node.Depth + 1
+	leftOp := ">"
+	rightOp := "<"
+	if includeSelf {
+		minDepth = node.Depth
+		leftOp = ">="
+		rightOp = "<="
+	}
+	models, err := tree.query().
+		Where(tree.config.LeftField, leftOp, node.Lft).
+		Where(tree.config.RightField, rightOp, node.Rgt).
+		Where(tree.config.DepthField, ">=", minDepth).
+		Where(tree.config.DepthField, "<=", node.Depth+maxDepth).
+		OrderBy(tree.config.LeftField).
+		Get(ctx)
+	return node, models, err
+}
+
+func (tree *Tree[T]) descendantsAtDepth(ctx context.Context, nodeID any, depth int, includeSelf bool) (*treeRow, []*T, error) {
+	if depth < 0 {
+		return nil, []*T{}, &oro.Error{Op: "nestedset.descendants", Kind: oro.ErrInvalidArgument, Field: "depth"}
+	}
+	node, err := tree.node(ctx, nodeID)
+	if err != nil || node == nil {
+		return nil, []*T{}, err
+	}
+	if depth == 0 && !includeSelf {
+		return node, []*T{}, nil
+	}
+	leftOp := ">"
+	rightOp := "<"
+	if includeSelf {
+		leftOp = ">="
+		rightOp = "<="
+	}
+	models, err := tree.query().
+		Where(tree.config.LeftField, leftOp, node.Lft).
+		Where(tree.config.RightField, rightOp, node.Rgt).
+		Where(tree.config.DepthField, node.Depth+depth).
+		OrderBy(tree.config.LeftField).
+		Get(ctx)
+	return node, models, err
+}
+
+func (tree *Tree[T]) relativeNodes(models []*T, baseDepth int) ([]*RelativeNode[T], error) {
+	nodes := make([]*RelativeNode[T], 0, len(models))
+	for _, model := range models {
+		depth, err := fieldInt(model, tree.config.DepthField)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, &RelativeNode[T]{
+			Model: model,
+			Depth: depth - baseDepth,
+		})
+	}
+	return nodes, nil
 }
 
 func primaryField(db *oro.DB) string {

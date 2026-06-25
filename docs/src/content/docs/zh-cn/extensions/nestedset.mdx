@@ -138,6 +138,33 @@ descendantsAndSelf, err := tree.DescendantsAndSelf(ctx, nodeID)
 
 单节点读取未命中返回 `nil, nil`。多节点读取未命中返回空切片。
 
+## 相对层级
+
+数据库里的 `Depth` 是整棵树内的绝对层级。分销树、组织树等业务界面通常需要相对层级：当前节点是 `0`，直接子级是 `1`，孙级是 `2`。
+
+```go
+rows, err := tree.DescendantsWithDepth(ctx, nodeID)
+rows, err := tree.DescendantsAndSelfWithDepth(ctx, nodeID)
+```
+
+返回结构：
+
+```go
+type RelativeNode[T any] struct {
+    Model *T
+    Depth int // 相对层级
+}
+```
+
+按相对层级限制后代：
+
+```go
+items, err := tree.DescendantsWithinDepth(ctx, nodeID, 2) // 子级和孙级
+items, err := tree.DescendantsAtDepth(ctx, nodeID, 1)     // 只查直接子级
+```
+
+`DescendantsAndSelfWithinDepth` 和 `DescendantsAndSelfAtDepth` 会包含当前节点。这些方法仍然使用 SQL 的左右值和 depth 条件过滤，不会先加载整张表。
+
 ## 判断方法
 
 ```go
