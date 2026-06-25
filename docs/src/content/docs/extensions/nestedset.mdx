@@ -59,6 +59,20 @@ If you need custom field names, use `nestedset.FieldNames(parent, left, right, d
 ```go
 tree := nestedset.Use[Category](db)
 
+root, err := tree.Create(ctx, &Category{Name: "Catalog"})
+phones, err := tree.Create(ctx, &Category{
+    Name: "Phones",
+    NodeFields: nestedset.NodeFields{
+        ParentID: oro.NullOf(root.ID),
+    },
+})
+```
+
+`Create` reads `ParentID` from the model. Empty `ParentID` creates a root node; a valid `ParentID` creates the model as the last child of that parent.
+
+You can also use explicit placement methods:
+
+```go
 root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
 phones, err := tree.CreateChild(ctx, root.ID, &Category{Name: "Phones"})
 _, err = tree.CreateFirstChild(ctx, phones.ID, &Category{Name: "Android"})
@@ -71,6 +85,21 @@ _, err = tree.CreateAfter(ctx, phones.ID, &Category{Name: "Laptops"})
 - `CreateBefore` and `CreateAfter` insert as siblings.
 
 Structural writes run in transactions.
+
+Plain ORM writes such as `db.Use[Category]().Create(...)` do not maintain nested-set bounds. Use the `tree` service for tree-aware writes.
+
+## Update nodes
+
+```go
+phones.Name = "Smart Phones"
+phones.ParentID = oro.NullOf(newParentID)
+
+updated, err := tree.Update(ctx, phones)
+```
+
+`Update` writes normal model fields and compares `ParentID` with the current database row. If `ParentID` changed, the subtree is moved and `_lft`, `_rgt`, and `Depth` are recalculated.
+
+For position-specific moves, use the explicit move methods below.
 
 ## Read trees
 
@@ -200,4 +229,3 @@ err := tree.RebuildTree(ctx, []*nestedset.Node[Category]{
 ```
 
 New models in the payload are inserted. Existing models with an `ID` are updated.
-

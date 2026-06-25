@@ -105,6 +105,66 @@ func TestNestedSetCreateAndRead(t *testing.T) {
 	}
 }
 
+func TestNestedSetCreateAndUpdateFromParentID(t *testing.T) {
+	db, ctx := openNestedSetDB(t)
+	tree := nestedset.Use[category](db)
+
+	root, err := tree.Create(ctx, &category{Name: "root"})
+	if err != nil {
+		t.Fatalf("create root from parent id: %v", err)
+	}
+	a, err := tree.Create(ctx, &category{Name: "a", NodeFields: nestedset.NodeFields{ParentID: oro.NullOf(root.ID)}})
+	if err != nil {
+		t.Fatalf("create child a from parent id: %v", err)
+	}
+	b, err := tree.Create(ctx, &category{Name: "b", NodeFields: nestedset.NodeFields{ParentID: oro.NullOf(root.ID)}})
+	if err != nil {
+		t.Fatalf("create child b from parent id: %v", err)
+	}
+	c, err := tree.Create(ctx, &category{Name: "c", NodeFields: nestedset.NodeFields{ParentID: oro.NullOf(a.ID)}})
+	if err != nil {
+		t.Fatalf("create child c from parent id: %v", err)
+	}
+
+	assertOrder(t, ctx, tree, []string{"root", "a", "c", "b"})
+	assertBounds(t, ctx, tree, map[string][3]int{
+		"root": {1, 8, 0},
+		"a":    {2, 5, 1},
+		"c":    {3, 4, 2},
+		"b":    {6, 7, 1},
+	})
+
+	b.Name = "b2"
+	b.ParentID = oro.NullOf(c.ID)
+	updated, err := tree.Update(ctx, b)
+	if err != nil {
+		t.Fatalf("update parent id: %v", err)
+	}
+	if updated == nil || updated.Name != "b2" || !updated.ParentID.Valid || updated.ParentID.Value != c.ID {
+		t.Fatalf("unexpected updated node %#v", updated)
+	}
+
+	assertOrder(t, ctx, tree, []string{"root", "a", "c", "b2"})
+	assertBounds(t, ctx, tree, map[string][3]int{
+		"root": {1, 8, 0},
+		"a":    {2, 7, 1},
+		"c":    {3, 6, 2},
+		"b2":   {4, 5, 3},
+	})
+
+	c.ParentID = oro.NullZero[uint64]()
+	if _, err := tree.Update(ctx, c); err != nil {
+		t.Fatalf("move to root from parent id: %v", err)
+	}
+	assertOrder(t, ctx, tree, []string{"root", "a", "c", "b2"})
+	assertBounds(t, ctx, tree, map[string][3]int{
+		"root": {1, 4, 0},
+		"a":    {2, 3, 1},
+		"c":    {5, 8, 0},
+		"b2":   {6, 7, 1},
+	})
+}
+
 func TestNestedSetMoveAndDelete(t *testing.T) {
 	db, ctx := openNestedSetDB(t)
 	tree := nestedset.Use[category](db)

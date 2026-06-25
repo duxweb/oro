@@ -59,6 +59,20 @@ func (Category) Define(s *oro.SchemaBuilder) {
 ```go
 tree := nestedset.Use[Category](db)
 
+root, err := tree.Create(ctx, &Category{Name: "Catalog"})
+phones, err := tree.Create(ctx, &Category{
+    Name: "Phones",
+    NodeFields: nestedset.NodeFields{
+        ParentID: oro.NullOf(root.ID),
+    },
+})
+```
+
+`Create` 会读取模型里的 `ParentID`。`ParentID` 为空时创建根节点；`ParentID` 有值时创建为该父节点的最后一个子节点。
+
+也可以使用明确位置的方法：
+
+```go
 root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
 phones, err := tree.CreateChild(ctx, root.ID, &Category{Name: "Phones"})
 _, err = tree.CreateFirstChild(ctx, phones.ID, &Category{Name: "Android"})
@@ -71,6 +85,21 @@ _, err = tree.CreateAfter(ctx, phones.ID, &Category{Name: "Laptops"})
 - `CreateBefore` 和 `CreateAfter` 插入为兄弟节点。
 
 结构性写入会自动运行在事务中。
+
+普通 ORM 写入，例如 `db.Use[Category]().Create(...)`，不会维护 nested set 的左右值。树形相关写入统一使用 `tree` 服务。
+
+## 更新节点
+
+```go
+phones.Name = "Smart Phones"
+phones.ParentID = oro.NullOf(newParentID)
+
+updated, err := tree.Update(ctx, phones)
+```
+
+`Update` 会写入普通模型字段，并把模型里的 `ParentID` 和数据库当前行对比。如果 `ParentID` 变化，会移动整棵子树，并重新计算 `_lft`、`_rgt` 和 `Depth`。
+
+如果需要指定移动到兄弟节点前后或第一个子节点，使用下面的显式移动方法。
 
 ## 读取树
 
@@ -200,4 +229,3 @@ err := tree.RebuildTree(ctx, []*nestedset.Node[Category]{
 ```
 
 payload 里的新模型会插入；带 `ID` 的已有模型会更新。
-

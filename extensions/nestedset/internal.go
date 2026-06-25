@@ -99,7 +99,7 @@ func (tree *Tree[T]) write(ctx context.Context, fn func(txTree *Tree[T]) error) 
 	})
 }
 
-func (tree *Tree[T]) createAtNode(ctx context.Context, targetID any, model *T, mode int) (*T, error) {
+func (tree *Tree[T]) createAtNode(ctx context.Context, targetID any, model *T, mode int, options ...oro.WriteOption) (*T, error) {
 	var created *T
 	err := tree.write(ctx, func(txTree *Tree[T]) error {
 		target, err := txTree.nodeForUpdate(ctx, targetID)
@@ -127,7 +127,7 @@ func (tree *Tree[T]) createAtNode(ctx context.Context, targetID any, model *T, m
 		if err := txTree.prepareModel(model, parentIDValue(parentID), insertAt, insertAt+1, depth); err != nil {
 			return err
 		}
-		created, err = txTree.query().Create(ctx, model)
+		created, err = txTree.query().Create(ctx, model, options...)
 		return err
 	})
 	return created, err
@@ -213,6 +213,32 @@ func (tree *Tree[T]) prepareModel(model *T, parent any, left int, right int, dep
 		}
 	}
 	return nil
+}
+
+func (tree *Tree[T]) updateValues(model *T) (oro.Map, error) {
+	if model == nil {
+		return nil, &oro.Error{Op: "nestedset.update", Kind: oro.ErrInvalidArgument}
+	}
+	values := oro.Map{}
+	value := modelValue(model)
+	for index := 0; index < value.NumField(); index++ {
+		structField := value.Type().Field(index)
+		if !structField.IsExported() || structField.Anonymous {
+			continue
+		}
+		values[structField.Name] = value.Field(index).Interface()
+	}
+	return values, nil
+}
+
+func sameParent(left oro.Null[uint64], right oro.Null[uint64]) bool {
+	if !left.Valid && !right.Valid {
+		return true
+	}
+	if left.Valid != right.Valid {
+		return false
+	}
+	return left.Value == right.Value
 }
 
 func (tree *Tree[T]) move(ctx context.Context, nodeID any, targetID any, mode int) error {

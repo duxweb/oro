@@ -88,7 +88,25 @@ func Use[T any](db *oro.DB, options ...Option) *Tree[T] {
 	return &Tree[T]{db: db, config: resolveConfig(options)}
 }
 
+func (tree *Tree[T]) Create(ctx context.Context, model *T, options ...oro.WriteOption) (*T, error) {
+	if model == nil {
+		return nil, &oro.Error{Op: "nestedset.create", Kind: oro.ErrInvalidArgument}
+	}
+	parentID, err := fieldNullUint64(model, tree.config.ParentField)
+	if err != nil {
+		return nil, err
+	}
+	if !parentID.Valid {
+		return tree.createRoot(ctx, model, options...)
+	}
+	return tree.createAtNode(ctx, parentID.Value, model, childLast, options...)
+}
+
 func (tree *Tree[T]) CreateRoot(ctx context.Context, model *T) (*T, error) {
+	return tree.createRoot(ctx, model)
+}
+
+func (tree *Tree[T]) createRoot(ctx context.Context, model *T, options ...oro.WriteOption) (*T, error) {
 	var created *T
 	err := tree.write(ctx, func(txTree *Tree[T]) error {
 		maxRight, err := txTree.maxRight(ctx)
@@ -98,7 +116,7 @@ func (tree *Tree[T]) CreateRoot(ctx context.Context, model *T) (*T, error) {
 		if err := txTree.prepareModel(model, nil, maxRight+1, maxRight+2, 0); err != nil {
 			return err
 		}
-		created, err = txTree.query().Create(ctx, model)
+		created, err = txTree.query().Create(ctx, model, options...)
 		return err
 	})
 	return created, err
@@ -118,6 +136,53 @@ func (tree *Tree[T]) CreateBefore(ctx context.Context, targetID any, model *T) (
 
 func (tree *Tree[T]) CreateAfter(ctx context.Context, targetID any, model *T) (*T, error) {
 	return tree.createAtNode(ctx, targetID, model, siblingAfter)
+}
+
+func (tree *Tree[T]) Update(ctx context.Context, model *T, options ...oro.WriteOption) (*T, error) {
+	if model == nil {
+		return nil, &oro.Error{Op: "nestedset.update", Kind: oro.ErrInvalidArgument}
+	}
+	id, err := modelID(model)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return nil, &oro.Error{Op: "nestedset.update", Kind: oro.ErrInvalidArgument, Field: primaryField(tree.db)}
+	}
+	err = tree.write(ctx, func(txTree *Tree[T]) error {
+		current, err := txTree.nodeForUpdate(ctx, id)
+		if err != nil || current == nil {
+			return err
+		}
+		nextParent, err := fieldNullUint64(model, txTree.config.ParentField)
+		if err != nil {
+			return err
+		}
+		values, err := txTree.updateValues(model)
+		if err != nil {
+			return err
+		}
+		delete(values, txTree.config.ParentField)
+		delete(values, txTree.config.LeftField)
+		delete(values, txTree.config.RightField)
+		delete(values, txTree.config.DepthField)
+		if len(values) > 0 {
+			if _, err := txTree.query().Where(primaryField(txTree.db), id).Update(ctx, values, options...); err != nil {
+				return err
+			}
+		}
+		if sameParent(current.ParentID, nextParent) {
+			return nil
+		}
+		if nextParent.Valid {
+			return txTree.move(ctx, id, nextParent.Value, moveLastChild)
+		}
+		return txTree.move(ctx, id, nil, moveRoot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tree.query().Find(ctx, id)
 }
 
 func (tree *Tree[T]) Roots(ctx context.Context) ([]*T, error) {
