@@ -69,7 +69,12 @@ const pills = isZh
 
 <div class="pb-10 pt-4 md:pb-16 md:pt-10">
   <div class="mx-auto max-w-3xl text-center">
-    <p class="mb-5 font-mono text-[1.5rem] font-bold tracking-[0.06em] text-ink">{eyebrow}</p>
+    <div class="mb-5 flex flex-wrap items-center justify-center gap-3">
+      <p class="m-0 font-mono text-[1.5rem] font-bold tracking-[0.06em] text-ink">{eyebrow}</p>
+      <span class="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-[0.72rem] font-semibold leading-none tracking-[0.02em] text-muted">
+        Go 1.27+
+      </span>
+    </div>
     <h1
       class="m-0 bg-linear-to-r from-ink via-ink to-accent bg-clip-text text-[clamp(2rem,4vw,2.5rem)] font-extrabold leading-[1.15] tracking-[-0.03em] text-transparent"
       set:html={title}
