@@ -904,6 +904,7 @@ body {
 .sl-markdown-content table {
   display: table;
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   overflow: hidden;
   border-radius: 0.7rem;
@@ -922,6 +923,17 @@ body {
   border: 0;
   border-bottom: 1px solid var(--dux-line);
   padding: 0.6rem 0.9rem;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: top;
+}
+
+.sl-markdown-content :is(th, td) code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sl-markdown-content tbody tr:last-child :is(th, td) {
