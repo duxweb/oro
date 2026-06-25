@@ -73,7 +73,6 @@ s.Field("Status").Enum("draft", "published", "archived").Default("draft")
 ## Nullable
 
 ```go
-s.Field("DeletedAt").Timestamp().Nullable()
 s.Field("Stock").Uint().Nullable()
 ```
 
@@ -84,6 +83,21 @@ type Product struct {
     oro.Model
     Stock oro.Null[uint]
 }
+```
+
+软删除是显式能力。使用约定字段时嵌入 `oro.SoftDeleteFields`，字段为 `DeletedAt`，列名为 `deleted_at`：
+
+```go
+type Product struct {
+    oro.Model
+    oro.SoftDeleteFields
+}
+```
+
+如果要自定义软删除字段，可以标记字段：
+
+```go
+s.Field("RemovedAt").Column("removed_at").SoftDelete()
 ```
 
 ## 默认值

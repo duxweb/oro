@@ -169,10 +169,10 @@ func relationRowsWithConditions(ctx context.Context, db *DB, schema *ModelSchema
 	query := &RelationQuery{db: db, schema: schema, spec: QuerySpec{
 		Connection: db.session.connection,
 		Table:      schema.Table,
+		ModelName:  schema.Name,
+		Model:      schema,
 	}}
-	if err := applyTenantModelConnection(ctx, db, schema, &query.spec); err != nil {
-		return nil, nil, err
-	}
+	applyModelConnection(db, schema, &query.spec)
 	if callback != nil {
 		callback(query)
 		if query.spec.SelectErr != nil {
@@ -190,8 +190,11 @@ func relationRowsWithConditions(ctx context.Context, db *DB, schema *ModelSchema
 	if err := applyShardConnection(ctx, db, schema, &query.spec, query.shard, query.allShards); err != nil {
 		return nil, nil, err
 	}
+	if err := applyConnectionExtensions(ctx, db, &query.spec); err != nil {
+		return nil, nil, err
+	}
 	query.spec.Where = append(append([]Condition(nil), conditions...), query.spec.Where...)
-	if err := applyTenantScope(db, schema, &query.spec); err != nil {
+	if err := applyQueryExtensions(ctx, db, &query.spec); err != nil {
 		return nil, nil, err
 	}
 	var rows []Map
@@ -461,6 +464,8 @@ func loadManyToMany(ctx context.Context, db *DB, sourceSchema *ModelSchema, mode
 	throughSpec := QuerySpec{
 		Connection: db.session.connection,
 		Table:      relation.Through,
+		ModelName:  sourceSchema.Name,
+		Model:      sourceSchema,
 		Where:      []Condition{{Field: Snake(relation.SourceForeignKey), Op: "in_values", Value: sourceKeys}},
 	}
 	if relation.Kind == RelationDynamicManyToMany {
@@ -470,9 +475,7 @@ func loadManyToMany(ctx context.Context, db *DB, sourceSchema *ModelSchema, mode
 			Value: relation.SourceTypeValue,
 		})
 	}
-	if err := applyTenantModelConnection(ctx, db, sourceSchema, &throughSpec); err != nil {
-		return err
-	}
+	applyModelConnection(db, sourceSchema, &throughSpec)
 	if err := applyShardConnection(ctx, db, sourceSchema, &throughSpec, nil, false); err != nil {
 		return err
 	}

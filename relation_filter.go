@@ -143,9 +143,8 @@ func relationFilterSubquery(ctx context.Context, db *DB, sourceSchema *ModelSche
 	query := db.Table(targetSchema.Table).Select(Raw("1"))
 	query.spec.Connection = sourceSpec.Connection
 	query.spec.ModelName = targetSchema.Name
-	if err := applyTenantModelConnection(ctx, db, targetSchema, &query.spec); err != nil {
-		return nil, nil, err
-	}
+	query.spec.Model = targetSchema
+	applyModelConnection(db, targetSchema, &query.spec)
 	query.spec.Connection = sourceSpec.Connection
 	var count *CountCondition
 	if callback != nil {
@@ -294,7 +293,7 @@ func convertRelationFilterQuery(db *DB, targetSchema *ModelSchema, sourceSpec Qu
 		return err
 	}
 	query.spec.Where = conditions
-	if err := applyTenantScope(db, targetSchema, &query.spec); err != nil {
+	if err := applyQueryExtensions(context.Background(), db, &query.spec); err != nil {
 		return err
 	}
 	if err := convertModelSelects(targetSchema, &query.spec); err != nil {

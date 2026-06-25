@@ -1,0 +1,90 @@
+---
+title: Sharding
+description: Route model queries and writes to configured shard connections.
+---
+
+Sharding is a core routing feature. It maps a model query to one of several configured connections through a shard strategy.
+
+## Configure shards
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "orders_0": {Driver: mysql.Open(dsn0)},
+        "orders_1": {Driver: mysql.Open(dsn1)},
+    },
+    Shards: map[string]oro.ShardConfig{
+        "orders": {
+            Connections: []string{"orders_0", "orders_1"},
+            Strategy:    oro.ModShard("TenantID"),
+        },
+    },
+})
+```
+
+`ModShard(field)` hashes an integer-like field by modulo over the configured connection list.
+
+## Model sharding
+
+A model opts into a shard group in `Define`:
+
+```go
+type Order struct {
+    oro.Model
+    TenantID uint64
+    Code     string
+    Total    uint
+}
+
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Shard("orders", "TenantID")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("Code").String().Unique()
+    s.Field("Total").Uint()
+}
+```
+
+The field names passed to `Shard` are Go field names.
+
+## Query one shard
+
+Pass shard values explicitly:
+
+```go
+orders, err := db.Use[Order]().
+    Shard(oro.Map{"TenantID": uint64(10)}).
+    Where("Code", "A001").
+    Get(ctx)
+```
+
+Writes also require shard values:
+
+```go
+created, err := db.Use[Order]().
+    Shard(oro.Map{"TenantID": uint64(10)}).
+    Create(ctx, &Order{TenantID: 10, Code: "A001", Total: 120})
+```
+
+If a sharded model is queried or written without shard values, Oro returns `oro.ErrShardRequired`.
+
+## Query all shards
+
+Use `AllShards()` for read-oriented fan-out queries:
+
+```go
+orders, err := db.Use[Order]().
+    AllShards().
+    Where("Status", "paid").
+    Get(ctx)
+```
+
+`AllShards` merges results from all configured shard connections. Keep it for reads or controlled maintenance flows.
+
+## Transactions
+
+A single transaction cannot span multiple shards. If a write path needs more than one shard, coordinate it at the application layer.
+
+## Tenant extension integration
+
+The `extensions/tenant` package can provide shard values automatically. See [Tenant Extension](../../extensions/tenant/) when shard routing is tenant-based.

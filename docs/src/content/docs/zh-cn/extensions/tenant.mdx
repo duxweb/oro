@@ -1,0 +1,171 @@
+---
+title: Tenant 租户扩展
+description: 使用官方 tenant 扩展处理共享表租户、写入注入、连接路由、分片值和缓存键。
+---
+
+`extensions/tenant` 是官方租户扩展。租户能力不放在核心 ORM 里，但会接入查询、写入、预加载、分片和缓存 key。
+
+```go
+import "github.com/duxweb/oro/extensions/tenant"
+```
+
+## 安装
+
+打开数据库时注册扩展：
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        tenant.Extension(tenant.Fields("TenantID", "AppID")),
+    },
+})
+```
+
+`tenant.Fields(...)` 是默认租户字段。模型没有在 `Define` 里覆盖时，会使用这组字段。
+
+## 模型字段
+
+租户字段就是普通模型字段，仍然在 `Define` 里定义字段类型、索引和列信息：
+
+```go
+type Order struct {
+    oro.Model
+    TenantID uint64
+    AppID    uint64
+    Code     string
+    Total    uint
+}
+
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("AppID").UnsignedBigInt().Index()
+    s.Field("Code").String().Unique()
+    s.Field("Total").Uint()
+}
+```
+
+模型可以覆盖全局租户字段：
+
+```go
+func (Project) Define(s *oro.SchemaBuilder) {
+    s.Table("projects")
+    s.Tenant("OrgID")
+    s.Field("OrgID").UnsignedBigInt().Index()
+}
+```
+
+模型也可以退出租户过滤：
+
+```go
+func (Plan) Define(s *oro.SchemaBuilder) {
+    s.Table("plans")
+    s.NoTenant()
+}
+```
+
+## 带租户查询
+
+使用 `tenant.Use(db, values)` 绑定租户值：
+
+```go
+tenantDB := tenant.Use(db, oro.Map{
+    "TenantID": uint64(1),
+    "AppID":    uint64(10),
+})
+
+orders, err := tenantDB.Use[Order]().Where("Code", "A001").Get(ctx)
+```
+
+扩展会自动给模型查询追加租户条件。关系预加载和关系过滤也会走同一套模型查询流程，所以同样受租户约束。
+
+## 写入注入
+
+模型写入时会自动注入租户字段，业务代码不需要每次重复传租户字段：
+
+```go
+created, err := tenantDB.Use[Order]().Create(ctx, &Order{
+    Code:  "A001",
+    Total: 120,
+})
+```
+
+插入行会从租户状态得到 `TenantID = 1` 和 `AppID = 10`。
+
+## Context 租户值
+
+请求级租户值可以放入 `context.Context`：
+
+```go
+ctx = tenant.With(ctx, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
+orders, err := db.Use[Order]().Get(ctx)
+```
+
+这适合 repository 共用一个 `*oro.DB`，租户值由中间件注入的场景。
+
+## 禁用租户过滤
+
+`tenant.Without` 只建议用于后台管理或维护脚本：
+
+```go
+rows, err := tenant.Without(db).Use[Order]().Get(ctx)
+```
+
+基于 context 的流程可以使用：
+
+```go
+ctx = tenant.WithoutContext(ctx)
+rows, err := db.Use[Order]().Get(ctx)
+```
+
+## Resolver
+
+Resolver 可以从 context 自动解析租户值：
+
+```go
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        tenant.Extension(
+            tenant.Fields("TenantID"),
+            tenant.WithResolver(tenant.ResolverFunc(func(ctx context.Context) (oro.Map, bool, error) {
+                id, ok := tenantIDFromContext(ctx)
+                if !ok {
+                    return nil, false, nil
+                }
+                return oro.Map{"TenantID": id}, true, nil
+            })),
+        ),
+    },
+})
+```
+
+解析顺序是：显式 DB 状态、context 状态、resolver。
+
+## 连接路由
+
+租户路由器可以根据租户值选择连接：
+
+```go
+tenant.Extension(
+    tenant.Fields("TenantID"),
+    tenant.WithRouter(tenant.RouterFunc(func(ctx context.Context, values oro.Map) (string, error) {
+        if values["TenantID"] == uint64(1) {
+            return "tenant_a", nil
+        }
+        return "tenant_b", nil
+    })),
+)
+```
+
+如果路由器返回空连接名，查询会继续使用原本的连接。
+
+## 分片和缓存 key
+
+tenant 扩展也会把租户值提供给分片路由和自动缓存 key。这样可以避免跨租户缓存串数据，也可以让分片策略直接使用租户值，不需要每个查询都重复传。
+
+## 错误行为
+
+租户模型查询或写入时缺少租户值，会返回 `oro.ErrTenantRequired`。配置的租户字段在模型里不存在时，会返回 `oro.ErrUnknownTenant`。

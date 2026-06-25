@@ -86,6 +86,7 @@ type FieldBuilder struct {
 	virtual      bool
 	hidden       bool
 	optimistic   bool
+	softDelete   bool
 	index        string
 	unique       string
 	fullText     string
@@ -304,6 +305,15 @@ func (field *FieldBuilder) OptimisticLock() *FieldBuilder {
 	return field
 }
 
+func (field *FieldBuilder) SoftDelete() *FieldBuilder {
+	field.softDelete = true
+	field.nullable = boolPtr(true)
+	if field.fieldTyp == "" {
+		field.setType("time.Time")
+	}
+	return field
+}
+
 func (field *FieldBuilder) Index(name ...string) *FieldBuilder {
 	if len(name) > 0 {
 		field.index = name[0]
@@ -311,6 +321,10 @@ func (field *FieldBuilder) Index(name ...string) *FieldBuilder {
 		field.index = defaultIndexMarker
 	}
 	return field
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func (field *FieldBuilder) Unique(name ...string) *FieldBuilder {

@@ -7,6 +7,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/tenant"
 	_ "modernc.org/sqlite"
 )
 
@@ -132,23 +133,49 @@ func TestShardModelRoutesCRUD(t *testing.T) {
 }
 
 func TestShardUsesTenantValuesForRouting(t *testing.T) {
-	db, ctx := newShardTestDB(t)
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Default: "shard_0",
+		Connections: map[string]oro.ConnectionConfig{
+			"shard_0": {Driver: sqlite.Open(":memory:")},
+			"shard_1": {Driver: sqlite.Open(":memory:")},
+		},
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID"))},
+		Shards: map[string]oro.ShardConfig{
+			"orders": {Connections: []string{"shard_0", "shard_1"}, Strategy: oro.ModShard("TenantID")},
+			"logs":   {Connections: []string{"shard_0", "shard_1"}, Strategy: oro.ModShard("TenantID")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := db.Register(shardOrder{}, shardLog{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
 
-	created, err := db.Tenant(oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Create(ctx, &shardOrder{TenantID: 3, Code: "T003", Status: "new"})
+	created, err := tenant.Use(db, oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Create(ctx, &shardOrder{TenantID: 3, Code: "T003", Status: "new"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.TenantID != 3 {
 		t.Fatalf("unexpected tenant routed row %#v", created)
 	}
-	count, err := db.Tenant(oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Count(ctx)
+	count, err := tenant.Use(db, oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Count(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
 		t.Fatalf("expected tenant routed count 1, got %d", count)
 	}
-	_, err = db.Tenant(oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Create(ctx, &shardOrder{TenantID: 4, Code: "bad-tenant", Status: "new"})
+	_, err = tenant.Use(db, oro.Map{"TenantID": uint64(3)}).Use[shardOrder]().Create(ctx, &shardOrder{TenantID: 4, Code: "bad-tenant", Status: "new"})
 	if !errors.Is(err, oro.ErrShardConflict) {
 		t.Fatalf("expected shard conflict on tenant routed create, got %v", err)
 	}

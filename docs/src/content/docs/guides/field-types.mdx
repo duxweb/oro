@@ -73,7 +73,6 @@ Enums document legal values for sync and schema inspection. Databases without na
 ## Nullable
 
 ```go
-s.Field("DeletedAt").Timestamp().Nullable()
 s.Field("Stock").Uint().Nullable()
 ```
 
@@ -84,6 +83,21 @@ type Product struct {
     oro.Model
     Stock oro.Null[uint]
 }
+```
+
+Soft delete is explicit. Add `oro.SoftDeleteFields` to use the conventional `DeletedAt -> deleted_at` field:
+
+```go
+type Product struct {
+    oro.Model
+    oro.SoftDeleteFields
+}
+```
+
+For a custom soft-delete field, mark the field with `SoftDelete()`:
+
+```go
+s.Field("RemovedAt").Column("removed_at").SoftDelete()
 ```
 
 ## Defaults

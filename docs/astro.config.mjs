@@ -88,7 +88,7 @@ export default defineConfig({
             { label: 'Driver Adapters', translations: { 'zh-CN': '驱动适配器' }, slug: 'advanced/driver-adapters' },
             { label: 'Hooks & Events', translations: { 'zh-CN': 'Hooks 与事件' }, slug: 'advanced/hooks-events' },
             { label: 'Scopes', translations: { 'zh-CN': '查询作用域' }, slug: 'advanced/scopes' },
-            { label: 'Tenant & Sharding', translations: { 'zh-CN': '租户与分片' }, slug: 'advanced/tenancy-sharding' },
+            { label: 'Sharding', translations: { 'zh-CN': '分片' }, slug: 'advanced/sharding' },
             { label: 'JSON & Full Text', translations: { 'zh-CN': 'JSON 与全文索引' }, slug: 'advanced/json-fulltext' },
             { label: 'Cache', translations: { 'zh-CN': '查询缓存' }, slug: 'advanced/cache' },
             { label: 'Serialization', translations: { 'zh-CN': '序列化输出' }, slug: 'advanced/serialization' },
@@ -96,6 +96,15 @@ export default defineConfig({
             { label: 'Logging', translations: { 'zh-CN': '日志' }, slug: 'advanced/logging' },
             { label: 'Testing Matrix', translations: { 'zh-CN': '测试矩阵' }, slug: 'advanced/testing' },
             { label: 'Performance Benchmarks', translations: { 'zh-CN': '性能基准' }, slug: 'advanced/performance-benchmarks' }
+          ]
+        },
+        {
+          label: 'Extensions',
+          translations: { 'zh-CN': '扩展包' },
+          items: [
+            { label: 'Overview', translations: { 'zh-CN': '概览' }, slug: 'extensions' },
+            { label: 'Tenant', translations: { 'zh-CN': 'Tenant 租户扩展' }, slug: 'extensions/tenant' },
+            { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
           ]
         },
         {

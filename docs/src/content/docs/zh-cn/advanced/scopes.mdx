@@ -148,7 +148,7 @@ func Newest[T any]() oro.Scope[T] {
 
 ## 和租户功能的关系
 
-全局租户过滤不建议写成普通 Scope。Oro 已提供 `TenantConfig` 和 `db.Tenant(oro.Map)`，可以自动处理查询、写入和预加载。
+全局租户过滤不建议写成普通 Scope。租户能力由 `extensions/tenant` 提供，可以统一处理查询、写入和预加载。
 
 Scope 更适合业务筛选，例如“可见内容”“已发布”“后台可搜索”。
 

@@ -1,9 +1,6 @@
 package oro
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 type Config struct {
 	Default string
@@ -13,9 +10,10 @@ type Config struct {
 
 	Pool   PoolConfig
 	Batch  BatchConfig
-	Tenant *TenantConfig
 	Shards map[string]ShardConfig
 	Cache  CacheStore
+
+	Extensions []Extension
 
 	Factory Factory
 
@@ -59,21 +57,6 @@ type SQLCacheConfig struct {
 type ScanCacheConfig struct {
 	Disabled bool
 	MaxSize  int
-}
-
-type TenantConfig struct {
-	Fields []string
-	Router TenantRouter
-}
-
-type TenantRouter interface {
-	Connection(ctx context.Context, values Map) (string, error)
-}
-
-type TenantRouterFunc func(ctx context.Context, values Map) (string, error)
-
-func (fn TenantRouterFunc) Connection(ctx context.Context, values Map) (string, error) {
-	return fn(ctx, values)
 }
 
 type ConnectionConfig struct {

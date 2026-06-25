@@ -1,0 +1,55 @@
+---
+title: Extensions
+description: Install optional Oro packages through Config.Extensions without growing the core ORM surface.
+---
+
+Extensions are optional packages that add cross-cutting behavior or higher-level data structures without making Oro core larger.
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        tenant.Extension(tenant.Fields("TenantID")),
+        nestedset.Extension(),
+    },
+})
+```
+
+## What extensions can do
+
+An extension can hook into specific lifecycle points:
+
+| Hook | Purpose |
+| --- | --- |
+| `Install` | validate configuration or initialize state |
+| `ApplyQuery` | append query conditions, such as tenant filters |
+| `ApplyWrite` | inject or validate write values |
+| `ApplyConnection` | route queries to another connection |
+| `ShardValues` | provide shard routing values |
+| `CacheKeyValues` | add extension state to automatic cache keys |
+
+Business-facing APIs stay in the extension package. For example, tenant usage is `tenant.Use(db, values)`, while tree usage is `nestedset.Use[Category](db)`.
+
+## Embedded extension fields
+
+Some extensions need model fields. Oro supports this through marked embedded field structs:
+
+```go
+type Category struct {
+    oro.Model
+    nestedset.NodeFields
+
+    Name string
+}
+```
+
+`nestedset.NodeFields` implements Oro's embedded-field marker, so the schema parser treats its exported fields as normal model fields. This keeps extension fields reusable without struct tags or code generation.
+
+## First-party extensions
+
+| Package | Purpose |
+| --- | --- |
+| [`extensions/tenant`](./tenant/) | tenant filters, write injection, connection routing, shard values, cache key values |
+| [`extensions/nestedset`](./nestedset/) | hierarchical data with `ParentID`, `_lft`, `_rgt`, and `Depth` |

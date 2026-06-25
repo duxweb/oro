@@ -21,7 +21,7 @@ if err := db.Sync(ctx); err != nil {
 
 `Register` 做两件事：
 
-- 解析模型字段、表名、连接、租户、分片和索引；
+- 解析模型字段、表名、连接、分片和索引；
 - 注册模型关系，供 `With`、`For`、`WhereHas`、序列化等功能使用。
 
 `Sync` 只同步已注册模型。
@@ -173,25 +173,23 @@ func (Product) Define(s *oro.SchemaBuilder) {
 `db.Sync(ctx)` 会按模型连接分别同步。也可以手动指定连接：
 
 ```go
-err := db.Connection("tenant_1").Sync(ctx)
+err := db.Connection("catalog").Sync(ctx)
 ```
 
-手动连接适合多租户独立库或初始化脚本。
+手动连接适合多连接初始化脚本。
 
-## 租户和分片
+## 分片
 
-租户字段和分片字段也是表结构的一部分：
+分片字段也是表结构的一部分：
 
 ```go
 func (Order) Define(s *oro.SchemaBuilder) {
-    s.Tenant("TenantID", "AppID")
     s.Shard("orders", "TenantID")
     s.Field("TenantID").UnsignedBigInt().Index()
-    s.Field("AppID").UnsignedBigInt().Index()
 }
 ```
 
-分片模型会对配置中的分片连接同步目标表。字段定义仍然只写一次。
+分片模型会对配置中的分片连接同步目标表。字段定义仍然只写一次。租户字段和租户写入规则见 [Tenant 租户扩展](../../extensions/tenant/)。
 
 ## 外键策略
 

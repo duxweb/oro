@@ -34,6 +34,7 @@ const seedRows = 1000
 
 type oroBenchProduct struct {
 	oro.Model
+	oro.SoftDeleteFields
 	Code  string
 	Price uint
 }

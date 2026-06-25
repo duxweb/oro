@@ -1,6 +1,6 @@
 ---
 title: 配置
-description: Config、连接、连接池、日志、超时、租户和分片配置。
+description: Config、连接、连接池、日志、超时、扩展和分片配置。
 ---
 
 ## Config 结构
@@ -13,9 +13,9 @@ type Config struct {
     Connections map[string]ConnectionConfig
     TablePrefix string
     Pool        PoolConfig
-    Tenant      *TenantConfig
     Shards      map[string]ShardConfig
     Cache       CacheStore
+    Extensions  []Extension
     Logger      Logger
     LogLevel    LogLevel
     Timeout     TimeoutConfig
@@ -119,19 +119,15 @@ db, err := oro.Open(oro.Config{
 rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
 ```
 
-## 租户
+## 扩展
 
 ```go
-Tenant: &oro.TenantConfig{
-    Fields: []string{"TenantID", "AppID"},
+Extensions: []oro.Extension{
+    tenant.Extension(tenant.Fields("TenantID", "AppID")),
 }
 ```
 
-使用租户值：
-
-```go
-db.Tenant(oro.Map{"TenantID": 1, "AppID": 10})
-```
+可选能力由扩展包提供，不放进核心 ORM。参考 [扩展包](../../extensions/) 和 [Tenant 租户扩展](../../extensions/tenant/)。
 
 ## 分片
 

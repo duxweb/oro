@@ -122,6 +122,8 @@ func (serializer reflectSerializer) serializeStruct(value reflect.Value, opts Se
 		if !field.IsExported() || field.Anonymous {
 			if field.Anonymous && field.Type == reflect.TypeOf(Model{}) {
 				serializer.serializeBaseModel(value.FieldByIndex(field.Index), output, opts, seen)
+			} else if field.Anonymous && isFlattenableExtensionStruct(field.Type) {
+				serializer.serializeEmbeddedFields(value.FieldByIndex(field.Index), output, opts, seen)
 			}
 			continue
 		}
@@ -157,13 +159,41 @@ func (serializer reflectSerializer) serializeBaseModel(value reflect.Value, outp
 		{goName: "ID", json: "id"},
 		{goName: "CreatedAt", json: "created_at"},
 		{goName: "UpdatedAt", json: "updated_at"},
-		{goName: "DeletedAt", json: "deleted_at"},
 	} {
 		fieldValue := value.FieldByName(field.goName)
 		if !fieldValue.IsValid() {
 			continue
 		}
 		output[field.json] = serializer.serializeValue(fieldValue, opts, seen)
+	}
+}
+
+func (serializer reflectSerializer) serializeEmbeddedFields(value reflect.Value, output Map, opts SerializeOptions, seen map[visitKey]struct{}) {
+	if !value.IsValid() {
+		return
+	}
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return
+	}
+	for _, field := range reflect.VisibleFields(value.Type()) {
+		if !field.IsExported() || field.Anonymous {
+			continue
+		}
+		name, skip := jsonFieldName(field)
+		if skip {
+			continue
+		}
+		fieldValue := value.FieldByIndex(field.Index)
+		if isOmitEmpty(field) && fieldValue.IsZero() {
+			continue
+		}
+		output[name] = serializer.serializeValue(fieldValue, opts, seen)
 	}
 }
 

@@ -3,10 +3,12 @@ package oro
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 type testProduct struct {
 	Model
+	SoftDeleteFields
 	Code  string
 	Price uint
 	State string
@@ -38,8 +40,11 @@ func TestSchemaParserParse(t *testing.T) {
 	if len(schema.Primary) == 0 || schema.Primary[0] != "ID" {
 		t.Fatalf("expected ID primary, got %#v", schema.Primary)
 	}
-	if len(schema.Indexes) != 4 {
-		t.Fatalf("expected four indexes, got %#v", schema.Indexes)
+	if len(schema.Indexes) != 5 {
+		t.Fatalf("expected five indexes, got %#v", schema.Indexes)
+	}
+	if _, ok := schema.FieldByGo["DeletedAt"]; !ok {
+		t.Fatal("expected soft delete field")
 	}
 	price := schema.FieldByGo["Price"]
 	if price.Type != "decimal" || price.Precision != 12 || price.Scale != 2 || price.Nullable {
@@ -70,6 +75,47 @@ func TestSchemaParserParse(t *testing.T) {
 	}
 	if index := indexes["ft_products_code_state"]; !index.FullText || len(index.Fields) != 2 {
 		t.Fatalf("unexpected composite fulltext index %#v", index)
+	}
+	if index := indexes["idx_products_deleted_at"]; len(index.Fields) != 1 || index.Fields[0] != "deleted_at" {
+		t.Fatalf("unexpected soft delete index %#v", index)
+	}
+}
+
+type testPlainModel struct {
+	Model
+	Code string
+}
+
+func TestSchemaParserModelDoesNotEnableSoftDelete(t *testing.T) {
+	schema, err := schemaParser{}.Parse(testPlainModel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := schema.FieldByGo["DeletedAt"]; ok {
+		t.Fatal("did not expect DeletedAt from base Model")
+	}
+	if _, ok := softDeleteField(schema); ok {
+		t.Fatal("did not expect soft delete field")
+	}
+}
+
+type testCustomSoftDelete struct {
+	Model
+	RemovedAt Null[time.Time]
+}
+
+func (testCustomSoftDelete) Define(s *SchemaBuilder) {
+	s.Field("RemovedAt").Column("removed_at").SoftDelete()
+}
+
+func TestSchemaParserCustomSoftDeleteField(t *testing.T) {
+	schema, err := schemaParser{}.Parse(testCustomSoftDelete{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	field, ok := softDeleteField(schema)
+	if !ok || field.Name != "RemovedAt" || field.Column != "removed_at" {
+		t.Fatalf("unexpected soft delete field %#v", field)
 	}
 }
 

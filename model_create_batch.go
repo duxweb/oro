@@ -103,7 +103,7 @@ func canCreateModelsBatchFast(db *DB, spec QuerySpec, schema *ModelSchema, shard
 	if len(shard) > 0 || schema.ShardGroup != "" {
 		return false
 	}
-	if len(tenantFieldsForSchema(db.runtime.Config, schema)) > 0 && !db.session.withoutTenant {
+	if hasWriteExtensions(db) {
 		return false
 	}
 	conn, err := connectionForQuery(db, spec.Connection)

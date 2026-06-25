@@ -6,10 +6,15 @@ type Model struct {
 	ID        uint64
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt Null[time.Time]
 
 	state *modelState
 }
+
+type SoftDeleteFields struct {
+	DeletedAt Null[time.Time]
+}
+
+func (SoftDeleteFields) OroEmbeddedFields() {}
 
 type modelState struct {
 	relations map[string]loadedRelation
@@ -42,4 +47,8 @@ func (model *Model) ensureRelationMap() *modelState {
 
 type Definer interface {
 	Define(s *SchemaBuilder)
+}
+
+type EmbeddedFields interface {
+	OroEmbeddedFields()
 }

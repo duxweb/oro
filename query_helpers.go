@@ -531,6 +531,12 @@ func queryRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) ([]Map, erro
 	if spec.SelectErr != nil {
 		return nil, spec.SelectErr
 	}
+	if err := applyConnectionExtensions(ctx, db, &spec); err != nil {
+		return nil, err
+	}
+	if err := applyQueryExtensions(ctx, db, &spec); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, spec.Connection)
 	if err != nil {
 		return nil, err
@@ -892,6 +898,12 @@ func isSQLWhitespace(char rune) bool {
 }
 
 func updateRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return 0, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return 0, err
+	}
 	if len(spec.Values) == 0 || len(spec.Values[0]) == 0 {
 		return 0, &Error{Op: "update", Kind: ErrInvalidArgument, Table: spec.Table}
 	}
@@ -916,6 +928,12 @@ func updateRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
 }
 
 func deleteRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return 0, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return 0, err
+	}
 	if len(spec.Where) == 0 {
 		return 0, &Error{Op: "delete", Kind: ErrUnsafeDelete, Table: spec.Table}
 	}
@@ -937,6 +955,12 @@ func deleteRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
 }
 
 func createRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return nil, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, spec.Connection)
 	if err != nil {
 		return nil, err
@@ -963,6 +987,12 @@ func createRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
 }
 
 func createResultRows(ctx context.Context, db *DB, spec WriteSpec) (*CreateResult, error) {
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return nil, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, spec.Connection)
 	if err != nil {
 		return nil, err
@@ -989,6 +1019,12 @@ func createResultRows(ctx context.Context, db *DB, spec WriteSpec) (*CreateResul
 }
 
 func upsertRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return nil, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, spec.Connection)
 	if err != nil {
 		return nil, err
@@ -1366,10 +1402,12 @@ func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 	spec := cloneQuerySpec(query.spec)
 	spec.Table = schema.Table
 	spec.ModelName = schema.Name
-	if err := applyTenantModelConnection(context.Background(), query.db, schema, &spec); err != nil {
+	spec.Model = schema
+	applyModelConnection(query.db, schema, &spec)
+	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	conditions, err := convertModelConditions(schema, spec.Where)
@@ -1377,7 +1415,7 @@ func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 		return QuerySpec{}, nil, err
 	}
 	spec.Where = conditions
-	if err := applyTenantScope(query.db, schema, &spec); err != nil {
+	if err := applyQueryExtensions(context.Background(), query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	if err := resolveModelRelationAggregates(query.db, schema, &spec); err != nil {
@@ -1401,10 +1439,12 @@ func modelWriteSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 	spec := cloneQuerySpec(query.spec)
 	spec.Table = schema.Table
 	spec.ModelName = schema.Name
-	if err := applyTenantModelConnection(context.Background(), query.db, schema, &spec); err != nil {
+	spec.Model = schema
+	applyModelConnection(query.db, schema, &spec)
+	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	conditions, err := convertModelConditions(schema, spec.Where)
@@ -1412,7 +1452,7 @@ func modelWriteSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 		return QuerySpec{}, nil, err
 	}
 	spec.Where = conditions
-	if err := applyTenantScope(query.db, schema, &spec); err != nil {
+	if err := applyQueryExtensions(context.Background(), query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	if err := convertModelSelects(schema, &spec); err != nil {
@@ -1434,10 +1474,12 @@ func modelInsertSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, erro
 	spec := cloneQuerySpec(query.spec)
 	spec.Table = schema.Table
 	spec.ModelName = schema.Name
-	if err := applyTenantModelConnection(context.Background(), query.db, schema, &spec); err != nil {
+	spec.Model = schema
+	applyModelConnection(query.db, schema, &spec)
+	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	return spec, schema, nil

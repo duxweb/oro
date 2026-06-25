@@ -117,7 +117,7 @@ db, err := oro.Open(oro.Config{
 | `ErrCrossShardJoin` | 不支持的跨分片 join |
 | `ErrCrossShardTransaction` | 单事务跨分片 |
 
-这类错误通常表示调用入口缺少上下文，例如没有设置 `db.Tenant(...)` 或 `Shard(...)`。
+这类错误通常表示调用入口缺少上下文，例如没有设置 `tenant.Use(...)` 或 `Shard(...)`。
 
 ## 结构同步错误
 

@@ -601,9 +601,6 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 		return nil, err
 	}
 	writeDB := withSpecConnection(query.db, spec)
-	if err := applyTenantColumns(writeDB, schema, row); err != nil {
-		return nil, err
-	}
 	if err := validateShardWriteValuesForDB(writeDB, schema, query.shard, row); err != nil {
 		return nil, err
 	}
@@ -805,9 +802,6 @@ func (query *ModelQuery[T]) createManyBatch(ctx context.Context, spec QuerySpec,
 			}
 			row, err := buildModelInsertMap(schema, model, writeOptions)
 			if err != nil {
-				return err
-			}
-			if err := applyTenantColumns(tx, schema, row); err != nil {
 				return err
 			}
 			if err := validateShardWriteValuesForDB(tx, schema, txQuery.shard, row); err != nil {
@@ -1185,9 +1179,6 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	writeOptions := applyWriteOptions(options)
 	row, err := buildModelInsertMap(schema, model, writeOptions)
 	if err != nil {
-		return nil, err
-	}
-	if err := applyTenantColumns(query.db, schema, row); err != nil {
 		return nil, err
 	}
 	if err := validateShardWriteValuesForDB(query.db, schema, query.shard, row); err != nil {

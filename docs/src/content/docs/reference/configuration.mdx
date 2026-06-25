@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Config, connections, pool settings, logger, timeout, tenant, and shard options.
+description: Config, connections, pool settings, logger, timeout, extensions, and shard options.
 ---
 
 ## Config shape
@@ -11,9 +11,9 @@ type Config struct {
     Connections map[string]ConnectionConfig
     TablePrefix string
     Pool        PoolConfig
-    Tenant      *TenantConfig
     Shards      map[string]ShardConfig
     Cache       CacheStore
+    Extensions  []Extension
     Logger      Logger
     LogLevel    LogLevel
     Timeout     TimeoutConfig
@@ -105,19 +105,15 @@ Query-level timeout is also available:
 rows, err := db.Use[Product]().Timeout(2 * time.Second).Get(ctx)
 ```
 
-## Tenant
+## Extensions
 
 ```go
-Tenant: &oro.TenantConfig{
-    Fields: []string{"TenantID", "AppID"},
+Extensions: []oro.Extension{
+    tenant.Extension(tenant.Fields("TenantID", "AppID")),
 }
 ```
 
-Use tenant values with:
-
-```go
-db.Tenant(oro.Map{"TenantID": 1, "AppID": 10})
-```
+Extension packages provide optional behavior without growing the core ORM surface. See [Extensions](../../extensions/) and [Tenant Extension](../../extensions/tenant/).
 
 ## Shards
 

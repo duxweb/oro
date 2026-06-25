@@ -7,6 +7,7 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/tenant"
 	_ "modernc.org/sqlite"
 )
 
@@ -87,7 +88,7 @@ func (tenantComment) Define(s *oro.SchemaBuilder) {
 func TestTenantSharedTableScopesCRUD(t *testing.T) {
 	ctx := context.Background()
 	db, err := oro.Open(oro.Config{
-		Tenant: &oro.TenantConfig{Fields: []string{"TenantID", "AppID"}},
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID", "AppID"))},
 		Connections: map[string]oro.ConnectionConfig{
 			"default": {Driver: sqlite.Open(":memory:")},
 		},
@@ -112,7 +113,7 @@ func TestTenantSharedTableScopesCRUD(t *testing.T) {
 		t.Fatalf("expected ErrTenantRequired, got %v", err)
 	}
 
-	tenantOne := db.Tenant(oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
+	tenantOne := tenant.Use(db, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
 	created, err := tenantOne.Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "A001", Status: "new"})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +124,7 @@ func TestTenantSharedTableScopesCRUD(t *testing.T) {
 	if _, err := tenantOne.Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "A002", Status: "new"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Tenant(oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).
 		Use[tenantOrder]().
 		Create(ctx, &tenantOrder{Code: "B001", Status: "new"}); err != nil {
 		t.Fatal(err)
@@ -160,7 +161,7 @@ func TestTenantSharedTableScopesCRUD(t *testing.T) {
 		t.Fatalf("expected no cross tenant delete, got %d", deleted)
 	}
 
-	allRows, err := db.WithoutTenant().Use[tenantOrder]().OrderBy("Code").Get(ctx)
+	allRows, err := tenant.Without(db).Use[tenantOrder]().OrderBy("Code").Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestTenantSharedTableScopesCRUD(t *testing.T) {
 func TestTenantModelOverrideAndNoTenant(t *testing.T) {
 	ctx := context.Background()
 	db, err := oro.Open(oro.Config{
-		Tenant: &oro.TenantConfig{Fields: []string{"TenantID"}},
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID"))},
 		Connections: map[string]oro.ConnectionConfig{
 			"default": {Driver: sqlite.Open(":memory:")},
 		},
@@ -192,18 +193,18 @@ func TestTenantModelOverrideAndNoTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = db.Tenant(oro.Map{"TenantID": uint64(1)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "missing org"})
+	_, err = tenant.Use(db, oro.Map{"TenantID": uint64(1)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "missing org"})
 	if !errors.Is(err, oro.ErrTenantRequired) {
 		t.Fatalf("expected model tenant override error, got %v", err)
 	}
 
-	if _, err := db.Tenant(oro.Map{"OrgID": uint64(7)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "p1"}); err != nil {
+	if _, err := tenant.Use(db, oro.Map{"OrgID": uint64(7)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "p1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Tenant(oro.Map{"OrgID": uint64(8)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "p2"}); err != nil {
+	if _, err := tenant.Use(db, oro.Map{"OrgID": uint64(8)}).Use[tenantProject]().Create(ctx, &tenantProject{Name: "p2"}); err != nil {
 		t.Fatal(err)
 	}
-	projects, err := db.Tenant(oro.Map{"OrgID": uint64(7)}).Use[tenantProject]().Get(ctx)
+	projects, err := tenant.Use(db, oro.Map{"OrgID": uint64(7)}).Use[tenantProject]().Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +227,7 @@ func TestTenantModelOverrideAndNoTenant(t *testing.T) {
 func TestTenantWithScopesPreloadedRelations(t *testing.T) {
 	ctx := context.Background()
 	db, err := oro.Open(oro.Config{
-		Tenant: &oro.TenantConfig{Fields: []string{"TenantID"}},
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID"))},
 		Connections: map[string]oro.ConnectionConfig{
 			"default": {Driver: sqlite.Open(":memory:")},
 		},
@@ -246,7 +247,7 @@ func TestTenantWithScopesPreloadedRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tenantOne := db.Tenant(oro.Map{"TenantID": uint64(1)})
+	tenantOne := tenant.Use(db, oro.Map{"TenantID": uint64(1)})
 	article, err := tenantOne.Use[tenantArticle]().Create(ctx, &tenantArticle{Title: "a1"})
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +255,7 @@ func TestTenantWithScopesPreloadedRelations(t *testing.T) {
 	if _, err := tenantOne.Use[tenantComment]().Create(ctx, &tenantComment{ArticleID: article.ID, Body: "visible"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Tenant(oro.Map{"TenantID": uint64(2)}).Use[tenantComment]().Create(ctx, &tenantComment{ArticleID: article.ID, Body: "hidden"}); err != nil {
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(2)}).Use[tenantComment]().Create(ctx, &tenantComment{ArticleID: article.ID, Body: "hidden"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -274,9 +275,8 @@ func TestTenantWithScopesPreloadedRelations(t *testing.T) {
 func TestTenantRouterSelectsConnection(t *testing.T) {
 	ctx := context.Background()
 	db, err := oro.Open(oro.Config{
-		Tenant: &oro.TenantConfig{
-			Fields: []string{"TenantID"},
-			Router: oro.TenantRouterFunc(func(ctx context.Context, values oro.Map) (string, error) {
+		Extensions: []oro.Extension{
+			tenant.Extension(tenant.Fields("TenantID"), tenant.WithRouter(tenant.RouterFunc(func(ctx context.Context, values oro.Map) (string, error) {
 				tenantID, ok := values["TenantID"]
 				if !ok {
 					return "", oro.ErrTenantRequired
@@ -287,9 +287,9 @@ func TestTenantRouterSelectsConnection(t *testing.T) {
 				case uint64(2):
 					return "tenant_2", nil
 				default:
-					return "tenant_missing", nil
+					return "", oro.ErrUnknownTenant
 				}
-			}),
+			}))),
 		},
 		Connections: map[string]oro.ConnectionConfig{
 			"tenant_1": {Driver: sqlite.Open(":memory:")},
@@ -315,21 +315,21 @@ func TestTenantRouterSelectsConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.Tenant(oro.Map{"TenantID": uint64(1), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "T1", Status: "ok"}); err != nil {
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "T1", Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Tenant(oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "T2", Status: "ok"}); err != nil {
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "T2", Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 
-	row1, err := db.Connection("tenant_1").WithoutTenant().Use[tenantOrder]().First(ctx)
+	row1, err := tenant.Without(db.Connection("tenant_1")).Use[tenantOrder]().First(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if row1.Code != "T1" {
 		t.Fatalf("expected tenant_1 data, got %#v", row1)
 	}
-	row2, err := db.Connection("tenant_2").WithoutTenant().Use[tenantOrder]().First(ctx)
+	row2, err := tenant.Without(db.Connection("tenant_2")).Use[tenantOrder]().First(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestTenantRouterSelectsConnection(t *testing.T) {
 		t.Fatalf("expected tenant_2 data, got %#v", row2)
 	}
 
-	_, err = db.Tenant(oro.Map{"TenantID": uint64(3), "AppID": uint64(10)}).Use[tenantOrder]().Get(ctx)
+	_, err = tenant.Use(db, oro.Map{"TenantID": uint64(3), "AppID": uint64(10)}).Use[tenantOrder]().Get(ctx)
 	if !errors.Is(err, oro.ErrUnknownTenant) {
 		t.Fatalf("expected ErrUnknownTenant, got %v", err)
 	}

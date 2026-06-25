@@ -38,78 +38,15 @@ func (schemaParser) Parse(model any) (*ModelSchema, error) {
 		schema.Table = Snake(typ.Name()) + "s"
 	}
 
-	for index := 0; index < typ.NumField(); index++ {
-		structField := typ.Field(index)
-		if !structField.IsExported() {
-			continue
-		}
-		if structField.Anonymous && structField.Type == reflect.TypeOf(Model{}) {
-			schema.ModelIndex = append([]int(nil), structField.Index...)
-			if err := addModelFields(schema, structField.Index); err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		fieldBuilder := builder.fields[structField.Name]
-		if fieldBuilder != nil && fieldBuilder.typeConflict {
-			return nil, &Error{Op: "schema.parse", Kind: ErrInvalidArgument, Model: schema.Name, Field: structField.Name}
-		}
-		if fieldBuilder != nil && fieldBuilder.ignore {
-			continue
-		}
-
-		field := FieldSchema{
-			Name:     structField.Name,
-			Column:   Snake(structField.Name),
-			Type:     structField.Type.String(),
-			Index:    append([]int(nil), structField.Index...),
-			Nullable: true,
-		}
-		if fieldBuilder != nil {
-			if fieldBuilder.column != "" {
-				field.Column = fieldBuilder.column
-			}
-			if fieldBuilder.fieldTyp != "" {
-				field.Type = fieldBuilder.fieldTyp
-			}
-			if fieldBuilder.nullable != nil {
-				field.Nullable = *fieldBuilder.nullable
-			}
-			field.Size = fieldBuilder.size
-			field.SizeSet = fieldBuilder.sizeSet
-			field.Precision = fieldBuilder.precision
-			field.Scale = fieldBuilder.scale
-			field.Default = fieldBuilder.defaultVal
-			field.EnumValues = append([]string(nil), fieldBuilder.enumValues...)
-			field.Comment = fieldBuilder.comment
-			field.Primary = fieldBuilder.primary
-			field.Ignore = fieldBuilder.ignore
-			field.Virtual = fieldBuilder.virtual
-			field.Hidden = fieldBuilder.hidden
-			field.Optimistic = fieldBuilder.optimistic
-		}
-		if err := validateFieldSchema(schema.Name, field, structField.Type); err != nil {
-			return nil, err
-		}
-		if err := addField(schema, field); err != nil {
-			return nil, err
-		}
-		if fieldBuilder != nil {
-			if fieldBuilder.index != "" {
-				addIndex(schema, builderIndexName(schema.Table, field.Column, fieldBuilder.index, false), []string{field.Column}, false)
-			}
-			if fieldBuilder.unique != "" {
-				addIndex(schema, builderIndexName(schema.Table, field.Column, fieldBuilder.unique, true), []string{field.Column}, true)
-			}
-			if fieldBuilder.fullText != "" {
-				addFullTextIndex(schema, builderFullTextIndexName(schema.Table, field.Column, fieldBuilder.fullText), []string{field.Column})
-			}
-		}
+	if err := addStructFields(schema, builder, typ, nil); err != nil {
+		return nil, err
 	}
 
 	for fieldName := range builder.fields {
-		if _, ok := fieldByName(typ, fieldName); !ok {
+		if _, ok := schema.FieldByGo[fieldName]; !ok {
+			if builder.fields[fieldName] != nil && builder.fields[fieldName].ignore {
+				continue
+			}
 			return nil, &Error{Op: "schema.parse", Kind: ErrUnknownField, Model: schema.Name, Field: fieldName}
 		}
 	}
@@ -146,17 +83,142 @@ func (schemaParser) Parse(model any) (*ModelSchema, error) {
 	return schema, nil
 }
 
+func addStructFields(schema *ModelSchema, builder *SchemaBuilder, typ reflect.Type, baseIndex []int) error {
+	for index := 0; index < typ.NumField(); index++ {
+		structField := typ.Field(index)
+		if !structField.IsExported() {
+			continue
+		}
+		fieldIndex := fieldIndex(baseIndex, index)
+		if structField.Anonymous && structField.Type == reflect.TypeOf(Model{}) {
+			schema.ModelIndex = append([]int(nil), fieldIndex...)
+			if err := addModelFields(schema, fieldIndex); err != nil {
+				return err
+			}
+			continue
+		}
+		if structField.Anonymous && structField.Type == reflect.TypeOf(SoftDeleteFields{}) {
+			if err := addSoftDeleteFields(schema, fieldIndex); err != nil {
+				return err
+			}
+			continue
+		}
+		if structField.Anonymous && isFlattenableExtensionStruct(structField.Type) {
+			fieldType := structField.Type
+			for fieldType.Kind() == reflect.Pointer {
+				fieldType = fieldType.Elem()
+			}
+			if err := addStructFields(schema, builder, fieldType, fieldIndex); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := addSchemaField(schema, builder, structField, fieldIndex); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addSchemaField(schema *ModelSchema, builder *SchemaBuilder, structField reflect.StructField, index []int) error {
+	fieldBuilder := builder.fields[structField.Name]
+	if fieldBuilder != nil && fieldBuilder.typeConflict {
+		return &Error{Op: "schema.parse", Kind: ErrInvalidArgument, Model: schema.Name, Field: structField.Name}
+	}
+	if fieldBuilder != nil && fieldBuilder.ignore {
+		return nil
+	}
+	field := FieldSchema{
+		Name:     structField.Name,
+		Column:   Snake(structField.Name),
+		Type:     structField.Type.String(),
+		Index:    append([]int(nil), index...),
+		Nullable: true,
+	}
+	if fieldBuilder != nil {
+		if fieldBuilder.column != "" {
+			field.Column = fieldBuilder.column
+		}
+		if fieldBuilder.fieldTyp != "" {
+			field.Type = fieldBuilder.fieldTyp
+		}
+		if fieldBuilder.nullable != nil {
+			field.Nullable = *fieldBuilder.nullable
+		}
+		field.Size = fieldBuilder.size
+		field.SizeSet = fieldBuilder.sizeSet
+		field.Precision = fieldBuilder.precision
+		field.Scale = fieldBuilder.scale
+		field.Default = fieldBuilder.defaultVal
+		field.EnumValues = append([]string(nil), fieldBuilder.enumValues...)
+		field.Comment = fieldBuilder.comment
+		field.Primary = fieldBuilder.primary
+		field.Ignore = fieldBuilder.ignore
+		field.Virtual = fieldBuilder.virtual
+		field.Hidden = fieldBuilder.hidden
+		field.Optimistic = fieldBuilder.optimistic
+		field.SoftDelete = fieldBuilder.softDelete
+	}
+	if err := validateFieldSchema(schema.Name, field, structField.Type); err != nil {
+		return err
+	}
+	if err := addField(schema, field); err != nil {
+		return err
+	}
+	if fieldBuilder != nil {
+		if fieldBuilder.index != "" {
+			addIndex(schema, builderIndexName(schema.Table, field.Column, fieldBuilder.index, false), []string{field.Column}, false)
+		}
+		if fieldBuilder.unique != "" {
+			addIndex(schema, builderIndexName(schema.Table, field.Column, fieldBuilder.unique, true), []string{field.Column}, true)
+		}
+		if fieldBuilder.fullText != "" {
+			addFullTextIndex(schema, builderFullTextIndexName(schema.Table, field.Column, fieldBuilder.fullText), []string{field.Column})
+		}
+		if fieldBuilder.softDelete && fieldBuilder.index == "" {
+			addIndex(schema, builderIndexName(schema.Table, field.Column, defaultIndexMarker, false), []string{field.Column}, false)
+		}
+	}
+	return nil
+}
+
+func isFlattenableExtensionStruct(typ reflect.Type) bool {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct || typ.PkgPath() == "" {
+		return false
+	}
+	embeddedType := reflect.TypeOf((*EmbeddedFields)(nil)).Elem()
+	return reflect.PointerTo(typ).Implements(embeddedType) || typ.Implements(embeddedType)
+}
+
 func addModelFields(schema *ModelSchema, baseIndex []int) error {
 	for _, field := range []FieldSchema{
 		{Name: "ID", Column: "id", Type: "uint64", Index: fieldIndex(baseIndex, 0), Primary: true},
 		{Name: "CreatedAt", Column: "created_at", Type: "time.Time", Index: fieldIndex(baseIndex, 1), Nullable: true, AutoCreate: true},
 		{Name: "UpdatedAt", Column: "updated_at", Type: "time.Time", Index: fieldIndex(baseIndex, 2), Nullable: true, AutoUpdate: true},
-		{Name: "DeletedAt", Column: "deleted_at", Type: "oro.Null[time.Time]", Index: fieldIndex(baseIndex, 3), Nullable: true, SoftDelete: true},
 	} {
 		if err := addField(schema, field); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func addSoftDeleteFields(schema *ModelSchema, baseIndex []int) error {
+	field := FieldSchema{
+		Name:       "DeletedAt",
+		Column:     "deleted_at",
+		Type:       "oro.Null[time.Time]",
+		Index:      fieldIndex(baseIndex, 0),
+		Nullable:   true,
+		SoftDelete: true,
+	}
+	if err := addField(schema, field); err != nil {
+		return err
+	}
+	addIndex(schema, builderIndexName(schema.Table, field.Column, defaultIndexMarker, false), []string{field.Column}, false)
 	return nil
 }
 
@@ -243,6 +305,9 @@ func validateFieldSchema(modelName string, field FieldSchema, goType reflect.Typ
 	if field.Optimistic && !isIntegerFieldType(field.Type) {
 		return &Error{Op: "schema.parse", Kind: ErrInvalidArgument, Model: modelName, Field: field.Name}
 	}
+	if field.SoftDelete && !isSoftDeleteFieldType(field.Type) {
+		return &Error{Op: "schema.parse", Kind: ErrInvalidArgument, Model: modelName, Field: field.Name}
+	}
 	if field.Type == "enum" {
 		if len(field.EnumValues) == 0 {
 			return &Error{Op: "schema.parse", Kind: ErrInvalidArgument, Model: modelName, Field: field.Name}
@@ -279,6 +344,10 @@ func containsString(values []string, value string) bool {
 
 func isIntegerFieldType(fieldType string) bool {
 	return schemautil.IsIntegerFieldType(fieldType)
+}
+
+func isSoftDeleteFieldType(fieldType string) bool {
+	return fieldType == "time.Time" || strings.Contains(fieldType, "time.Time")
 }
 
 func addIndex(schema *ModelSchema, name string, fields []string, unique bool) {

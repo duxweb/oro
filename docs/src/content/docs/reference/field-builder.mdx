@@ -3,7 +3,7 @@ title: Field Builder
 description: SchemaBuilder and FieldBuilder API reference.
 ---
 
-`Define` receives a `SchemaBuilder`. Use it to set the table, connection, fields, indexes, relations, tenant, and shard metadata.
+`Define` receives a `SchemaBuilder`. Use it to set the table, connection, fields, indexes, relations, and shard metadata.
 
 ## Model-level methods
 
@@ -25,8 +25,6 @@ Common model methods:
 | `Index(name, fields...)` | create an index |
 | `Unique(name, fields...)` | create a unique index |
 | `FullText(name, fields...)` | create a full-text index |
-| `Tenant(fields...)` | model tenant fields |
-| `NoTenant()` | opt out of tenancy |
 | `Shard(table, fields...)` | shard rule |
 
 ## Field types
@@ -47,7 +45,7 @@ s.Field("CreatedAt").Timestamp()
 ```go
 s.Field("Code").String().Column("product_code").Unique().Comment("public product code")
 s.Field("Status").String().Default("active").Index()
-s.Field("DeletedAt").Timestamp().Nullable()
+s.Field("RemovedAt").Column("removed_at").SoftDelete()
 s.Field("PasswordHash").String().Hidden()
 s.Field("CommentsCount").Virtual()
 ```
@@ -68,7 +66,10 @@ Common options:
 | `Virtual()` | not part of table creation |
 | `Comment(text)` | column comment where supported |
 | `OptimisticLock()` | version field for update checks |
+| `SoftDelete()` | mark a nullable time field as soft delete |
 
 ## Field names
+
+For the conventional soft-delete field, prefer embedding `oro.SoftDeleteFields`. Use `SoftDelete()` only when you define a custom field such as `RemovedAt`.
 
 `Field("Code")` references the Go struct field. The default column is `code`. Use `Column(...)` only when the database column cannot be derived cleanly.

@@ -1,0 +1,203 @@
+---
+title: Nested Set 树形结构
+description: 使用官方 nestedset 扩展存储和查询层级数据。
+---
+
+`extensions/nestedset` 提供类型化树服务，用 `ParentID`、`_lft`、`_rgt` 和 `Depth` 保存节点，并提供创建、移动、读取、删除、检查和重建方法。
+
+## 安装
+
+```go
+import "github.com/duxweb/oro/extensions/nestedset"
+```
+
+打开数据库时注册扩展：
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        nestedset.Extension(),
+    },
+})
+```
+
+## 模型
+
+嵌入 `nestedset.NodeFields`，并在 `Define` 里调用 `nestedset.Define(s)`：
+
+```go
+type Category struct {
+    oro.Model
+    nestedset.NodeFields
+
+    Name string
+}
+
+func (Category) Define(s *oro.SchemaBuilder) {
+    s.Table("categories")
+    nestedset.Define(s)
+    s.Field("Name").String().Size(120)
+}
+```
+
+默认列名：
+
+| 字段 | 列名 |
+| --- | --- |
+| `ParentID` | `parent_id` |
+| `Lft` | `_lft` |
+| `Rgt` | `_rgt` |
+| `Depth` | `depth` |
+
+如果需要自定义字段名，在 `Define` 和 `Use` 两处使用同一份 `nestedset.FieldNames(parent, left, right, depth)`。
+
+## 创建节点
+
+```go
+tree := nestedset.Use[Category](db)
+
+root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
+phones, err := tree.CreateChild(ctx, root.ID, &Category{Name: "Phones"})
+_, err = tree.CreateFirstChild(ctx, phones.ID, &Category{Name: "Android"})
+_, err = tree.CreateAfter(ctx, phones.ID, &Category{Name: "Laptops"})
+```
+
+- `CreateRoot` 新建根节点。
+- `CreateChild` 追加为最后一个子节点。
+- `CreateFirstChild` 插入为第一个子节点。
+- `CreateBefore` 和 `CreateAfter` 插入为兄弟节点。
+
+结构性写入会自动运行在事务中。
+
+## 读取树
+
+```go
+roots, err := tree.Roots(ctx)
+all, err := tree.All(ctx)
+nested, err := tree.Tree(ctx)
+subtree, err := tree.Subtree(ctx, phones.ID)
+flatSubtree, err := tree.FlatSubtree(ctx, phones.ID)
+```
+
+`Tree` 和 `Subtree` 返回嵌套节点：
+
+```go
+type Node[T any] struct {
+    Model    *T
+    Children []*Node[T]
+}
+```
+
+## 读取关系
+
+```go
+parent, err := tree.Parent(ctx, nodeID)
+children, err := tree.Children(ctx, nodeID)
+first, err := tree.FirstChild(ctx, nodeID)
+last, err := tree.LastChild(ctx, nodeID)
+siblings, err := tree.Siblings(ctx, nodeID)
+prev, err := tree.PrevSibling(ctx, nodeID)
+next, err := tree.NextSibling(ctx, nodeID)
+ancestors, err := tree.Ancestors(ctx, nodeID)
+ancestorsAndSelf, err := tree.AncestorsAndSelf(ctx, nodeID)
+descendants, err := tree.Descendants(ctx, nodeID)
+descendantsAndSelf, err := tree.DescendantsAndSelf(ctx, nodeID)
+```
+
+单节点读取未命中返回 `nil, nil`。多节点读取未命中返回空切片。
+
+## 判断方法
+
+```go
+ok, err := tree.IsRoot(ctx, nodeID)
+ok, err := tree.IsLeaf(ctx, nodeID)
+ok, err := tree.IsAncestorOf(ctx, ancestorID, nodeID)
+ok, err := tree.IsDescendantOf(ctx, nodeID, ancestorID)
+```
+
+## 移动节点
+
+```go
+err := tree.MoveToRoot(ctx, nodeID)
+err := tree.MoveToChildOf(ctx, nodeID, parentID)
+err := tree.MoveToFirstChildOf(ctx, nodeID, parentID)
+err := tree.MoveBefore(ctx, nodeID, targetID)
+err := tree.MoveAfter(ctx, nodeID, targetID)
+err := tree.MoveUp(ctx, nodeID)
+err := tree.MoveDown(ctx, nodeID)
+```
+
+节点不能移动到自身或自己的后代中。移动会保留整个子树。
+
+## 删除子树
+
+```go
+deleted, err := tree.Delete(ctx, nodeID)
+deleted, err := tree.DeleteSubtree(ctx, nodeID)
+```
+
+`Delete` 和 `DeleteSubtree` 都会删除当前节点和所有后代，然后闭合树区间。
+
+## 多棵树隔离
+
+一张表里放多棵独立树时使用 `Scope`，例如租户树或应用树：
+
+```go
+tree := nestedset.Use[Category](db, nestedset.Scope(oro.Map{
+    "TenantID": uint64(1),
+}))
+```
+
+scope 会应用到所有读取和结构性写入。新建节点时，scope 值也会写入模型。
+
+## Query 包装
+
+复杂读取可以使用 `tree.Query()`：
+
+```go
+nodes, err := tree.Query().
+    WhereDepthGte(1).
+    DefaultOrder().
+    Get(ctx)
+
+query, err := tree.Query().DescendantsOf(ctx, root.ID)
+if err != nil {
+    return err
+}
+items, err := query.Where("Status", "active").DefaultOrder().Get(ctx)
+```
+
+支持 `Roots`、`AncestorsOf`、`AncestorsAndSelfOf`、`DescendantsOf`、`DescendantsAndSelfOf`、`SiblingsOf`、`WhereDepth`、`WhereDepthGte`、`WhereDepthLte`、`DefaultOrder`、`Reversed`、`ToTree`、`Get`、`First`、`Count` 和 `Exists`。
+
+## 检查和重建
+
+```go
+result, err := tree.Check(ctx)
+if err != nil {
+    return err
+}
+if !result.Valid {
+    err = tree.Rebuild(ctx)
+}
+```
+
+`Rebuild` 会根据 `ParentID` 重新计算 `Lft`、`Rgt` 和 `Depth`。
+
+也可以传入显式嵌套结构并持久化：
+
+```go
+err := tree.RebuildTree(ctx, []*nestedset.Node[Category]{
+    {
+        Model: &Category{Name: "Root"},
+        Children: []*nestedset.Node[Category]{
+            {Model: &Category{Name: "Child"}},
+        },
+    },
+})
+```
+
+payload 里的新模型会插入；带 `ID` 的已有模型会更新。
+

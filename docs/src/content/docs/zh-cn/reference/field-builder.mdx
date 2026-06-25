@@ -28,8 +28,6 @@ func (Product) Define(s *oro.SchemaBuilder) {
 | `Table(name)` | 设置逻辑表名 |
 | `Connection(name)` | 设置模型默认连接 |
 | `Shard(group, fields...)` | 设置模型分片组和分片字段 |
-| `Tenant(fields...)` | 设置模型租户字段 |
-| `NoTenant()` | 当前模型不应用全局租户 |
 | `Field(name)` | 获取字段构建器，`name` 是 Go 字段名 |
 | `Index(name, fields...)` | 定义组合普通索引 |
 | `Unique(name, fields...)` | 定义组合唯一索引 |
@@ -98,6 +96,7 @@ s.Field("CategoryID").UnsignedBigInt().Column("category_id")
 | `Virtual()` | 查询/输出虚拟字段，不参与同步 |
 | `Hidden()` | 序列化时默认隐藏 |
 | `OptimisticLock()` | 标记乐观锁字段 |
+| `SoftDelete()` | 标记可空时间字段为软删除字段 |
 
 示例：
 
@@ -106,10 +105,13 @@ func (User) Define(s *oro.SchemaBuilder) {
     s.Field("Email").Email().Size(191).Unique()
     s.Field("Password").String().Size(255).Hidden()
     s.Field("Version").UnsignedBigInt().Default(1).OptimisticLock()
+    s.Field("RemovedAt").Column("removed_at").SoftDelete()
     s.Field("Profile").JSON().Nullable()
     s.Field("Score").Decimal(12, 2).Default("0.00")
 }
 ```
+
+约定软删除字段优先嵌入 `oro.SoftDeleteFields`，默认字段是 `DeletedAt`，列名是 `deleted_at`。只有自定义字段名时才需要 `SoftDelete()`。
 
 字段备注：
 

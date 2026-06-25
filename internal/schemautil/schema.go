@@ -7,7 +7,7 @@ import (
 
 func IsBaseModelField(name string) bool {
 	switch name {
-	case "ID", "CreatedAt", "UpdatedAt", "DeletedAt":
+	case "ID", "CreatedAt", "UpdatedAt":
 		return true
 	default:
 		return false

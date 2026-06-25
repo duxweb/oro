@@ -142,6 +142,15 @@ affected, err := db.Use[Product]().Where("ID", id).Delete(ctx)
 
 如果模型定义了软删除字段，`Delete` 会写入软删除时间；否则执行物理删除。
 
+约定软删除字段需要显式开启：
+
+```go
+type Product struct {
+    oro.Model
+    oro.SoftDeleteFields // DeletedAt -> deleted_at
+}
+```
+
 裸表删除始终是物理删除：
 
 ```go

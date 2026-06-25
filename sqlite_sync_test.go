@@ -11,6 +11,7 @@ import (
 
 type syncProduct struct {
 	oro.Model
+	oro.SoftDeleteFields
 	Code  string
 	Price uint
 }
@@ -23,6 +24,7 @@ func (syncProduct) Define(s *oro.SchemaBuilder) {
 
 type syncProductWithStock struct {
 	oro.Model
+	oro.SoftDeleteFields
 	Code  string
 	Price uint
 	Stock uint

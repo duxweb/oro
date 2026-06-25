@@ -49,8 +49,7 @@ type Factory interface {
 type sessionState struct {
 	connection       string
 	manualConnection bool
-	tenant           Map
-	withoutTenant    bool
+	extensions       map[string]any
 	tx               *txState
 }
 

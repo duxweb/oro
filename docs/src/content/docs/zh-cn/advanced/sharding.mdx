@@ -1,0 +1,90 @@
+---
+title: 分片
+description: 把模型查询和写入路由到配置好的分片连接。
+---
+
+分片是核心路由能力。它通过分片策略把模型查询映射到多个连接中的一个。
+
+## 配置分片
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "orders_0": {Driver: mysql.Open(dsn0)},
+        "orders_1": {Driver: mysql.Open(dsn1)},
+    },
+    Shards: map[string]oro.ShardConfig{
+        "orders": {
+            Connections: []string{"orders_0", "orders_1"},
+            Strategy:    oro.ModShard("TenantID"),
+        },
+    },
+})
+```
+
+`ModShard(field)` 会把整数类字段按连接数量取模，得到目标分片连接。
+
+## 模型分片
+
+模型在 `Define` 中选择分片组：
+
+```go
+type Order struct {
+    oro.Model
+    TenantID uint64
+    Code     string
+    Total    uint
+}
+
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Shard("orders", "TenantID")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("Code").String().Unique()
+    s.Field("Total").Uint()
+}
+```
+
+`Shard` 传入的是 Go 字段名。
+
+## 查询单分片
+
+显式传入分片值：
+
+```go
+orders, err := db.Use[Order]().
+    Shard(oro.Map{"TenantID": uint64(10)}).
+    Where("Code", "A001").
+    Get(ctx)
+```
+
+写入也需要分片值：
+
+```go
+created, err := db.Use[Order]().
+    Shard(oro.Map{"TenantID": uint64(10)}).
+    Create(ctx, &Order{TenantID: 10, Code: "A001", Total: 120})
+```
+
+分片模型没有提供分片值时，Oro 返回 `oro.ErrShardRequired`。
+
+## 查询全部分片
+
+读类扇出查询可以使用 `AllShards()`：
+
+```go
+orders, err := db.Use[Order]().
+    AllShards().
+    Where("Status", "paid").
+    Get(ctx)
+```
+
+`AllShards` 会合并所有分片连接的结果，建议只用于查询或受控维护流程。
+
+## 事务
+
+单个事务不能跨多个分片。如果写入流程需要多个分片，应该在应用层协调。
+
+## Tenant 扩展集成
+
+`extensions/tenant` 可以自动向分片路由提供租户值。如果分片按租户路由，参考 [Tenant 租户扩展](../../extensions/tenant/)。

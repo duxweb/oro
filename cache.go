@@ -155,9 +155,13 @@ func cacheKey(db *DB, spec QuerySpec, compiled CompiledSQL) (string, error) {
 	if spec.Cache.Key != "" {
 		return spec.Cache.Key, nil
 	}
+	extensionValues, err := extensionCacheKeyValues(context.Background(), db)
+	if err != nil {
+		return "", &Error{Op: "cache", Kind: ErrInvalidArgument, Cause: err}
+	}
 	key, err := cacheutil.Key(Map{
 		"connection": spec.Connection,
-		"tenant":     dbTenantValues(db),
+		"extensions": extensionValues,
 		"shard":      spec.ShardGroup,
 		"table":      spec.Table,
 		"model":      spec.ModelName,
@@ -170,13 +174,6 @@ func cacheKey(db *DB, spec QuerySpec, compiled CompiledSQL) (string, error) {
 		return "", &Error{Op: "cache", Kind: ErrInvalidArgument, Cause: err}
 	}
 	return key, nil
-}
-
-func dbTenantValues(db *DB) Map {
-	if db == nil {
-		return nil
-	}
-	return copyMap(db.session.tenant)
 }
 
 func cacheWithNames(with []WithSpec) []string {

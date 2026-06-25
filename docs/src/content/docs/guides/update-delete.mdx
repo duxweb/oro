@@ -111,6 +111,15 @@ affected, err := db.Use[Product]().Where("ID", id).Delete(ctx)
 
 If the model has a soft-delete field, `Delete` writes the deleted timestamp. Otherwise it physically deletes the row.
 
+Enable the conventional soft-delete field explicitly:
+
+```go
+type Product struct {
+    oro.Model
+    oro.SoftDeleteFields // DeletedAt -> deleted_at
+}
+```
+
 Table deletes are physical deletes:
 
 ```go

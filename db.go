@@ -46,10 +46,15 @@ func Open(config Config) (*DB, error) {
 	rt.RelationWriter = factory.NewRelationWriter(rt)
 	rt.Serializer = factory.NewSerializer(rt)
 
-	return &DB{
+	db := &DB{
 		runtime: rt,
 		session: sessionState{connection: config.defaultConnectionName()},
-	}, nil
+	}
+	if err := installExtensions(db, config.Extensions); err != nil {
+		_ = db.Close(context.Background())
+		return nil, err
+	}
+	return db, nil
 }
 
 func (db *DB) Close(ctx context.Context) error {
@@ -66,18 +71,19 @@ func (db *DB) Connection(name string) *DB {
 	return &clone
 }
 
-func (db *DB) Tenant(values Map) *DB {
+func (db *DB) WithExtension(name string, state any) *DB {
 	clone := *db
-	clone.session.tenant = copyMap(values)
-	clone.session.withoutTenant = false
+	clone.session.extensions = cloneExtensionState(db.session.extensions)
+	clone.session.extensions[name] = state
 	return &clone
 }
 
-func (db *DB) WithoutTenant() *DB {
-	clone := *db
-	clone.session.tenant = nil
-	clone.session.withoutTenant = true
-	return &clone
+func (db *DB) ExtensionState(name string) (any, bool) {
+	if db == nil || db.session.extensions == nil {
+		return nil, false
+	}
+	value, ok := db.session.extensions[name]
+	return value, ok
 }
 
 func (db *DB) Use[T any]() *ModelQuery[T] {
@@ -101,6 +107,32 @@ func (db *DB) Table(name string) *TableQuery {
 
 func (db *DB) TableName(name string) string {
 	return tableNames(db).Physical(name)
+}
+
+func SchemaOf[T any](db *DB) (*ModelSchema, error) {
+	return schemaForModel[T](db)
+}
+
+func (db *DB) SchemaOf(model Definer) (*ModelSchema, error) {
+	if db == nil || db.runtime == nil || db.runtime.SchemaParser == nil {
+		return nil, &Error{Op: "schema", Kind: ErrInvalidArgument}
+	}
+	if model == nil {
+		return nil, &Error{Op: "schema", Kind: ErrInvalidArgument}
+	}
+	if db.runtime.Registry != nil {
+		if schema, ok := db.runtime.Registry.Get(model); ok {
+			return schema, nil
+		}
+	}
+	schema, err := db.runtime.SchemaParser.Parse(model)
+	if err != nil {
+		return nil, err
+	}
+	if db.runtime.Registry != nil {
+		db.runtime.Registry.Register(schema, model)
+	}
+	return schema, nil
 }
 
 func (db *DB) From(source Source) *TableQuery {

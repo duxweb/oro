@@ -173,12 +173,20 @@ s.Field("Name").String().Size(120)
 s.Field("Price").Decimal(12, 2).Default(0)
 s.Field("Status").Enum("draft", "published")
 s.Field("Meta").JSON().Nullable()
-s.Field("DeletedAt").Timestamp().Nullable()
 s.Field("Version").UnsignedBigInt().OptimisticLock()
 
 s.Index("idx_posts_status", "Status")
 s.Unique("uk_posts_slug", "Slug")
 s.FullText("ft_posts_title_body", "Title", "Body")
+```
+
+需要软删除时显式开启：
+
+```go
+type User struct {
+    oro.Model
+    oro.SoftDeleteFields // DeletedAt -> deleted_at
+}
 ```
 
 ## 自动同步
@@ -337,13 +345,16 @@ db, err := oro.Open(oro.Config{
         "mysql": {Driver: mysql.Open(mysqlDSN)},
         "pgsql": {Driver: pgsql.Open(pgDSN)},
     },
+    Extensions: []oro.Extension{
+        tenant.Extension(tenant.Fields("TenantID", "AppID")),
+    },
 })
 ```
 
 租户和分片统一使用 `oro.Map`：
 
 ```go
-rows, err := db.Tenant(oro.Map{"TenantID": 10, "AppID": 20}).
+rows, err := tenant.Use(db, oro.Map{"TenantID": 10, "AppID": 20}).
     Use[Product]().
     Get(ctx)
 

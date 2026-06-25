@@ -14,6 +14,7 @@ import (
 
 type integrationProduct struct {
 	oro.Model
+	oro.SoftDeleteFields
 	Code  string
 	Price uint
 }
@@ -296,6 +297,7 @@ var integrationHookCalls []string
 
 type integrationHookProduct struct {
 	oro.Model
+	oro.SoftDeleteFields
 	Code  string
 	Price uint
 }

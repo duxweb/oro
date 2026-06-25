@@ -1,0 +1,171 @@
+---
+title: Tenant Extension
+description: Use the first-party tenant extension for shared-table tenancy, write injection, connection routing, shard values, and cache keys.
+---
+
+`extensions/tenant` is the first-party tenancy package. It keeps tenant behavior outside the core ORM while still integrating with queries, writes, preloads, sharding, and cache keys.
+
+```go
+import "github.com/duxweb/oro/extensions/tenant"
+```
+
+## Install
+
+Register the extension when opening the database:
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        tenant.Extension(tenant.Fields("TenantID", "AppID")),
+    },
+})
+```
+
+`tenant.Fields(...)` defines the default tenant fields for models that do not override tenant fields in `Define`.
+
+## Model fields
+
+Tenant fields are normal model fields. Define their database metadata like any other field:
+
+```go
+type Order struct {
+    oro.Model
+    TenantID uint64
+    AppID    uint64
+    Code     string
+    Total    uint
+}
+
+func (Order) Define(s *oro.SchemaBuilder) {
+    s.Table("orders")
+    s.Field("TenantID").UnsignedBigInt().Index()
+    s.Field("AppID").UnsignedBigInt().Index()
+    s.Field("Code").String().Unique()
+    s.Field("Total").Uint()
+}
+```
+
+A model can override the global tenant fields:
+
+```go
+func (Project) Define(s *oro.SchemaBuilder) {
+    s.Table("projects")
+    s.Tenant("OrgID")
+    s.Field("OrgID").UnsignedBigInt().Index()
+}
+```
+
+A model can opt out:
+
+```go
+func (Plan) Define(s *oro.SchemaBuilder) {
+    s.Table("plans")
+    s.NoTenant()
+}
+```
+
+## Query with tenant values
+
+Use `tenant.Use(db, values)` to bind tenant values to a DB handle:
+
+```go
+tenantDB := tenant.Use(db, oro.Map{
+    "TenantID": uint64(1),
+    "AppID":    uint64(10),
+})
+
+orders, err := tenantDB.Use[Order]().Where("Code", "A001").Get(ctx)
+```
+
+The extension automatically appends tenant conditions to model queries. The same values also apply to relation preloads and relation filters because they go through the same model query pipeline.
+
+## Writes
+
+Tenant values are injected into model writes, so callers do not need to repeat tenant fields in every create or upsert:
+
+```go
+created, err := tenantDB.Use[Order]().Create(ctx, &Order{
+    Code:  "A001",
+    Total: 120,
+})
+```
+
+The inserted row receives `TenantID = 1` and `AppID = 10` from the tenant state.
+
+## Context values
+
+For request-scoped tenancy, store values in `context.Context`:
+
+```go
+ctx = tenant.With(ctx, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
+orders, err := db.Use[Order]().Get(ctx)
+```
+
+This is useful when repositories receive a shared `*oro.DB` and tenant values come from middleware.
+
+## Disable tenant filtering
+
+Use `tenant.Without` only for admin or maintenance paths:
+
+```go
+rows, err := tenant.Without(db).Use[Order]().Get(ctx)
+```
+
+For context-based flows:
+
+```go
+ctx = tenant.WithoutContext(ctx)
+rows, err := db.Use[Order]().Get(ctx)
+```
+
+## Resolver
+
+A resolver can derive tenant values from context automatically:
+
+```go
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        tenant.Extension(
+            tenant.Fields("TenantID"),
+            tenant.WithResolver(tenant.ResolverFunc(func(ctx context.Context) (oro.Map, bool, error) {
+                id, ok := tenantIDFromContext(ctx)
+                if !ok {
+                    return nil, false, nil
+                }
+                return oro.Map{"TenantID": id}, true, nil
+            })),
+        ),
+    },
+})
+```
+
+Resolution order is explicit DB state, context state, then resolver.
+
+## Connection routing
+
+A tenant router can choose a connection from tenant values:
+
+```go
+tenant.Extension(
+    tenant.Fields("TenantID"),
+    tenant.WithRouter(tenant.RouterFunc(func(ctx context.Context, values oro.Map) (string, error) {
+        if values["TenantID"] == uint64(1) {
+            return "tenant_a", nil
+        }
+        return "tenant_b", nil
+    })),
+)
+```
+
+If the router returns an empty connection name, the query keeps its normal connection.
+
+## Shards and cache keys
+
+The tenant extension also contributes tenant values to shard resolution and automatic cache keys. This prevents cross-tenant cache collisions and allows tenant values to feed shard strategies without repeating them in every query.
+
+## Error behavior
+
+If a tenant-enabled model is queried or written without tenant values, Oro returns `oro.ErrTenantRequired`. If a configured tenant field does not exist on the model, Oro returns `oro.ErrUnknownTenant`.

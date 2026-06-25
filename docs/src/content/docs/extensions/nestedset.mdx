@@ -1,0 +1,203 @@
+---
+title: Nested Set Trees
+description: Store and query hierarchical data with the first-party nestedset extension.
+---
+
+`extensions/nestedset` provides a typed tree service for hierarchical data. It stores each node with `ParentID`, `_lft`, `_rgt`, and `Depth`, then exposes explicit methods for creating, moving, reading, deleting, checking, and rebuilding trees.
+
+## Install
+
+```go
+import "github.com/duxweb/oro/extensions/nestedset"
+```
+
+Register the extension when opening the database:
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        nestedset.Extension(),
+    },
+})
+```
+
+## Model
+
+Embed `nestedset.NodeFields` and call `nestedset.Define(s)`:
+
+```go
+type Category struct {
+    oro.Model
+    nestedset.NodeFields
+
+    Name string
+}
+
+func (Category) Define(s *oro.SchemaBuilder) {
+    s.Table("categories")
+    nestedset.Define(s)
+    s.Field("Name").String().Size(120)
+}
+```
+
+Default columns:
+
+| Field | Column |
+| --- | --- |
+| `ParentID` | `parent_id` |
+| `Lft` | `_lft` |
+| `Rgt` | `_rgt` |
+| `Depth` | `depth` |
+
+If you need custom field names, use `nestedset.FieldNames(parent, left, right, depth)` in both `Define` and `Use`.
+
+## Create nodes
+
+```go
+tree := nestedset.Use[Category](db)
+
+root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
+phones, err := tree.CreateChild(ctx, root.ID, &Category{Name: "Phones"})
+_, err = tree.CreateFirstChild(ctx, phones.ID, &Category{Name: "Android"})
+_, err = tree.CreateAfter(ctx, phones.ID, &Category{Name: "Laptops"})
+```
+
+- `CreateRoot` appends a new root tree.
+- `CreateChild` appends as the last child.
+- `CreateFirstChild` inserts as the first child.
+- `CreateBefore` and `CreateAfter` insert as siblings.
+
+Structural writes run in transactions.
+
+## Read trees
+
+```go
+roots, err := tree.Roots(ctx)
+all, err := tree.All(ctx)
+nested, err := tree.Tree(ctx)
+subtree, err := tree.Subtree(ctx, phones.ID)
+flatSubtree, err := tree.FlatSubtree(ctx, phones.ID)
+```
+
+`Tree` and `Subtree` return nested nodes:
+
+```go
+type Node[T any] struct {
+    Model    *T
+    Children []*Node[T]
+}
+```
+
+## Read relationships
+
+```go
+parent, err := tree.Parent(ctx, nodeID)
+children, err := tree.Children(ctx, nodeID)
+first, err := tree.FirstChild(ctx, nodeID)
+last, err := tree.LastChild(ctx, nodeID)
+siblings, err := tree.Siblings(ctx, nodeID)
+prev, err := tree.PrevSibling(ctx, nodeID)
+next, err := tree.NextSibling(ctx, nodeID)
+ancestors, err := tree.Ancestors(ctx, nodeID)
+ancestorsAndSelf, err := tree.AncestorsAndSelf(ctx, nodeID)
+descendants, err := tree.Descendants(ctx, nodeID)
+descendantsAndSelf, err := tree.DescendantsAndSelf(ctx, nodeID)
+```
+
+Single-node reads return `nil, nil` when not found. Multi-node reads return an empty slice.
+
+## Predicates
+
+```go
+ok, err := tree.IsRoot(ctx, nodeID)
+ok, err := tree.IsLeaf(ctx, nodeID)
+ok, err := tree.IsAncestorOf(ctx, ancestorID, nodeID)
+ok, err := tree.IsDescendantOf(ctx, nodeID, ancestorID)
+```
+
+## Move nodes
+
+```go
+err := tree.MoveToRoot(ctx, nodeID)
+err := tree.MoveToChildOf(ctx, nodeID, parentID)
+err := tree.MoveToFirstChildOf(ctx, nodeID, parentID)
+err := tree.MoveBefore(ctx, nodeID, targetID)
+err := tree.MoveAfter(ctx, nodeID, targetID)
+err := tree.MoveUp(ctx, nodeID)
+err := tree.MoveDown(ctx, nodeID)
+```
+
+A node cannot move into itself or its own descendants. Moves preserve the full subtree.
+
+## Delete subtrees
+
+```go
+deleted, err := tree.Delete(ctx, nodeID)
+deleted, err := tree.DeleteSubtree(ctx, nodeID)
+```
+
+`Delete` and `DeleteSubtree` both delete the current node and all descendants, then close the tree gap.
+
+## Scoped trees
+
+Use `Scope` when one table contains multiple independent trees, such as tenant trees or app-specific trees:
+
+```go
+tree := nestedset.Use[Category](db, nestedset.Scope(oro.Map{
+    "TenantID": uint64(1),
+}))
+```
+
+The scope is applied to every read and structural write. Scope values are also written into newly created models.
+
+## Query wrapper
+
+For advanced reads, use `tree.Query()`:
+
+```go
+nodes, err := tree.Query().
+    WhereDepthGte(1).
+    DefaultOrder().
+    Get(ctx)
+
+query, err := tree.Query().DescendantsOf(ctx, root.ID)
+if err != nil {
+    return err
+}
+items, err := query.Where("Status", "active").DefaultOrder().Get(ctx)
+```
+
+Supported query helpers include `Roots`, `AncestorsOf`, `AncestorsAndSelfOf`, `DescendantsOf`, `DescendantsAndSelfOf`, `SiblingsOf`, `WhereDepth`, `WhereDepthGte`, `WhereDepthLte`, `DefaultOrder`, `Reversed`, `ToTree`, `Get`, `First`, `Count`, and `Exists`.
+
+## Check and rebuild
+
+```go
+result, err := tree.Check(ctx)
+if err != nil {
+    return err
+}
+if !result.Valid {
+    err = tree.Rebuild(ctx)
+}
+```
+
+`Rebuild` recalculates `Lft`, `Rgt`, and `Depth` from `ParentID`.
+
+You can also persist an explicit nested payload:
+
+```go
+err := tree.RebuildTree(ctx, []*nestedset.Node[Category]{
+    {
+        Model: &Category{Name: "Root"},
+        Children: []*nestedset.Node[Category]{
+            {Model: &Category{Name: "Child"}},
+        },
+    },
+})
+```
+
+New models in the payload are inserted. Existing models with an `ID` are updated.
+

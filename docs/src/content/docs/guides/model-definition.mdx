@@ -8,11 +8,11 @@ Models implement `Define(*oro.SchemaBuilder)`. Field names are Go struct field n
 ```go
 type User struct {
     oro.Model
+    oro.SoftDeleteFields
     Email        string
     PasswordHash string
     Status       string
     Profile      oro.JSONRaw
-    DeletedAt    oro.Null[time.Time]
 }
 
 func (User) Define(s *oro.SchemaBuilder) {
@@ -21,9 +21,10 @@ func (User) Define(s *oro.SchemaBuilder) {
     s.Field("PasswordHash").Column("password_hash").String().Hidden()
     s.Field("Status").Enum("active", "disabled").Default("active").Index()
     s.Field("Profile").JSON().Nullable()
-    s.Field("DeletedAt").Timestamp().Nullable()
 }
 ```
+
+`oro.Model` contains `id`, `created_at`, and `updated_at`. Add `oro.SoftDeleteFields` only when the model needs soft delete; it maps `DeletedAt` to `deleted_at`.
 
 ## Naming rules
 
@@ -113,12 +114,9 @@ Hidden fields are excluded from default select and serialization. Virtual fields
 func (Order) Define(s *oro.SchemaBuilder) {
     s.Table("orders")
     s.Connection("mysql")
-    s.Tenant("TenantID", "AppID")
     s.Shard("orders", "TenantID")
 }
 ```
 
 - `Connection` sets the default connection for this model.
-- `Tenant` opts the model into tenant filtering and write injection.
-- `NoTenant` disables global tenant behavior for a model.
-- `Shard` maps model queries to a shard group.
+- `Shard` maps model queries to a shard group. Tenant-specific model options are documented in the [Tenant Extension](../../extensions/tenant/).

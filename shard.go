@@ -57,8 +57,10 @@ func shardErrors() shardstrategy.ErrorSet {
 
 func shardValuesForSchema(db *DB, schema *ModelSchema, explicit Map) Map {
 	values := Map{}
-	for key, value := range db.session.tenant {
-		values[key] = value
+	if extensionValues, err := extensionShardValues(context.Background(), db); err == nil {
+		for key, value := range extensionValues {
+			values[key] = value
+		}
 	}
 	for key, value := range explicit {
 		values[key] = value
