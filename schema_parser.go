@@ -97,13 +97,10 @@ func addStructFields(schema *ModelSchema, builder *SchemaBuilder, typ reflect.Ty
 			}
 			continue
 		}
-		if structField.Anonymous && structField.Type == reflect.TypeOf(SoftDeleteFields{}) {
-			if err := addSoftDeleteFields(schema, fieldIndex); err != nil {
+		if structField.Anonymous && isFlattenableExtensionStruct(structField.Type) {
+			if err := applyEmbeddedFieldDefinition(builder, structField.Type); err != nil {
 				return err
 			}
-			continue
-		}
-		if structField.Anonymous && isFlattenableExtensionStruct(structField.Type) {
 			fieldType := structField.Type
 			for fieldType.Kind() == reflect.Pointer {
 				fieldType = fieldType.Elem()
@@ -117,6 +114,27 @@ func addStructFields(schema *ModelSchema, builder *SchemaBuilder, typ reflect.Ty
 			return err
 		}
 	}
+	return nil
+}
+
+func applyEmbeddedFieldDefinition(builder *SchemaBuilder, typ reflect.Type) error {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		return nil
+	}
+	definerType := reflect.TypeOf((*EmbeddedFieldDefiner)(nil)).Elem()
+	var value any
+	if reflect.PointerTo(typ).Implements(definerType) {
+		value = reflect.New(typ).Interface()
+	} else if typ.Implements(definerType) {
+		value = reflect.Zero(typ).Interface()
+	}
+	if value == nil {
+		return nil
+	}
+	value.(EmbeddedFieldDefiner).DefineOroFields(builder)
 	return nil
 }
 
@@ -203,22 +221,6 @@ func addModelFields(schema *ModelSchema, baseIndex []int) error {
 			return err
 		}
 	}
-	return nil
-}
-
-func addSoftDeleteFields(schema *ModelSchema, baseIndex []int) error {
-	field := FieldSchema{
-		Name:       "DeletedAt",
-		Column:     "deleted_at",
-		Type:       "oro.Null[time.Time]",
-		Index:      fieldIndex(baseIndex, 0),
-		Nullable:   true,
-		SoftDelete: true,
-	}
-	if err := addField(schema, field); err != nil {
-		return err
-	}
-	addIndex(schema, builderIndexName(schema.Table, field.Column, defaultIndexMarker, false), []string{field.Column}, false)
 	return nil
 }
 
@@ -351,10 +353,20 @@ func isSoftDeleteFieldType(fieldType string) bool {
 }
 
 func addIndex(schema *ModelSchema, name string, fields []string, unique bool) {
+	for _, index := range schema.Indexes {
+		if index.Name == name && index.Unique == unique && !index.FullText && stringSlicesEqual(index.Fields, fields) {
+			return
+		}
+	}
 	schema.Indexes = append(schema.Indexes, IndexSpec{Name: name, Fields: fields, Unique: unique})
 }
 
 func addFullTextIndex(schema *ModelSchema, name string, fields []string) {
+	for _, index := range schema.Indexes {
+		if index.Name == name && index.FullText && stringSlicesEqual(index.Fields, fields) {
+			return
+		}
+	}
 	schema.Indexes = append(schema.Indexes, IndexSpec{Name: name, Fields: fields, FullText: true})
 }
 

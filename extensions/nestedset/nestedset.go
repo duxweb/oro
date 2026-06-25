@@ -18,6 +18,10 @@ type NodeFields struct {
 
 func (NodeFields) OroEmbeddedFields() {}
 
+func (NodeFields) DefineOroFields(s *oro.SchemaBuilder) {
+	Define(s)
+}
+
 type Config struct {
 	ParentField string
 	LeftField   string

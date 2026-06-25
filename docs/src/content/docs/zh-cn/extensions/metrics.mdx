@@ -1,0 +1,69 @@
+---
+title: Metrics 指标扩展
+description: 使用官方 metrics 扩展把 SQL、缓存和事务事件输出到自定义指标系统。
+---
+
+`extensions/metrics` 不内置 Prometheus、OpenTelemetry 或其他第三方依赖。它只把 Oro 事件转换成稳定的指标样本，由业务项目决定写入哪里。
+
+```go
+import "github.com/duxweb/oro/extensions/metrics"
+```
+
+## 安装
+
+```go
+recorder := metrics.NewMemoryRecorder()
+
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        metrics.Extension(metrics.WithRecorder(recorder)),
+    },
+})
+```
+
+`MemoryRecorder` 适合测试和本地调试，不建议作为生产指标后端。
+
+## 样本字段
+
+```go
+type Sample struct {
+    Event     oro.EventName
+    Operation string
+    ModelName string
+    Table     string
+    Rows      int64
+    Duration  time.Duration
+    Err       error
+}
+```
+
+会记录的事件包括：
+
+| 事件 | 说明 |
+| --- | --- |
+| `AfterSQL` | SQL 执行完成，包含耗时和错误 |
+| `AfterCacheHit` | 查询缓存命中 |
+| `AfterCacheMiss` | 查询缓存未命中 |
+| `AfterCommit` | 事务提交 |
+| `AfterRollback` | 事务回滚 |
+
+## 自定义 Recorder
+
+```go
+type Recorder struct{}
+
+func (Recorder) Record(ctx context.Context, sample metrics.Sample) {
+    // 输出到 Prometheus、OpenTelemetry、日志系统或自研指标服务
+}
+
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        metrics.Extension(metrics.WithRecorder(Recorder{})),
+    },
+})
+```
+
+`Operation` 使用清晰的数据库操作语义，例如 `select`、`create`、`update`、`delete`、`raw`、`commit`。

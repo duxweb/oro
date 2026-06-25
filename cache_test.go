@@ -54,7 +54,7 @@ func TestSQLiteModelQueryCache(t *testing.T) {
 
 	var sqlCount int
 	db.On(oro.BeforeSQL, func(ctx context.Context, event *oro.Event) error {
-		if event.Operation == "query" {
+		if event.Operation == "select" {
 			sqlCount++
 		}
 		return nil

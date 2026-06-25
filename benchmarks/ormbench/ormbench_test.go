@@ -14,6 +14,7 @@ import (
 	oromysql "github.com/duxweb/oro/driver/mysql"
 	oropgsql "github.com/duxweb/oro/driver/pgsql"
 	orosqlite "github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/softdelete"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
@@ -34,7 +35,7 @@ const seedRows = 1000
 
 type oroBenchProduct struct {
 	oro.Model
-	oro.SoftDeleteFields
+	softdelete.SoftDeleteFields
 	Code  string
 	Price uint
 }

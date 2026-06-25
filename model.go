@@ -10,12 +10,6 @@ type Model struct {
 	state *modelState
 }
 
-type SoftDeleteFields struct {
-	DeletedAt Null[time.Time]
-}
-
-func (SoftDeleteFields) OroEmbeddedFields() {}
-
 type modelState struct {
 	relations map[string]loadedRelation
 }
@@ -51,4 +45,9 @@ type Definer interface {
 
 type EmbeddedFields interface {
 	OroEmbeddedFields()
+}
+
+type EmbeddedFieldDefiner interface {
+	EmbeddedFields
+	DefineOroFields(s *SchemaBuilder)
 }

@@ -557,7 +557,7 @@ func queryRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) ([]Map, erro
 		return nil, err
 	}
 	return cachedRows(ctx, db, spec, compiled, func() ([]Map, error) {
-		result, err := queryCompiled(ctx, db, execForReadRuntime(db, conn, spec), spec, compiled, "query")
+		result, err := queryCompiled(ctx, db, execForReadRuntime(db, conn, spec), spec, compiled, "select")
 		if err != nil {
 			return nil, translateQueryError(conn, err)
 		}
@@ -898,6 +898,9 @@ func isSQLWhitespace(char rune) bool {
 }
 
 func updateRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
+	if spec.Operation == "" {
+		spec.Operation = "update"
+	}
 	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
 		return 0, err
 	}
@@ -928,6 +931,9 @@ func updateRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
 }
 
 func deleteRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
+	if spec.Operation == "" {
+		spec.Operation = "delete"
+	}
 	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
 		return 0, err
 	}
@@ -955,6 +961,9 @@ func deleteRows(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
 }
 
 func createRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
+	if spec.Operation == "" {
+		spec.Operation = "create"
+	}
 	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
 		return nil, err
 	}
@@ -987,6 +996,9 @@ func createRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
 }
 
 func createResultRows(ctx context.Context, db *DB, spec WriteSpec) (*CreateResult, error) {
+	if spec.Operation == "" {
+		spec.Operation = "create"
+	}
 	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
 		return nil, err
 	}
@@ -1019,6 +1031,9 @@ func createResultRows(ctx context.Context, db *DB, spec WriteSpec) (*CreateResul
 }
 
 func upsertRows(ctx context.Context, db *DB, spec WriteSpec) ([]Map, error) {
+	if spec.Operation == "" {
+		spec.Operation = "upsert"
+	}
 	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
 		return nil, err
 	}

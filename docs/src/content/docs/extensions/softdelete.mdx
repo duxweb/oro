@@ -1,0 +1,84 @@
+---
+title: Soft Delete
+description: Use the first-party softdelete extension to keep soft-delete fields outside the base model while reusing Oro query, delete, and restore behavior.
+---
+
+`extensions/softdelete` provides the conventional soft-delete fields and schema definition helper. Soft delete still uses the normal Oro model query flow: default queries hide deleted rows, `OnlyDeleted` selects deleted rows, and `WithDeleted` disables the default filter.
+
+```go
+import "github.com/duxweb/oro/extensions/softdelete"
+```
+
+## Install
+
+The extension has no runtime configuration, but registering it makes the dependency explicit:
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        softdelete.Extension(),
+    },
+})
+```
+
+## Model fields
+
+Embed `softdelete.SoftDeleteFields`:
+
+```go
+type Product struct {
+    oro.Model
+    softdelete.SoftDeleteFields
+
+    Code string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+}
+```
+
+The embedded field defines the conventional `DeletedAt -> deleted_at` column automatically. The Go type is `oro.Null[time.Time]`.
+
+## Delete and restore
+
+```go
+_, err := db.Use[Product]().Where("ID", id).Delete(ctx)
+```
+
+When a model has a soft-delete field, `Delete` updates `deleted_at` instead of physically deleting the row.
+
+```go
+product, err := db.Use[Product]().OnlyDeleted().Where("ID", id).First(ctx)
+_, err = db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
+```
+
+`Restore` sets the soft-delete field back to `NULL`.
+
+## Force delete
+
+Use `ForceDelete` when a row must be physically removed:
+
+```go
+_, err := db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+## Custom field
+
+For a custom field name, mark the field with the core field builder:
+
+```go
+type Product struct {
+    oro.Model
+    RemovedAt oro.Null[time.Time]
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("RemovedAt").Column("removed_at").Timestamp().SoftDelete()
+}
+```

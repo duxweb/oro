@@ -85,12 +85,12 @@ type Product struct {
 }
 ```
 
-Soft delete is explicit. Add `oro.SoftDeleteFields` to use the conventional `DeletedAt -> deleted_at` field:
+Soft delete is explicit. Add `softdelete.SoftDeleteFields` from `extensions/softdelete` to use the conventional `DeletedAt -> deleted_at` field:
 
 ```go
 type Product struct {
     oro.Model
-    oro.SoftDeleteFields
+    softdelete.SoftDeleteFields
 }
 ```
 

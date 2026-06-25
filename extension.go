@@ -32,6 +32,11 @@ type CacheKeyExtension interface {
 	CacheKeyValues(ctx context.Context, db *DB) (Map, bool, error)
 }
 
+type EventExtension interface {
+	Extension
+	Events() map[EventName]EventHandler
+}
+
 type ExtensionFunc struct {
 	ExtensionName string
 	Fn            func(db *DB) error
@@ -63,6 +68,11 @@ func installExtensions(db *DB, extensions []Extension) error {
 		}
 		if err := extension.Install(db); err != nil {
 			return &Error{Op: "extension.install", Kind: ErrHook, Field: name, Cause: err}
+		}
+		if eventExtension, ok := extension.(EventExtension); ok {
+			for eventName, handler := range eventExtension.Events() {
+				db.On(eventName, handler)
+			}
 		}
 		installed[name] = struct{}{}
 	}

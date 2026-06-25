@@ -929,6 +929,9 @@ func canCreateModelsExec(db *DB, spec QuerySpec, schema *ModelSchema, options wr
 	if db == nil || db.runtime == nil || !usesDefaultExecutor(db) || !usesDefaultMapper(db) || cacheEnabled(db, spec) {
 		return false
 	}
+	if hasWriteExtensions(db) {
+		return false
+	}
 	if len(options.only) > 0 || len(options.omit) > 0 || len(rows) == 0 || len(schema.PrimaryColumns) != 1 {
 		return false
 	}
@@ -973,6 +976,9 @@ func supportsCreateExecPrimary(conn *Connection) bool {
 
 func canCreateModelsDirect(db *DB, spec QuerySpec) bool {
 	if db == nil || db.runtime == nil || cacheEnabled(db, spec) {
+		return false
+	}
+	if hasWriteExtensions(db) {
 		return false
 	}
 	conn, err := connectionForQuery(db, spec.Connection)
@@ -1322,7 +1328,7 @@ func (query *ModelQuery[T]) deleteInTransaction(ctx context.Context, spec QueryS
 					converted[column] = value
 				}
 			}
-			result, err = updateRows(ctx, tx, WriteSpec{QuerySpec: spec, Values: []Map{converted}})
+			result, err = updateRows(ctx, tx, WriteSpec{QuerySpec: spec, Values: []Map{converted}, Operation: "delete"})
 		} else {
 			result, err = deleteRows(ctx, tx, WriteSpec{QuerySpec: spec})
 		}
@@ -1382,7 +1388,7 @@ func (query *ModelQuery[T]) restoreInTransaction(ctx context.Context, spec Query
 				converted[column] = value
 			}
 		}
-		result, err := updateRows(ctx, tx, WriteSpec{QuerySpec: spec, Values: []Map{converted}})
+		result, err := updateRows(ctx, tx, WriteSpec{QuerySpec: spec, Values: []Map{converted}, Operation: "restore"})
 		if err != nil {
 			return err
 		}

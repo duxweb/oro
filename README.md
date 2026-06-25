@@ -185,7 +185,7 @@ Enable soft delete explicitly when needed:
 ```go
 type User struct {
     oro.Model
-    oro.SoftDeleteFields // DeletedAt -> deleted_at
+    softdelete.SoftDeleteFields // DeletedAt -> deleted_at
 }
 ```
 

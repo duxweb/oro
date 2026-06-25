@@ -9,12 +9,13 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/softdelete"
 	_ "modernc.org/sqlite"
 )
 
 type integrationProduct struct {
 	oro.Model
-	oro.SoftDeleteFields
+	softdelete.SoftDeleteFields
 	Code  string
 	Price uint
 }
@@ -297,7 +298,7 @@ var integrationHookCalls []string
 
 type integrationHookProduct struct {
 	oro.Model
-	oro.SoftDeleteFields
+	softdelete.SoftDeleteFields
 	Code  string
 	Price uint
 }

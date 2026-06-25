@@ -1,0 +1,94 @@
+---
+title: Audit 审计扩展
+description: 使用官方 audit 扩展自动写入 created_by、updated_by、deleted_by，并按事件记录审计日志。
+---
+
+`extensions/audit` 处理业务审计字段和审计日志。它通过 Oro 的写入扩展点注入操作者字段，通过事件扩展点记录写入结果。
+
+```go
+import "github.com/duxweb/oro/extensions/audit"
+```
+
+## 安装
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        audit.Extension(audit.WithWriter(audit.DefaultLogWriter())),
+    },
+})
+```
+
+如果使用默认日志写入器，需要注册并同步 `audit.Log{}`：
+
+```go
+err := db.Register(Product{}, audit.Log{})
+err = db.Sync(ctx)
+```
+
+## 模型字段
+
+```go
+type Product struct {
+    oro.Model
+    audit.AuditFields
+
+    Code string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+}
+```
+
+`audit.AuditFields` 会自动定义这些字段：
+
+| 字段 | 列名 | 用途 |
+| --- | --- | --- |
+| `CreatedBy` | `created_by` | 创建人 |
+| `UpdatedBy` | `updated_by` | 最后更新人 |
+| `DeletedBy` | `deleted_by` | 删除人，软删除时也会写入 |
+
+## 请求级操作者
+
+```go
+ctx = audit.WithActor(ctx, userID)
+created, err := db.Use[Product]().Create(ctx, &Product{Code: "P001"})
+```
+
+创建时会写入 `CreatedBy` 和 `UpdatedBy`。更新、恢复会写入 `UpdatedBy`，删除会写入 `DeletedBy` 和 `UpdatedBy`。
+
+## Resolver
+
+如果操作者来自统一上下文，可以使用 resolver：
+
+```go
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        audit.Extension(audit.WithResolver(audit.ActorResolverFunc(func(ctx context.Context) (uint64, bool, error) {
+            return currentUserID(ctx)
+        }))),
+    },
+})
+```
+
+`audit.WithActor(ctx, id)` 的优先级高于 resolver。
+
+## 自定义日志写入
+
+```go
+type Writer struct{}
+
+func (Writer) WriteAuditLog(ctx context.Context, db *oro.DB, entry audit.Entry) error {
+    // 写入队列、日志系统或独立审计库
+    return nil
+}
+
+extension := audit.Extension(audit.WithWriter(Writer{}))
+```
+
+`audit.Entry` 包含模型名、表名、操作、影响行数、写入值、操作者和时间。

@@ -48,15 +48,24 @@ func (builder *SchemaBuilder) Field(name string) *FieldBuilder {
 }
 
 func (builder *SchemaBuilder) Index(name string, fields ...string) {
-	builder.indexes = append(builder.indexes, indexBuilder{Name: name, Fields: fields})
+	builder.addIndex(indexBuilder{Name: name, Fields: fields})
 }
 
 func (builder *SchemaBuilder) Unique(name string, fields ...string) {
-	builder.indexes = append(builder.indexes, indexBuilder{Name: name, Fields: fields, Unique: true})
+	builder.addIndex(indexBuilder{Name: name, Fields: fields, Unique: true})
 }
 
 func (builder *SchemaBuilder) FullText(name string, fields ...string) {
-	builder.indexes = append(builder.indexes, indexBuilder{Name: name, Fields: fields, FullText: true})
+	builder.addIndex(indexBuilder{Name: name, Fields: fields, FullText: true})
+}
+
+func (builder *SchemaBuilder) addIndex(index indexBuilder) {
+	for _, existing := range builder.indexes {
+		if existing.Name == index.Name && existing.Unique == index.Unique && existing.FullText == index.FullText && stringSlicesEqual(existing.Fields, index.Fields) {
+			return
+		}
+	}
+	builder.indexes = append(builder.indexes, index)
 }
 
 type indexBuilder struct {
@@ -64,6 +73,18 @@ type indexBuilder struct {
 	Fields   []string
 	Unique   bool
 	FullText bool
+}
+
+func stringSlicesEqual(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 const defaultIndexMarker = "__oro_default__"

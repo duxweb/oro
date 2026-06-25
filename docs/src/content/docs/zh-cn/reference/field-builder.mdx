@@ -111,7 +111,7 @@ func (User) Define(s *oro.SchemaBuilder) {
 }
 ```
 
-约定软删除字段优先嵌入 `oro.SoftDeleteFields`，默认字段是 `DeletedAt`，列名是 `deleted_at`。只有自定义字段名时才需要 `SoftDelete()`。
+约定软删除字段优先嵌入 `extensions/softdelete` 的 `softdelete.SoftDeleteFields`，默认字段是 `DeletedAt`，列名是 `deleted_at`。只有自定义字段名时才需要 `SoftDelete()`。
 
 字段备注：
 

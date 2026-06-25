@@ -1,0 +1,69 @@
+---
+title: Metrics
+description: Use the first-party metrics extension to export SQL, cache, and transaction events to your own metrics backend.
+---
+
+`extensions/metrics` does not import Prometheus, OpenTelemetry, or any other third-party metrics stack. It converts Oro events into stable samples, and your application decides where to send them.
+
+```go
+import "github.com/duxweb/oro/extensions/metrics"
+```
+
+## Install
+
+```go
+recorder := metrics.NewMemoryRecorder()
+
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        metrics.Extension(metrics.WithRecorder(recorder)),
+    },
+})
+```
+
+`MemoryRecorder` is useful for tests and local debugging. It is not a production metrics backend.
+
+## Sample fields
+
+```go
+type Sample struct {
+    Event     oro.EventName
+    Operation string
+    ModelName string
+    Table     string
+    Rows      int64
+    Duration  time.Duration
+    Err       error
+}
+```
+
+Recorded events:
+
+| Event | Meaning |
+| --- | --- |
+| `AfterSQL` | SQL finished, including duration and error |
+| `AfterCacheHit` | query cache hit |
+| `AfterCacheMiss` | query cache miss |
+| `AfterCommit` | transaction committed |
+| `AfterRollback` | transaction rolled back |
+
+## Custom recorder
+
+```go
+type Recorder struct{}
+
+func (Recorder) Record(ctx context.Context, sample metrics.Sample) {
+    // export to Prometheus, OpenTelemetry, logs, or an internal metrics service
+}
+
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        metrics.Extension(metrics.WithRecorder(Recorder{})),
+    },
+})
+```
+
+`Operation` uses clear database operation names such as `select`, `create`, `update`, `delete`, `raw`, and `commit`.

@@ -215,7 +215,7 @@ func openModelRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) (*modelR
 	if err != nil {
 		return nil, err
 	}
-	return openCompiledRows(ctx, db, conn, spec, compiled, "query")
+	return openCompiledRows(ctx, db, conn, spec, compiled, "select")
 }
 
 func openRawRowsDirect(ctx context.Context, db *DB, raw RawSpec, timeout time.Duration) (*modelRows, error) {

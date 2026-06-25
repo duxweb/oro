@@ -85,12 +85,12 @@ type Product struct {
 }
 ```
 
-软删除是显式能力。使用约定字段时嵌入 `oro.SoftDeleteFields`，字段为 `DeletedAt`，列名为 `deleted_at`：
+软删除是显式能力。使用约定字段时嵌入 `extensions/softdelete` 的 `softdelete.SoftDeleteFields`，字段为 `DeletedAt`，列名为 `deleted_at`：
 
 ```go
 type Product struct {
     oro.Model
-    oro.SoftDeleteFields
+    softdelete.SoftDeleteFields
 }
 ```
 

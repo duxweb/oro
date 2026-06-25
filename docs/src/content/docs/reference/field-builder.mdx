@@ -70,6 +70,6 @@ Common options:
 
 ## Field names
 
-For the conventional soft-delete field, prefer embedding `oro.SoftDeleteFields`. Use `SoftDelete()` only when you define a custom field such as `RemovedAt`.
+For the conventional soft-delete field, prefer embedding `softdelete.SoftDeleteFields` from `extensions/softdelete`. Use `SoftDelete()` only when you define a custom field such as `RemovedAt`.
 
 `Field("Code")` references the Go struct field. The default column is `code`. Use `Column(...)` only when the database column cannot be derived cleanly.

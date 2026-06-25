@@ -1,0 +1,94 @@
+---
+title: Audit
+description: Use the first-party audit extension to fill created_by, updated_by, deleted_by and record write audit logs.
+---
+
+`extensions/audit` handles actor fields and audit logs. It injects actor values through Oro write extensions and records write results through event extensions.
+
+```go
+import "github.com/duxweb/oro/extensions/audit"
+```
+
+## Install
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        audit.Extension(audit.WithWriter(audit.DefaultLogWriter())),
+    },
+})
+```
+
+When using the default log writer, register and sync `audit.Log{}`:
+
+```go
+err := db.Register(Product{}, audit.Log{})
+err = db.Sync(ctx)
+```
+
+## Model fields
+
+```go
+type Product struct {
+    oro.Model
+    audit.AuditFields
+
+    Code string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+}
+```
+
+`audit.AuditFields` automatically defines these fields:
+
+| Field | Column | Purpose |
+| --- | --- | --- |
+| `CreatedBy` | `created_by` | creator |
+| `UpdatedBy` | `updated_by` | last updater |
+| `DeletedBy` | `deleted_by` | deleter, including soft delete |
+
+## Request actor
+
+```go
+ctx = audit.WithActor(ctx, userID)
+created, err := db.Use[Product]().Create(ctx, &Product{Code: "P001"})
+```
+
+Create fills `CreatedBy` and `UpdatedBy`. Update and restore fill `UpdatedBy`. Delete fills `DeletedBy` and `UpdatedBy`.
+
+## Resolver
+
+If actor identity is stored in request context, use a resolver:
+
+```go
+db, err := oro.Open(oro.Config{
+    Extensions: []oro.Extension{
+        audit.Extension(audit.WithResolver(audit.ActorResolverFunc(func(ctx context.Context) (uint64, bool, error) {
+            return currentUserID(ctx)
+        }))),
+    },
+})
+```
+
+`audit.WithActor(ctx, id)` takes precedence over the resolver.
+
+## Custom log writer
+
+```go
+type Writer struct{}
+
+func (Writer) WriteAuditLog(ctx context.Context, db *oro.DB, entry audit.Entry) error {
+    // write to a queue, log pipeline, or separate audit database
+    return nil
+}
+
+extension := audit.Extension(audit.WithWriter(Writer{}))
+```
+
+`audit.Entry` includes model name, table, operation, affected rows, values, actor, and timestamp.

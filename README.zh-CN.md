@@ -185,7 +185,7 @@ s.FullText("ft_posts_title_body", "Title", "Body")
 ```go
 type User struct {
     oro.Model
-    oro.SoftDeleteFields // DeletedAt -> deleted_at
+    softdelete.SoftDeleteFields // DeletedAt -> deleted_at
 }
 ```
 

@@ -8,7 +8,7 @@ Models implement `Define(*oro.SchemaBuilder)`. Field names are Go struct field n
 ```go
 type User struct {
     oro.Model
-    oro.SoftDeleteFields
+    softdelete.SoftDeleteFields
     Email        string
     PasswordHash string
     Status       string
@@ -24,7 +24,7 @@ func (User) Define(s *oro.SchemaBuilder) {
 }
 ```
 
-`oro.Model` contains `id`, `created_at`, and `updated_at`. Add `oro.SoftDeleteFields` only when the model needs soft delete; it maps `DeletedAt` to `deleted_at`.
+`oro.Model` contains `id`, `created_at`, and `updated_at`. Add `softdelete.SoftDeleteFields` from `extensions/softdelete` only when the model needs soft delete; it maps `DeletedAt` to `deleted_at`.
 
 ## Naming rules
 

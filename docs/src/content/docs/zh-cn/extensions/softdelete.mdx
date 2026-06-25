@@ -1,0 +1,84 @@
+---
+title: Soft Delete 软删除扩展
+description: 使用官方 softdelete 扩展把软删除字段从核心模型中拆出来，并复用 Oro 的查询、删除、恢复能力。
+---
+
+`extensions/softdelete` 提供约定软删除字段和字段定义方法。软删除能力仍然走 Oro 的模型查询链路：普通查询自动隐藏已删除数据，`OnlyDeleted` 查询已删除数据，`WithDeleted` 取消默认过滤。
+
+```go
+import "github.com/duxweb/oro/extensions/softdelete"
+```
+
+## 安装
+
+软删除扩展没有运行时配置，注册后用于表达项目依赖关系：
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        softdelete.Extension(),
+    },
+})
+```
+
+## 模型字段
+
+推荐直接嵌入 `softdelete.SoftDeleteFields`：
+
+```go
+type Product struct {
+    oro.Model
+    softdelete.SoftDeleteFields
+
+    Code string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+}
+```
+
+嵌入字段会自动定义约定列 `DeletedAt -> deleted_at`，类型是 `oro.Null[time.Time]`。
+
+## 删除与恢复
+
+```go
+_, err := db.Use[Product]().Where("ID", id).Delete(ctx)
+```
+
+模型包含软删除字段时，`Delete` 会更新 `deleted_at`，不会物理删除。
+
+```go
+product, err := db.Use[Product]().OnlyDeleted().Where("ID", id).First(ctx)
+_, err = db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
+```
+
+`Restore` 会把软删除字段恢复为 `NULL`。
+
+## 物理删除
+
+需要真正删除记录时使用 `ForceDelete`：
+
+```go
+_, err := db.Use[Product]().Where("ID", id).ForceDelete(ctx)
+```
+
+## 自定义字段
+
+如果不使用约定字段，可以直接用核心字段构建器标记软删除列：
+
+```go
+type Product struct {
+    oro.Model
+    RemovedAt oro.Null[time.Time]
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("RemovedAt").Column("removed_at").Timestamp().SoftDelete()
+}
+```

@@ -6,12 +6,13 @@ import (
 
 	oro "github.com/duxweb/oro"
 	"github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/softdelete"
 	_ "modernc.org/sqlite"
 )
 
 type syncProduct struct {
 	oro.Model
-	oro.SoftDeleteFields
+	softdelete.SoftDeleteFields
 	Code  string
 	Price uint
 }
@@ -24,7 +25,7 @@ func (syncProduct) Define(s *oro.SchemaBuilder) {
 
 type syncProductWithStock struct {
 	oro.Model
-	oro.SoftDeleteFields
+	softdelete.SoftDeleteFields
 	Code  string
 	Price uint
 	Stock uint

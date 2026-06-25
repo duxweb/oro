@@ -104,6 +104,9 @@ export default defineConfig({
           items: [
             { label: 'Overview', translations: { 'zh-CN': '概览' }, slug: 'extensions' },
             { label: 'Tenant', translations: { 'zh-CN': 'Tenant 租户扩展' }, slug: 'extensions/tenant' },
+            { label: 'Soft Delete', translations: { 'zh-CN': 'Soft Delete 软删除' }, slug: 'extensions/softdelete' },
+            { label: 'Audit', translations: { 'zh-CN': 'Audit 审计' }, slug: 'extensions/audit' },
+            { label: 'Metrics', translations: { 'zh-CN': 'Metrics 指标' }, slug: 'extensions/metrics' },
             { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
           ]
         },

@@ -147,7 +147,7 @@ affected, err := db.Use[Product]().Where("ID", id).Delete(ctx)
 ```go
 type Product struct {
     oro.Model
-    oro.SoftDeleteFields // DeletedAt -> deleted_at
+    softdelete.SoftDeleteFields // DeletedAt -> deleted_at
 }
 ```
 

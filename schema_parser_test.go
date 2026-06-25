@@ -8,11 +8,21 @@ import (
 
 type testProduct struct {
 	Model
-	SoftDeleteFields
+	TestSoftDeleteFields
 	Code  string
 	Price uint
 	State string
 	Meta  JSONRaw
+}
+
+type TestSoftDeleteFields struct {
+	DeletedAt Null[time.Time]
+}
+
+func (TestSoftDeleteFields) OroEmbeddedFields() {}
+
+func (TestSoftDeleteFields) DefineOroFields(s *SchemaBuilder) {
+	s.Field("DeletedAt").Column("deleted_at").Timestamp().SoftDelete()
 }
 
 func (testProduct) Define(s *SchemaBuilder) {

@@ -74,6 +74,7 @@ type WriteSpec struct {
 	Primary   []string
 	Conflict  ConflictSpec
 	Returning bool
+	Operation string
 }
 
 type WithSpec struct {
