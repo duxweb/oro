@@ -180,6 +180,18 @@ body {
   color: var(--dux-muted);
 }
 
+header.header .dux-menu__label,
+header.header .dux-menu__caret {
+  display: none !important;
+}
+
+header.header .dux-menu__trigger {
+  justify-content: center;
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0 !important;
+}
+
 .dux-menu {
   position: relative;
   display: inline-flex;
@@ -1003,44 +1015,87 @@ body {
   border-bottom-width: 1px !important;
 }
 
-/* ---------- Sidebar: separate by background, not borders ---------- */
+/* ---------- Sidebar: quiet text navigation ---------- */
 .sidebar-pane {
   border-inline-end: 0 !important;
   background: transparent !important;
 }
 
-/* nav becomes a rounded card sized to its content, not a full-height panel */
 .sidebar-content {
   height: auto !important;
   min-height: 0 !important;
-  margin: 1rem 0.75rem !important;
-  padding: 1.1rem 1rem !important;
-  background: var(--dux-surface);
-  border-radius: 1rem;
+  margin: 1.35rem 0 !important;
+  padding: 0.3rem 1.35rem 2rem !important;
+  background: transparent !important;
+  border-radius: 0 !important;
 }
 
-/* drop the vertical guide line on nested items */
 .sidebar-content ul ul li {
   border-inline-start: 0 !important;
+  margin-inline-start: 0 !important;
+  padding-inline-start: 0 !important;
 }
 
-/* rounded items with hover fill */
+.sidebar-pane summary {
+  padding: 0 !important;
+  color: var(--dux-ink) !important;
+}
+
+.sidebar-pane summary:hover {
+  color: var(--dux-ink) !important;
+}
+
+.sidebar-pane .group-label,
+.sidebar-pane .group-label .large {
+  color: var(--dux-muted) !important;
+  font-size: var(--dux-fs-xs) !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.sidebar-pane .caret {
+  display: none !important;
+}
+
 .sidebar-pane a {
-  border-radius: 0.55rem !important;
-  padding-block: 0.4rem !important;
+  display: block;
+  padding: 0.42rem 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--dux-muted) !important;
+  font-size: var(--dux-fs-sm) !important;
+  font-weight: 400;
+  line-height: 1.45;
+  transition: color 0.14s ease;
 }
 
-.sidebar-pane a:hover:not([aria-current="page"]) {
-  background: color-mix(in srgb, var(--dux-ink) 6%, transparent);
+.sidebar-pane a:hover,
+.sidebar-pane a:focus-visible {
+  background: transparent !important;
+  color: var(--dux-ink) !important;
 }
 
-/* more whitespace between groups and items */
 .sidebar-pane .top-level > li + li {
-  margin-top: 1.5rem !important;
+  margin-top: 1.85rem !important;
+}
+
+.sidebar-pane details > ul {
+  margin-top: 1rem !important;
 }
 
 .sidebar-pane ul ul li + li {
-  margin-top: 0.15rem;
+  margin-top: 0.38rem;
+}
+
+.sidebar-pane a[aria-current="page"],
+.sidebar-pane a[aria-current="page"]:hover,
+.sidebar-pane a[aria-current="page"]:focus-visible {
+  background: transparent !important;
+  color: var(--dux-accent) !important;
+  font-weight: 600;
+  box-shadow: none !important;
 }
 
 /* drop the table-of-contents left border too */
@@ -1085,6 +1140,10 @@ body {
   position: relative;
   display: block;
   padding: 0.32rem 0.4rem;
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  font-weight: 400;
+  line-height: 1.45;
   transition: color 0.14s ease;
 }
 
@@ -1116,15 +1175,6 @@ body {
   border-color: var(--dux-accent);
 }
 
-/* active item = translucent accent block + accent text (rounded) */
-a[aria-current="page"] {
-  background-color: var(--dux-active-bg) !important;
-  color: var(--dux-accent) !important;
-  font-weight: 600;
-  border-radius: 0.5rem;
-  box-shadow: var(--dux-active-shadow);
-}
-
 /* ============================================================
    Centered three-column shell (mx-auto) on desktop.
    Converts Starlight's edge-fixed columns into a centered grid
@@ -1138,9 +1188,31 @@ header.header {
 
 @media (min-width: 50rem) {
   header.header > .header {
+    display: grid !important;
+    grid-template-columns: minmax(8rem, 1fr) auto auto;
+    gap: 1rem;
+    align-items: center;
     max-width: var(--dux-shell-width);
     margin-inline: auto;
+    position: relative;
     width: 100%;
+  }
+
+  header.header > .header .title-wrapper {
+    min-width: 0;
+  }
+
+  header.header > .header > div:has(> site-search) {
+    justify-self: end;
+  }
+
+  header.header > .header site-search {
+    position: static;
+    transform: none;
+  }
+
+  header.header > .header .right-group {
+    justify-self: end;
   }
 }
 
