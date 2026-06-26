@@ -2,20 +2,11 @@ package translation_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/duxweb/oro"
-	"github.com/duxweb/oro/driver/mysql"
-	"github.com/duxweb/oro/driver/pgsql"
-	"github.com/duxweb/oro/driver/sqlite"
+	"github.com/duxweb/oro/extensions/internal/exttest"
 	"github.com/duxweb/oro/extensions/translation"
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type matrixProduct struct {
@@ -33,8 +24,8 @@ func (matrixProduct) Define(s *oro.SchemaBuilder) {
 }
 
 func TestTranslationDriverMatrix(t *testing.T) {
-	for _, testCase := range translationDriverCases() {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range exttest.DriverCases() {
+		t.Run(testCase.Name, func(t *testing.T) {
 			db, ctx := openTranslationMatrixDB(t, testCase)
 
 			created, err := translation.Use[matrixProduct](db).Create(ctx, &matrixProduct{Code: "TR001"}, translation.Values{
@@ -93,43 +84,12 @@ func TestTranslationDriverMatrix(t *testing.T) {
 	}
 }
 
-type translationDriverCase struct {
-	name   string
-	driver oro.Driver
-}
-
-func translationDriverCases() []translationDriverCase {
-	mysqlDSN := os.Getenv("ORO_MYSQL_DSN")
-	if mysqlDSN == "" {
-		mysqlDSN = "root:root@tcp(localhost:3306)/duxorm?parseTime=true&multiStatements=false"
-	}
-	pgsqlDSN := os.Getenv("ORO_PGSQL_DSN")
-	if pgsqlDSN == "" {
-		pgsqlDSN = "postgres://root@localhost:5432/duxorm?sslmode=disable"
-	}
-	return []translationDriverCase{
-		{name: "sqlite", driver: sqlite.Open(":memory:")},
-		{name: "mysql", driver: mysql.Open(mysqlDSN)},
-		{name: "pgsql", driver: pgsql.Open(pgsqlDSN)},
-	}
-}
-
-func openTranslationMatrixDB(t *testing.T, testCase translationDriverCase) (*oro.DB, context.Context) {
+func openTranslationMatrixDB(t *testing.T, testCase exttest.DriverCase) (*oro.DB, context.Context) {
 	t.Helper()
-	ctx := context.Background()
-	db, err := oro.Open(oro.Config{
-		Connections: map[string]oro.ConnectionConfig{
-			"default": {Driver: testCase.driver},
-		},
-		Pool: oro.PoolConfig{
-			MaxOpenConns: 4,
-			MaxIdleConns: 2,
-			PingOnOpen:   true,
-		},
-		Timeout: oro.TimeoutConfig{
-			Connect: 3 * time.Second,
-			Query:   10 * time.Second,
-		},
+	return exttest.Open(t, testCase, exttest.OpenOptions{
+		Models: []oro.Definer{matrixProduct{}},
+		Tables: []string{"oro_translation_matrix_products"},
+		Prefix: "translation_matrix_",
 		Extensions: []oro.Extension{
 			translation.Extension(
 				translation.DefaultLocale("zh-CN"),
@@ -138,68 +98,4 @@ func openTranslationMatrixDB(t *testing.T, testCase translationDriverCase) (*oro
 			),
 		},
 	})
-	if err != nil {
-		if translationDBUnavailable(err) {
-			t.Skipf("%s translation database unavailable: %v", testCase.name, err)
-		}
-		t.Fatal(err)
-	}
-	resetTranslationMatrix(t, ctx, db)
-	if err := db.Register(matrixProduct{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Sync(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		resetTranslationMatrix(t, ctx, db)
-		if err := db.Close(ctx); err != nil {
-			t.Fatal(err)
-		}
-	})
-	return db, ctx
-}
-
-func resetTranslationMatrix(t *testing.T, ctx context.Context, db *oro.DB) {
-	t.Helper()
-	_, err := db.Raw("drop table if exists oro_translation_matrix_products").Exec(ctx)
-	if err != nil && !translationDBUnavailable(err) {
-		t.Fatal(err)
-	}
-	_, err = db.Raw("drop table if exists oro_schema").Exec(ctx)
-	if err != nil && !translationDBUnavailable(err) {
-		t.Fatal(err)
-	}
-}
-
-func translationDBUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var ormErr *oro.Error
-	if errors.As(err, &ormErr) && ormErr.Cause != nil {
-		err = ormErr.Cause
-	}
-	message := strings.ToLower(fmt.Sprint(err))
-	unavailableParts := []string{
-		"connection refused",
-		"connect: connection refused",
-		"no such host",
-		"connection reset",
-		"server closed",
-		"timeout",
-		"deadline exceeded",
-		"access denied",
-		"authentication failed",
-		"password authentication failed",
-		"unknown database",
-		"database \"duxorm\" does not exist",
-		"role \"root\" does not exist",
-	}
-	for _, part := range unavailableParts {
-		if strings.Contains(message, part) {
-			return true
-		}
-	}
-	return false
 }
