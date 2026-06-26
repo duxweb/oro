@@ -843,11 +843,7 @@ func jsonConditionArgument(value any) (string, error) {
 }
 
 func mysqlJSONPath(parts []string) string {
-	path := "$"
-	for _, part := range parts {
-		path += "." + part
-	}
-	return path
+	return queryutil.JSONPath(parts)
 }
 
 func (d dialect) compileGroup(fields []string) string {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/duxweb/oro/internal/fifocache"
+	"github.com/duxweb/oro/internal/queryutil"
 )
 
 type sqlCache struct {
@@ -387,11 +388,7 @@ func simpleJSONPath(dialect string, parts []string) string {
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	}
-	path := "$"
-	for _, part := range parts {
-		path += "." + part
-	}
-	return path
+	return queryutil.JSONPath(parts)
 }
 
 func sortedSQLMapKeys(values Map) []string {

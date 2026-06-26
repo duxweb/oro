@@ -167,16 +167,17 @@ func TestCompileSelectJSONCondition(t *testing.T) {
 		Where: []oro.Condition{
 			oro.JSON("meta").Path("vip").Eq(true),
 			oro.JSON("meta").Path("profile", "country").Exists(),
+			oro.JSON("meta").Path("en-US", "Name").Eq("Apple"),
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `select * from "products" where json_extract("meta", ?) = ? and json_type("meta", ?) is not null`
+	want := `select * from "products" where json_extract("meta", ?) = ? and json_type("meta", ?) is not null and json_extract("meta", ?) = ?`
 	if sql.SQL != want {
 		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
 	}
-	if len(sql.Args) != 3 || sql.Args[0] != "$.vip" || sql.Args[1] != true || sql.Args[2] != "$.profile.country" {
+	if len(sql.Args) != 5 || sql.Args[0] != "$.vip" || sql.Args[1] != true || sql.Args[2] != "$.profile.country" || sql.Args[3] != `$."en-US".Name` || sql.Args[4] != "Apple" {
 		t.Fatalf("got args %#v", sql.Args)
 	}
 }

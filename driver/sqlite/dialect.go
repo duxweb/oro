@@ -776,11 +776,7 @@ func (d dialect) compileJSONCondition(condition oro.Condition) (string, []any, e
 }
 
 func sqliteJSONPath(parts []string) string {
-	path := "$"
-	for _, part := range parts {
-		path += "." + part
-	}
-	return path
+	return queryutil.JSONPath(parts)
 }
 
 func (d dialect) compileGroup(fields []string) string {
