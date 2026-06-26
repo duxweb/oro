@@ -1,0 +1,158 @@
+---
+title: Translation
+description: Store translated model fields in a JSON column with locale and fallback handling.
+---
+
+`extensions/translation` provides model-level translated fields. The default backend is a single JSON column named `translations`; the business fields remain real columns so they can store original values and serve as the final fallback.
+
+```go
+import "github.com/duxweb/oro/extensions/translation"
+```
+
+## Install
+
+Set the default locale, fallback locale, and translated fields when opening the database:
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        translation.Extension(
+            translation.DefaultLocale("zh-CN"),
+            translation.FallbackLocale("en-US"),
+            translation.TranslatedFields("Name", "Description"),
+        ),
+    },
+})
+```
+
+Resolution order is:
+
+1. current locale value;
+2. fallback locale value;
+3. original model field value.
+
+## Model fields
+
+Embed `translation.Fields` and define translated fields as normal fields:
+
+```go
+type Product struct {
+    oro.Model
+    translation.Fields
+
+    Code        string
+    Name        string
+    Description string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Name").String().Nullable()
+    s.Field("Description").Text().Nullable()
+}
+```
+
+`translation.Fields` automatically defines the hidden JSON column `Translations -> translations`. Do not define translated fields as `Virtual()` if you need original-value fallback, because the fallback value must be stored in a real column.
+
+## Create multiple locales
+
+```go
+created, err := translation.Use[Product](db).Create(ctx,
+    &Product{Code: "P001"},
+    translation.Values{
+        "zh-CN": oro.Map{
+            "Name":        "苹果",
+            "Description": "红色苹果",
+        },
+        "en-US": oro.Map{
+            "Name":        "Apple",
+            "Description": "Red apple",
+        },
+    },
+)
+```
+
+When `translation.Values` is passed, Oro stores the full translation JSON and writes the default-locale values into the original fields. If the model already has non-zero original field values, those values are preserved.
+
+## Create current locale
+
+```go
+created, err := translation.Use[Product](db).
+    Locale("zh-CN").
+    Create(ctx, &Product{
+        Code:        "P002",
+        Name:        "梨子",
+        Description: "黄色梨子",
+    })
+```
+
+If `translation.Values` is not passed, `Create` stores non-zero translated fields under the current locale while the normal columns keep the original values.
+
+## Read with fallback
+
+```go
+product, err := translation.Use[Product](db).
+    Locale("ja-JP").
+    Fallback("en-US").
+    Find(ctx, id)
+```
+
+If `ja-JP.Name` is missing, Oro uses `en-US.Name`. If both are missing, it keeps the original struct field value.
+
+You can also pass locale state through `context.Context`:
+
+```go
+ctx = translation.WithLocale(ctx, "ja-JP")
+ctx = translation.WithFallback(ctx, "en-US")
+
+product, err := translation.Use[Product](db).Find(ctx, id)
+```
+
+## Update translations
+
+Update the current locale:
+
+```go
+_, err := translation.Use[Product](db).
+    Locale("zh-CN").
+    Where("ID", id).
+    Update(ctx, oro.Map{"Name": "新梨子"})
+```
+
+Update multiple locales at once:
+
+```go
+_, err := translation.Use[Product](db).
+    Where("ID", id).
+    Update(ctx, nil, translation.Values{
+        "en-US": oro.Map{"Name": "Pear"},
+    })
+```
+
+Translation updates read the current row first and merge into the existing `translations` JSON without removing other locales. To avoid merging one JSON payload into multiple records, `Update` with translation values must match exactly one row.
+
+## Query translated values
+
+```go
+product, err := translation.Use[Product](db).
+    Locale("en-US").
+    WhereTrans("Name", "Apple").
+    First(ctx)
+```
+
+`WhereTrans` queries the current locale value inside the JSON column. Fields not listed in `TranslatedFields` cannot be used with `WhereTrans`.
+
+## Helper API
+
+For direct model access:
+
+```go
+name := translation.Translate(product, "zh-CN", "en-US").String("Name")
+err := translation.Translate(product, "zh-CN").Set("Name", "葡萄")
+```
+
+`Translate(...).String("Name")` uses the same current-locale, fallback-locale, original-field resolution order.

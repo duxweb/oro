@@ -37,6 +37,11 @@ type EventExtension interface {
 	Events() map[EventName]EventHandler
 }
 
+type StatefulExtension interface {
+	Extension
+	State() any
+}
+
 type ExtensionFunc struct {
 	ExtensionName string
 	Fn            func(db *DB) error
@@ -73,6 +78,10 @@ func installExtensions(db *DB, extensions []Extension) error {
 			for eventName, handler := range eventExtension.Events() {
 				db.On(eventName, handler)
 			}
+		}
+		if statefulExtension, ok := extension.(StatefulExtension); ok {
+			db.session.extensions = cloneExtensionState(db.session.extensions)
+			db.session.extensions[name] = statefulExtension.State()
 		}
 		installed[name] = struct{}{}
 	}

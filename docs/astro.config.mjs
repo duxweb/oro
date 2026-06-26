@@ -107,6 +107,7 @@ export default defineConfig({
             { label: 'Soft Delete', translations: { 'zh-CN': 'Soft Delete 软删除' }, slug: 'extensions/softdelete' },
             { label: 'Audit', translations: { 'zh-CN': 'Audit 审计' }, slug: 'extensions/audit' },
             { label: 'Metrics', translations: { 'zh-CN': 'Metrics 指标' }, slug: 'extensions/metrics' },
+            { label: 'Translation', translations: { 'zh-CN': 'Translation 多语言模型' }, slug: 'extensions/translation' },
             { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
           ]
         },

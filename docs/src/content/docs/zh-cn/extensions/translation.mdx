@@ -1,0 +1,158 @@
+---
+title: Translation 多语言模型
+description: 使用 JSON 字段保存模型翻译内容，支持默认语言、回退语言和原始字段回退。
+---
+
+`extensions/translation` 提供模型字段级多语言。默认 backend 是单个 JSON 字段 `translations`，业务字段仍保留为真实列，用来保存原始值，也作为最后兜底值。
+
+```go
+import "github.com/duxweb/oro/extensions/translation"
+```
+
+## 安装
+
+打开数据库时设置默认语言、回退语言和需要翻译的字段：
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        translation.Extension(
+            translation.DefaultLocale("zh-CN"),
+            translation.FallbackLocale("en-US"),
+            translation.TranslatedFields("Name", "Description"),
+        ),
+    },
+})
+```
+
+字段取值顺序是：
+
+1. 当前语言；
+2. 回退语言；
+3. 模型原始字段值。
+
+## 模型字段
+
+嵌入 `translation.Fields`，把需要翻译的字段定义为普通字段：
+
+```go
+type Product struct {
+    oro.Model
+    translation.Fields
+
+    Code        string
+    Name        string
+    Description string
+}
+
+func (Product) Define(s *oro.SchemaBuilder) {
+    s.Table("products")
+    s.Field("Code").String().Unique()
+    s.Field("Name").String().Nullable()
+    s.Field("Description").Text().Nullable()
+}
+```
+
+`translation.Fields` 会自动定义隐藏 JSON 字段 `Translations -> translations`。翻译字段不要定义成 `Virtual()`，因为原始值兜底需要真实列保存基础内容。
+
+## 一次创建多语言
+
+```go
+created, err := translation.Use[Product](db).Create(ctx,
+    &Product{Code: "P001"},
+    translation.Values{
+        "zh-CN": oro.Map{
+            "Name":        "苹果",
+            "Description": "红色苹果",
+        },
+        "en-US": oro.Map{
+            "Name":        "Apple",
+            "Description": "Red apple",
+        },
+    },
+)
+```
+
+传入 `translation.Values` 时，扩展会保存完整翻译 JSON，并把默认语言的值写入原始字段；如果模型原始字段已有非零值，则保留原始字段值。
+
+## 创建当前语言
+
+```go
+created, err := translation.Use[Product](db).
+    Locale("zh-CN").
+    Create(ctx, &Product{
+        Code:        "P002",
+        Name:        "梨子",
+        Description: "黄色梨子",
+    })
+```
+
+不传 `translation.Values` 时，`Create` 会把非零翻译字段写入当前语言，同时普通列仍保存原始值。
+
+## 读取与回退
+
+```go
+product, err := translation.Use[Product](db).
+    Locale("ja-JP").
+    Fallback("en-US").
+    Find(ctx, id)
+```
+
+如果 `ja-JP.Name` 不存在，会使用 `en-US.Name`。如果回退语言也不存在，就保留模型原始字段值。
+
+也可以通过 `context.Context` 传递语言：
+
+```go
+ctx = translation.WithLocale(ctx, "ja-JP")
+ctx = translation.WithFallback(ctx, "en-US")
+
+product, err := translation.Use[Product](db).Find(ctx, id)
+```
+
+## 更新翻译
+
+更新当前语言：
+
+```go
+_, err := translation.Use[Product](db).
+    Locale("zh-CN").
+    Where("ID", id).
+    Update(ctx, oro.Map{"Name": "新梨子"})
+```
+
+一次更新多个语言：
+
+```go
+_, err := translation.Use[Product](db).
+    Where("ID", id).
+    Update(ctx, nil, translation.Values{
+        "en-US": oro.Map{"Name": "Pear"},
+    })
+```
+
+翻译更新会先读取当前记录，再合并到已有 `translations` JSON，不会删除其他语言。为了避免把同一份 JSON 合并到多条记录，带翻译值的 `Update` 只允许命中一条记录。
+
+## 查询翻译值
+
+```go
+product, err := translation.Use[Product](db).
+    Locale("en-US").
+    WhereTrans("Name", "Apple").
+    First(ctx)
+```
+
+`WhereTrans` 查询当前语言在 JSON 字段里的值。未配置到 `TranslatedFields` 的字段不能使用 `WhereTrans`。
+
+## 模型辅助 API
+
+直接操作模型翻译内容：
+
+```go
+name := translation.Translate(product, "zh-CN", "en-US").String("Name")
+err := translation.Translate(product, "zh-CN").Set("Name", "葡萄")
+```
+
+`Translate(...).String("Name")` 同样按当前语言、回退语言、原始字段值的顺序取值。
