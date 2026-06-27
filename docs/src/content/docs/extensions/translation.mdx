@@ -144,7 +144,18 @@ product, err := translation.Use[Product](db).
     First(ctx)
 ```
 
-`WhereTrans` queries the current locale value inside the JSON column. Fields not listed in `TranslatedFields` cannot be used with `WhereTrans`.
+`WhereTrans` queries the current locale value inside the JSON column.
+
+Use `WhereTransLike` for a `LIKE` match on the translated field for the active locale:
+
+```go
+products, err := translation.Use[Product](db).
+    Locale("en-US").
+    WhereTransLike("Name", "%App%").
+    Get(ctx)
+```
+
+Fields not listed in `TranslatedFields` cannot be used with `WhereTrans` or `WhereTransLike`.
 
 ## Helper API
 

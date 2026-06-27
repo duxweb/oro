@@ -76,10 +76,28 @@ Use `AllShards()` for read-oriented fan-out queries:
 orders, err := db.Use[Order]().
     AllShards().
     Where("Status", "paid").
+    OrderBy("Code").
     Get(ctx)
 ```
 
-`AllShards` merges results from all configured shard connections. Keep it for reads or controlled maintenance flows.
+`AllShards` fans the query out to every configured shard connection. For `Get`, `First`, and pagination it performs a **global merge**: rows from all shards are combined, sorted by the query's `ORDER BY`, and then `LIMIT` / `OFFSET` are applied globally across the merged result. Keep it for reads or controlled maintenance flows.
+
+:::note[Global ordering and paging]
+All-shard reads now merge and order **globally** instead of concatenating each shard's rows. Earlier versions applied `LIMIT` / `OFFSET` per shard, so ordering and pagination across shards were incorrect. Because the merge happens in memory, an explicit `ORDER BY` is required for any ordered all-shard read. `First()` over `AllShards()` returns the global-first row and reports `oro.ErrOrderRequired` when no `ORDER BY` is set.
+:::
+
+### Cross-shard aggregates
+
+`Count` over `AllShards()` is supported and sums the per-shard counts:
+
+```go
+total, err := db.Use[Order]().
+    AllShards().
+    Where("Status", "paid").
+    Count(ctx)
+```
+
+`Sum`, `Avg`, `Min`, and `Max` cannot be computed correctly by merging per-shard values, so over `AllShards()` they now return `oro.ErrUnsupported` instead of silently returning a single shard's result. Compute these at the application layer (or per shard) when you need them across shards.
 
 ## Transactions
 

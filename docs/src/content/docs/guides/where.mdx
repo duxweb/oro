@@ -15,6 +15,8 @@ db.Table("products").Where("price", ">=", 100) // table query uses column names
 
 Model queries use Go field names. Table queries use database column names.
 
+The operator in the three-argument form is validated against a fixed allowlist (`=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `like`, `not like`, `ilike`, `not ilike`, `is`, `is not`); an unknown operator returns `ErrInvalidArgument`.
+
 ## Field expressions
 
 ```go
@@ -31,6 +33,15 @@ db.Use[Product]().Where(
     oro.Field("Stock").Gt(0),
 )
 ```
+
+For literal substring matching, use `Contains`, `StartsWith`, or `EndsWith`. They escape the input, so `%` and `_` in user data are matched literally:
+
+```go
+db.Use[Product]().Where(oro.Field("Name").Contains("100%")) // matches the literal "100%"
+db.Use[Product]().Where(oro.Field("Code").StartsWith("VIP"))
+```
+
+`Like` keeps wildcard semantics; wrap user input with `oro.EscapeLike` when building a pattern by hand.
 
 ## Groups
 

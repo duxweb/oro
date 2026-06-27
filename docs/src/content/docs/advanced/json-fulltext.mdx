@@ -35,7 +35,15 @@ rows, err := db.Use[Product]().Where(
 ).Get(ctx)
 ```
 
-Supported JSON helpers include equality, inequality, null checks, existence checks, and contains-style predicates where the dialect supports them.
+```go
+rows, err := db.Use[Product]().Where(
+    oro.JSON("Meta").Path("profile", "city").Like("%Shanghai%"),
+).Get(ctx)
+```
+
+`Path(...).Like(value)` runs a SQL `LIKE` against the text value at the JSON path (works on SQLite/MySQL/PostgreSQL).
+
+Supported JSON helpers include equality, inequality, null checks, existence checks, contains-style predicates, and `LIKE` matching where the dialect supports them.
 
 ## JSON and table queries
 

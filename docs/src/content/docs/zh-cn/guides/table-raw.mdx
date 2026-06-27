@@ -23,6 +23,8 @@ rows, err := db.Table("products").
 
 `Table` 使用数据库列名，返回 `oro.Map` 或 `[]oro.Map`。
 
+如果该表映射到已注册的软删除模型，`Table` 读取会自动加上软删除过滤：`deleted_at` 非空的行会被排除，与模型查询一致。`Raw` 不会被加过滤，需要时请自行编写条件。
+
 ```go
 for _, row := range rows {
     code := row["code"]

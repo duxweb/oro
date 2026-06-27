@@ -56,7 +56,7 @@ schema/缓存/分片各子系统的行为，移除死代码与重复实现，并
 - 审计日志不再记录 `Hidden` 字段的值。
 - nestedset 的 `Tree.Update` 不再用零值覆盖未提供的列；新增 `UpdateValues`
   用于显式的部分更新。
-- 软删除的 `OnlyTrashed` 作用域现在在写操作上一致施加。
+- 软删除的 `OnlyDeleted` 作用域现在在写操作上一致施加。
 
 ### 变更
 

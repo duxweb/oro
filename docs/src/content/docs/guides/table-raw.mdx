@@ -16,6 +16,8 @@ rows, err := db.Table("products").
 
 `Table` uses database column names and returns `[]oro.Map`.
 
+If the table maps to a registered soft-delete model, `Table` reads are soft-delete-scoped: rows with `deleted_at` set are excluded, the same as model queries. `Raw` is never scoped, so add the predicate yourself when you need it.
+
 ## Table writes
 
 ```go

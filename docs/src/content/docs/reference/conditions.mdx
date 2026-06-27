@@ -17,6 +17,18 @@ Where(oro.Field("Price").Gte(100))
 
 Model queries use Go field names. Table queries use database column names.
 
+## Operator allowlist
+
+The three-argument form `Where(field, op, value)` validates `op` against a fixed allowlist. An unknown operator returns `ErrInvalidArgument` instead of being interpolated into SQL.
+
+Value conditions allow (case-insensitive, whitespace-normalized):
+
+`=` `!=` `<>` `<` `<=` `>` `>=` `like` `not like` `ilike` `not ilike` `is` `is not`
+
+Column conditions (`WhereColumn`) allow: `=` `!=` `<>` `<` `<=` `>` `>=`.
+
+`ilike` / `not ilike` only render natively on PostgreSQL.
+
 ## Field expressions
 
 ```go
@@ -54,6 +66,30 @@ Column comparison methods:
 | `GteCol(right)` | `left >= right` |
 | `LtCol(right)` | `left < right` |
 | `LteCol(right)` | `left <= right` |
+
+## Literal LIKE helpers
+
+`Like(value)` and `NotLike(value)` use the value as-is, so `%` and `_` stay wildcards. When the input is user data that must be matched literally, use the helpers that escape it for you:
+
+| Method | LIKE pattern |
+| --- | --- |
+| `Contains(value)` | `%value%` |
+| `StartsWith(value)` | `value%` |
+| `EndsWith(value)` | `%value` |
+
+```go
+oro.Field("Name").Contains("100%")   // matches the literal substring "100%"
+oro.Field("Code").StartsWith("VIP")
+oro.Field("Code").Like("P%")          // % is still a wildcard (unchanged)
+```
+
+These escape `\`, `%`, and `_` in the input and emit `LIKE ? ESCAPE '\'` on SQLite, MySQL, and PostgreSQL, so characters like `%` or `_` are matched literally.
+
+To build a custom pattern with `Like` while keeping user input literal, escape it with `oro.EscapeLike`:
+
+```go
+oro.Field("Name").Like("%" + oro.EscapeLike(userInput) + "%")  // manual escaping
+```
 
 ## Groups
 

@@ -76,10 +76,28 @@ created, err := db.Use[Order]().
 orders, err := db.Use[Order]().
     AllShards().
     Where("Status", "paid").
+    OrderBy("Code").
     Get(ctx)
 ```
 
-`AllShards` 会合并所有分片连接的结果，建议只用于查询或受控维护流程。
+`AllShards` 会把查询扇出到所有配置的分片连接。对于 `Get`、`First` 和分页，它会执行**全局合并**：先汇总所有分片的行，按查询的 `ORDER BY` 排序，再在合并后的结果上全局应用 `LIMIT` / `OFFSET`。建议只用于查询或受控维护流程。
+
+:::note[全局排序与分页]
+全分片读取现在会做**全局**合并和排序，而不再按分片拼接各自的结果。早期版本会在每个分片上分别应用 `LIMIT` / `OFFSET`，导致跨分片的排序和分页结果错误。由于合并发生在内存中，任何有序的全分片读取都必须显式给出 `ORDER BY`。`AllShards()` 上的 `First()` 返回全局第一行；未设置 `ORDER BY` 时会返回 `oro.ErrOrderRequired`。
+:::
+
+### 跨分片聚合
+
+`AllShards()` 上的 `Count` 是支持的，会把各分片的计数累加：
+
+```go
+total, err := db.Use[Order]().
+    AllShards().
+    Where("Status", "paid").
+    Count(ctx)
+```
+
+`Sum`、`Avg`、`Min`、`Max` 无法通过合并各分片的值得到正确结果，因此它们在 `AllShards()` 上现在会返回 `oro.ErrUnsupported`，而不再悄悄返回单个分片的结果。如果确实需要跨分片计算这些值，请在应用层（或逐分片）处理。
 
 ## 事务
 

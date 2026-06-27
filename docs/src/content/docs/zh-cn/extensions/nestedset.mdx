@@ -96,7 +96,19 @@ phones.ParentID = oro.NullOf(newParentID)
 updated, err := tree.Update(ctx, phones)
 ```
 
-`Update` 会写入普通模型字段，并把模型里的 `ParentID` 和数据库当前行对比。如果 `ParentID` 变化，会移动整棵子树，并重新计算 `_lft`、`_rgt` 和 `Depth`。
+`Update` 只写入模型上已设置（非零值）的字段，不再用零值覆盖未设置的其他列。它会把模型里的 `ParentID` 和数据库当前行对比，如果 `ParentID` 变化，会移动整棵子树，并重新计算 `_lft`、`_rgt` 和 `Depth`。
+
+如果只想按 id 更新部分列，而不必重新加载整个结构体，使用 `UpdateValues`：
+
+```go
+updated, err := tree.UpdateValues(ctx, node.ID, oro.Map{"Name": "New name"})
+```
+
+```go
+func (tree *Tree[T]) UpdateValues(ctx context.Context, nodeID any, values oro.Map, options ...oro.WriteOption) (*T, error)
+```
+
+由于 `Update` 会跳过零值，如果需要把某个字段显式设置为零值，请使用带 `oro.Map` 的 `UpdateValues`。
 
 如果需要指定移动到兄弟节点前后或第一个子节点，使用下面的显式移动方法。
 

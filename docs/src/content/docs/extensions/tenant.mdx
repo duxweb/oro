@@ -82,6 +82,8 @@ orders, err := tenantDB.Use[Order]().Where("Code", "A001").Get(ctx)
 
 The extension automatically appends tenant conditions to model queries. The same values also apply to relation preloads and relation filters because they go through the same model query pipeline.
 
+**Scope coverage:** model queries, eager relations, and `db.Table("...")` reads are tenant-scoped. `db.Table("...")` is scoped only when the table maps to a registered tenant model (resolved internally via the schema); previously it bypassed tenant scoping. Fully raw `db.Raw(...)` SQL is not tenant-scoped and remains the explicit escape hatch.
+
 ## Writes
 
 Tenant values are injected into model writes, so callers do not need to repeat tenant fields in every create or upsert:

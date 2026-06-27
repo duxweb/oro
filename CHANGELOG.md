@@ -66,7 +66,7 @@ consistently, removes dead and duplicated code, and adds the missing tests.
 - The audit log no longer records `Hidden` field values.
 - nestedset `Tree.Update` no longer overwrites unprovided columns with zero
   values; added `UpdateValues` for explicit partial updates.
-- Soft-delete `OnlyTrashed` scoping is now applied consistently on writes.
+- Soft-delete `OnlyDeleted` scoping is now applied consistently on writes.
 
 ### Changed
 

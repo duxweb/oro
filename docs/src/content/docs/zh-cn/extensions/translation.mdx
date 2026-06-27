@@ -144,7 +144,18 @@ product, err := translation.Use[Product](db).
     First(ctx)
 ```
 
-`WhereTrans` 查询当前语言在 JSON 字段里的值。未配置到 `TranslatedFields` 的字段不能使用 `WhereTrans`。
+`WhereTrans` 查询当前语言在 JSON 字段里的值。
+
+使用 `WhereTransLike` 可以对当前语言的翻译字段做 `LIKE` 模糊匹配：
+
+```go
+products, err := translation.Use[Product](db).
+    Locale("en-US").
+    WhereTransLike("Name", "%App%").
+    Get(ctx)
+```
+
+未配置到 `TranslatedFields` 的字段不能使用 `WhereTrans` 或 `WhereTransLike`。
 
 ## 模型辅助 API
 

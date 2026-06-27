@@ -59,6 +59,15 @@ _, err = db.Use[Product]().WithDeleted().Where("ID", id).Restore(ctx)
 
 `Restore` sets the soft-delete field back to `NULL`.
 
+## Scope coverage
+
+The default scope (`deleted_at IS NULL`) is applied on every read path that resolves to a registered soft-delete model, not only direct `Use[T]()` queries:
+
+- Eager loads via `.With(...)` exclude soft-deleted related rows. Earlier versions returned them; this leak is now fixed.
+- Low-level `db.Table("...")` reads on a table that maps to a registered soft-delete model also exclude soft-deleted rows.
+
+Model and relation queries keep their escape hatches: `WithDeleted()` includes deleted rows and `OnlyDeleted()` returns only deleted rows. For truly unscoped raw access, `db.Raw(...)` is never scoped, so write the predicate yourself when you need one.
+
 ## Force delete
 
 Use `ForceDelete` when a row must be physically removed:

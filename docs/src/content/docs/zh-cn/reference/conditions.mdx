@@ -36,6 +36,18 @@ query.WhereGroup(func(w *oro.WhereBuilder) {
 })
 ```
 
+## 操作符白名单
+
+三参数形态 `Where(field, op, value)` 会校验 `op` 是否在固定白名单内。未知操作符返回 `ErrInvalidArgument`，不会被拼进 SQL。
+
+值条件允许（大小写不敏感、空白归一化）：
+
+`=` `!=` `<>` `<` `<=` `>` `>=` `like` `not like` `ilike` `not ilike` `is` `is not`
+
+列条件（`WhereColumn`）允许：`=` `!=` `<>` `<` `<=` `>` `>=`。
+
+`ilike` / `not ilike` 只有 PostgreSQL 原生渲染。
+
 ## Field 表达式完整方法
 
 `oro.Field(name)` 返回字段表达式，主要用于 `Where(...)`、`OrWhere(...)`、`WhereGroup(...)` 这类接收条件对象的位置。
@@ -77,6 +89,30 @@ products, err := db.Use[Product]().
 | `IsNotNull()` | `IS NOT NULL` |
 
 `In(values...)` 和 `NotIn(values...)` 用于值列表；`WhereIn(field, oro.Query(...))` 用于子查询，两者不要混用。
+
+### 字面量 LIKE 匹配
+
+`Like(value)` / `NotLike(value)` 把值原样使用，`%` 和 `_` 仍是通配符。当输入是需要按字面匹配的用户数据时，用下面三个会自动转义的方法：
+
+| 方法 | LIKE 模式 |
+| --- | --- |
+| `Contains(value)` | `%value%` |
+| `StartsWith(value)` | `value%` |
+| `EndsWith(value)` | `%value` |
+
+```go
+oro.Field("Name").Contains("100%")   // 匹配字面子串 "100%"
+oro.Field("Code").StartsWith("VIP")
+oro.Field("Code").Like("P%")          // % 仍是通配符（行为不变）
+```
+
+它们会转义输入中的 `\`、`%`、`_`，并在 SQLite、MySQL、PostgreSQL 上统一生成 `LIKE ? ESCAPE '\'`，因此 `%`、`_` 会按字面匹配。
+
+如果要用 `Like` 自己拼模式但保持用户输入按字面匹配，用 `oro.EscapeLike` 转义：
+
+```go
+oro.Field("Name").Like("%" + oro.EscapeLike(userInput) + "%")  // 手动转义
+```
 
 ### 列比较
 
@@ -123,7 +159,7 @@ rows, err := db.Table("orders").As("o").
 | --- | --- |
 | 构造 | `oro.Field(name)`、`oro.Column(name)`、`oro.As(field, alias)` |
 | 值比较 | `Eq`、`NotEq`、`Gt`、`Gte`、`Lt`、`Lte` |
-| 模糊匹配 | `Like`、`NotLike` |
+| 模糊匹配 | `Like`、`NotLike`、`Contains`、`StartsWith`、`EndsWith` |
 | 集合 | `In`、`NotIn` |
 | 范围 | `Between` |
 | NULL | `IsNull`、`IsNotNull` |

@@ -15,6 +15,8 @@ db.Table("products").Where("price", ">=", 100)
 
 模型查询用 Go 字段名；裸表查询用数据库列名。
 
+三参数写法里的操作符会按固定白名单校验（`=`、`!=`、`<>`、`<`、`<=`、`>`、`>=`、`like`、`not like`、`ilike`、`not ilike`、`is`、`is not`），未知操作符返回 `ErrInvalidArgument`。详见 [操作符白名单](/zh-cn/reference/conditions/#操作符白名单)。
+
 `Where` 不接收回调函数。回调只用于 `WhereGroup`、`OrWhereGroup` 和 `WhereWhen`，这样一眼就能看出哪里会生成括号。
 
 | 写法 | 用途 |
@@ -55,6 +57,15 @@ db.Use[Product]().Where(
 ```
 
 字段表达式适合比较语义比较强的条件，例如 `Gte`、`Between`、`IsNull`、`EqCol`。普通等值条件仍然建议直接写 `Where("Code", "P001")`。
+
+需要按字面子串匹配时，用 `Contains`、`StartsWith`、`EndsWith`，它们会转义输入，`%`、`_` 会按字面匹配：
+
+```go
+db.Use[Product]().Where(oro.Field("Name").Contains("100%")) // 匹配字面 "100%"
+db.Use[Product]().Where(oro.Field("Code").StartsWith("VIP"))
+```
+
+`Like` 保持通配符语义；手动拼模式时用 `oro.EscapeLike` 转义用户输入。详见 [字面量 LIKE 匹配](/zh-cn/reference/conditions/#字面量-like-匹配)。
 
 `oro.Field("Code").` 后面的完整方法表见 [Field 表达式完整方法](/zh-cn/reference/conditions/#field-表达式完整方法)。
 

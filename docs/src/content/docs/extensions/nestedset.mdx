@@ -96,7 +96,19 @@ phones.ParentID = oro.NullOf(newParentID)
 updated, err := tree.Update(ctx, phones)
 ```
 
-`Update` writes normal model fields and compares `ParentID` with the current database row. If `ParentID` changed, the subtree is moved and `_lft`, `_rgt`, and `Depth` are recalculated.
+`Update` writes only the fields that are set (non-zero) on the model; it no longer overwrites unset or other columns with their zero values. It compares `ParentID` with the current database row, and if `ParentID` changed, the subtree is moved and `_lft`, `_rgt`, and `Depth` are recalculated.
+
+To update specific columns by id without rehydrating the whole struct, use `UpdateValues`:
+
+```go
+updated, err := tree.UpdateValues(ctx, node.ID, oro.Map{"Name": "New name"})
+```
+
+```go
+func (tree *Tree[T]) UpdateValues(ctx context.Context, nodeID any, values oro.Map, options ...oro.WriteOption) (*T, error)
+```
+
+Because `Update` skips zero values, use `UpdateValues` with an `oro.Map` when you need to set a field to a zero value explicitly.
 
 For position-specific moves, use the explicit move methods below.
 
