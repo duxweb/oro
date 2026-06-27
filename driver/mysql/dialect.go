@@ -211,6 +211,9 @@ func (d dialect) compileSelect(stmt oro.SelectAST) (oro.CompiledSQL, error) {
 		if *stmt.Offset < 0 {
 			return oro.CompiledSQL{}, &oro.Error{Op: "mysql.select", Kind: oro.ErrInvalidArgument, Field: "Offset"}
 		}
+		if stmt.Limit == nil {
+			sql += " limit 18446744073709551615"
+		}
 		sql += fmt.Sprintf(" offset %d", *stmt.Offset)
 	}
 	lockSQL, err := d.compileLock(stmt.Lock)
@@ -266,6 +269,8 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		expr = aggregateSQL
 	} else if !item.Raw {
 		expr = d.QuoteIdent(item.Expr)
+	} else {
+		args = append(args, item.Args...)
 	}
 	if item.Alias != "" {
 		expr += " as " + d.QuoteIdent(item.Alias)
@@ -675,15 +680,25 @@ func (d dialect) compileWhere(conditions []oro.Condition) (string, []any, error)
 		case "is null", "is not null":
 			parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+op)
 		default:
+			if !oro.IsSafeConditionOperator(condition.Op) {
+				return "", nil, &oro.Error{Op: "mysql.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+			}
 			if source, ok := condition.Value.(*oro.SourceAST); ok {
 				sql, sourceArgs, err := d.compileScalarSource(*source, "mysql.where")
 				if err != nil {
 					return "", nil, err
 				}
-				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+condition.Op+" "+sql)
+				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+oro.NormalizeConditionOperator(condition.Op)+" "+sql)
 				args = append(args, sourceArgs...)
 			} else {
-				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+condition.Op+" ?")
+				sql := prefix + d.QuoteIdent(condition.Field) + " " + oro.NormalizeConditionOperator(condition.Op) + " ?"
+				if condition.Escape != "" {
+					if condition.Escape != `\` {
+						return "", nil, &oro.Error{Op: "mysql.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+					}
+					sql += " escape '\\'"
+				}
+				parts = append(parts, sql)
 				args = append(args, condition.Value)
 			}
 		}
@@ -696,7 +711,10 @@ func (d dialect) compileColumnCondition(condition oro.Condition) (string, error)
 	if !ok || columnCondition.Right == "" {
 		return "", &oro.Error{Op: "mysql.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
 	}
-	return d.QuoteIdent(condition.Field) + " " + columnCondition.Op + " " + d.QuoteIdent(columnCondition.Right), nil
+	if !oro.IsSafeColumnOperator(columnCondition.Op) {
+		return "", &oro.Error{Op: "mysql.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+	}
+	return d.QuoteIdent(condition.Field) + " " + oro.NormalizeConditionOperator(columnCondition.Op) + " " + d.QuoteIdent(columnCondition.Right), nil
 }
 
 func (d dialect) compileInCondition(condition oro.Condition) (string, []any, error) {
@@ -712,8 +730,14 @@ func (d dialect) compileInCondition(condition oro.Condition) (string, []any, err
 
 func (d dialect) compileInValuesCondition(condition oro.Condition, not bool) (string, []any, error) {
 	values, ok := condition.Value.([]any)
-	if !ok || len(values) == 0 {
+	if !ok {
 		return "", nil, &oro.Error{Op: "mysql.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+	}
+	if len(values) == 0 {
+		if not {
+			return "1 = 1", nil, nil
+		}
+		return "1 = 0", nil, nil
 	}
 	placeholders := make([]string, len(values))
 	for index := range placeholders {
@@ -829,6 +853,8 @@ func (d dialect) compileJSONCondition(condition oro.Condition) (string, []any, e
 			return "", nil, err
 		}
 		return "json_contains(" + expr + ", cast(? as json)) = 1", []any{path, value}, nil
+	case "like":
+		return "json_unquote(" + expr + ") like ?", []any{path, jsonCondition.Value}, nil
 	default:
 		return "", nil, &oro.Error{Op: "mysql.json", Kind: oro.ErrInvalidArgument}
 	}
@@ -895,7 +921,11 @@ func (d dialect) compileColumn(column oro.ColumnSpec, allowPrimary bool) (string
 	}
 	parts := []string{d.QuoteIdent(column.ColumnName), dataType}
 	if allowPrimary && column.Primary {
-		parts = append(parts, "primary key auto_increment")
+		if isIntegerType(column.Type) {
+			parts = append(parts, "primary key auto_increment")
+		} else {
+			parts = append(parts, "primary key")
+		}
 	}
 	if !column.Nullable && !column.Primary {
 		parts = append(parts, "not null")
@@ -907,6 +937,10 @@ func (d dialect) compileColumn(column oro.ColumnSpec, allowPrimary bool) (string
 		parts = append(parts, "comment "+schemaString(column.Comment))
 	}
 	return strings.Join(parts, " "), nil
+}
+
+func isIntegerType(typ string) bool {
+	return strings.Contains(typ, "int")
 }
 
 func compileDefault(defaultValue *oro.DefaultSpec) string {

@@ -168,14 +168,14 @@ func (tree *Tree[T]) Update(ctx context.Context, model *T, options ...oro.WriteO
 		if err != nil {
 			return err
 		}
+		if !nextParent.Valid && !txTree.hasTreeCoordinates(model) {
+			nextParent = current.ParentID
+		}
 		values, err := txTree.updateValues(model)
 		if err != nil {
 			return err
 		}
-		delete(values, txTree.config.ParentField)
-		delete(values, txTree.config.LeftField)
-		delete(values, txTree.config.RightField)
-		delete(values, txTree.config.DepthField)
+		values = txTree.cleanUpdateValues(values)
 		if len(values) > 0 {
 			if _, err := txTree.query().Where(primaryField(txTree.db), id).Update(ctx, values, options...); err != nil {
 				return err
@@ -193,6 +193,47 @@ func (tree *Tree[T]) Update(ctx context.Context, model *T, options ...oro.WriteO
 		return nil, err
 	}
 	return tree.query().Find(ctx, id)
+}
+
+func (tree *Tree[T]) UpdateValues(ctx context.Context, nodeID any, values oro.Map, options ...oro.WriteOption) (*T, error) {
+	if values == nil {
+		values = oro.Map{}
+	}
+	err := tree.write(ctx, func(txTree *Tree[T]) error {
+		current, err := txTree.nodeForUpdate(ctx, nodeID)
+		if err != nil || current == nil {
+			return err
+		}
+		nextParent := current.ParentID
+		if value, ok := values[txTree.config.ParentField]; ok {
+			parent, err := uint64FromAny(value)
+			if err != nil {
+				return err
+			}
+			if value == nil {
+				nextParent = oro.NullZero[uint64]()
+			} else {
+				nextParent = oro.NullOf(parent)
+			}
+		}
+		cleanedValues := txTree.cleanUpdateValues(values)
+		if len(cleanedValues) > 0 {
+			if _, err := txTree.query().Where(primaryField(txTree.db), nodeID).Update(ctx, cleanedValues, options...); err != nil {
+				return err
+			}
+		}
+		if sameParent(current.ParentID, nextParent) {
+			return nil
+		}
+		if nextParent.Valid {
+			return txTree.move(ctx, nodeID, nextParent.Value, moveLastChild)
+		}
+		return txTree.move(ctx, nodeID, nil, moveRoot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tree.query().Find(ctx, nodeID)
 }
 
 func (tree *Tree[T]) Roots(ctx context.Context) ([]*T, error) {

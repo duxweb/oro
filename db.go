@@ -42,8 +42,6 @@ func Open(config Config) (*DB, error) {
 	rt.Executor = factory.NewExecutor(rt)
 	rt.Mapper = factory.NewMapper(rt)
 	rt.Syncer = factory.NewSyncer(rt)
-	rt.RelationLoader = factory.NewRelationLoader(rt)
-	rt.RelationWriter = factory.NewRelationWriter(rt)
 	rt.Serializer = factory.NewSerializer(rt)
 
 	db := &DB{

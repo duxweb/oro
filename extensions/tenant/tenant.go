@@ -133,10 +133,17 @@ func (extension extension) ApplyConnection(ctx context.Context, db *oro.DB, spec
 }
 
 func (extension extension) ApplyQuery(ctx context.Context, db *oro.DB, spec *oro.QuerySpec) error {
-	if db == nil || spec == nil || spec.Model == nil {
+	if db == nil || spec == nil {
 		return nil
 	}
-	fields := oro.TenantFieldsForSchema(extension.config.Fields, spec.Model)
+	model := spec.Model
+	if model == nil && spec.Table != "" {
+		model = oro.SchemaForTable(db, spec.Table)
+	}
+	if model == nil {
+		return nil
+	}
+	fields := oro.TenantFieldsForSchema(extension.config.Fields, model)
 	if len(fields) == 0 {
 		return nil
 	}
@@ -145,16 +152,16 @@ func (extension extension) ApplyQuery(ctx context.Context, db *oro.DB, spec *oro
 		return err
 	}
 	if !ok {
-		return &oro.Error{Op: "tenant", Kind: oro.ErrTenantRequired, Model: spec.Model.Name}
+		return &oro.Error{Op: "tenant", Kind: oro.ErrTenantRequired, Model: model.Name}
 	}
 	for _, fieldName := range fields {
-		field, ok := spec.Model.FieldByGo[fieldName]
+		field, ok := model.FieldByGo[fieldName]
 		if !ok {
-			return &oro.Error{Op: "tenant", Kind: oro.ErrUnknownTenant, Model: spec.Model.Name, Field: fieldName}
+			return &oro.Error{Op: "tenant", Kind: oro.ErrUnknownTenant, Model: model.Name, Field: fieldName}
 		}
 		value, ok := values[fieldName]
 		if !ok {
-			return &oro.Error{Op: "tenant", Kind: oro.ErrTenantRequired, Model: spec.Model.Name, Field: fieldName}
+			return &oro.Error{Op: "tenant", Kind: oro.ErrTenantRequired, Model: model.Name, Field: fieldName}
 		}
 		spec.Where = append(spec.Where, oro.Condition{Field: field.Column, Op: "=", Value: value})
 	}

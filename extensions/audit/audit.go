@@ -199,7 +199,7 @@ func (extension extension) handleAfterWrite(ctx context.Context, event *oro.Even
 		Table:     event.Table,
 		Operation: event.Operation,
 		Rows:      event.RowsAffected,
-		Values:    copyMap(event.Values),
+		Values:    visibleValues(event.Schema, event.Values),
 		At:        time.Now(),
 	}
 	if ok {
@@ -279,6 +279,33 @@ func copyMap(values oro.Map) oro.Map {
 	}
 	copied := make(oro.Map, len(values))
 	for key, value := range values {
+		copied[key] = value
+	}
+	return copied
+}
+
+func visibleValues(schema *oro.ModelSchema, values oro.Map) oro.Map {
+	if len(values) == 0 {
+		return nil
+	}
+	if schema == nil {
+		return copyMap(values)
+	}
+	hiddenColumns := map[string]bool{}
+	for _, field := range schema.Fields {
+		if field.Hidden {
+			hiddenColumns[field.Column] = true
+			hiddenColumns[field.Name] = true
+		}
+	}
+	if len(hiddenColumns) == 0 {
+		return copyMap(values)
+	}
+	copied := oro.Map{}
+	for key, value := range values {
+		if hiddenColumns[key] {
+			continue
+		}
 		copied[key] = value
 	}
 	return copied

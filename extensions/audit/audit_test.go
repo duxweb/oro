@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/duxweb/oro"
@@ -17,9 +18,58 @@ type article struct {
 	Title string
 }
 
+type secretArticle struct {
+	oro.Model
+	Title        string
+	PasswordHash string
+}
+
+func (secretArticle) Define(s *oro.SchemaBuilder) {
+	s.Table("oro_audit_secret_articles")
+	s.Field("Title").String()
+	s.Field("PasswordHash").Column("password_hash").String().Hidden()
+}
+
 func (article) Define(s *oro.SchemaBuilder) {
 	s.Table("oro_audit_articles")
 	s.Field("Title").String()
+}
+
+func TestAuditExtensionOmitsHiddenValues(t *testing.T) {
+	for _, testCase := range exttest.DriverCases() {
+		t.Run(testCase.Name, func(t *testing.T) {
+			ctx := audit.WithActor(context.Background(), 7)
+			db, _ := exttest.Open(t, testCase, exttest.OpenOptions{
+				Models: []oro.Definer{secretArticle{}, audit.Log{}},
+				Tables: []string{"oro_audit_logs", "oro_audit_secret_articles"},
+				Prefix: "audit_hidden_matrix_",
+				Extensions: []oro.Extension{
+					audit.Extension(audit.WithDefaultLogModel()),
+				},
+			})
+
+			if _, err := db.Use[secretArticle]().Create(ctx, &secretArticle{Title: "draft", PasswordHash: "secret-hash"}); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			log, err := db.Use[audit.Log]().OrderBy("ID").First(ctx)
+			if err != nil {
+				t.Fatalf("log: %v", err)
+			}
+			values := oro.Map{}
+			if err := json.Unmarshal(log.Values, &values); err != nil {
+				t.Fatalf("decode values: %v", err)
+			}
+			if _, ok := values["password_hash"]; ok {
+				t.Fatalf("hidden password_hash leaked into audit log: %#v", values)
+			}
+			if _, ok := values["PasswordHash"]; ok {
+				t.Fatalf("hidden PasswordHash leaked into audit log: %#v", values)
+			}
+			if values["title"] != "draft" {
+				t.Fatalf("expected visible title, got %#v", values)
+			}
+		})
+	}
 }
 
 func TestAuditExtensionFillsActorFieldsAndWritesLogs(t *testing.T) {

@@ -1,5 +1,7 @@
 package oro
 
+import "strings"
+
 type FieldExpr struct {
 	Name  string
 	Alias string
@@ -43,6 +45,18 @@ func (field FieldExpr) Like(value any) Condition {
 
 func (field FieldExpr) NotLike(value any) Condition {
 	return Condition{Field: field.Name, Op: "not like", Value: value}
+}
+
+func (field FieldExpr) Contains(value string) Condition {
+	return Condition{Field: field.Name, Op: "like", Value: "%" + EscapeLike(value) + "%", Escape: `\`}
+}
+
+func (field FieldExpr) StartsWith(value string) Condition {
+	return Condition{Field: field.Name, Op: "like", Value: EscapeLike(value) + "%", Escape: `\`}
+}
+
+func (field FieldExpr) EndsWith(value string) Condition {
+	return Condition{Field: field.Name, Op: "like", Value: "%" + EscapeLike(value), Escape: `\`}
 }
 
 func (field FieldExpr) In(values ...any) Condition {
@@ -96,6 +110,13 @@ type RawExpr struct {
 
 func Raw(sql string, args ...any) RawExpr {
 	return RawExpr{SQL: sql, Args: args}
+}
+
+func EscapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	value = strings.ReplaceAll(value, `_`, `\_`)
+	return value
 }
 
 type IncrementExpr struct {
@@ -194,6 +215,10 @@ func (path JSONPath) Exists() Condition {
 
 func (path JSONPath) Contains(value any) Condition {
 	return jsonCondition(path, "contains", value)
+}
+
+func (path JSONPath) Like(value any) Condition {
+	return jsonCondition(path, "like", value)
 }
 
 func jsonCondition(path JSONPath, op string, value any) Condition {

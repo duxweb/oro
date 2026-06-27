@@ -22,14 +22,12 @@ type Runtime struct {
 	SQLCache   *sqlCache
 	ScanCache  *modelScanCache
 
-	SchemaParser   SchemaParser
-	Planner        QueryPlanner
-	Executor       Executor
-	Mapper         Mapper
-	Syncer         Syncer
-	RelationLoader RelationLoader
-	RelationWriter RelationWriter
-	Serializer     Serializer
+	SchemaParser SchemaParser
+	Planner      QueryPlanner
+	Executor     Executor
+	Mapper       Mapper
+	Syncer       Syncer
+	Serializer   Serializer
 }
 
 type Factory interface {
@@ -41,8 +39,6 @@ type Factory interface {
 	NewExecutor(rt *Runtime) Executor
 	NewMapper(rt *Runtime) Mapper
 	NewSyncer(rt *Runtime) Syncer
-	NewRelationLoader(rt *Runtime) RelationLoader
-	NewRelationWriter(rt *Runtime) RelationWriter
 	NewSerializer(rt *Runtime) Serializer
 }
 
@@ -105,20 +101,9 @@ type Syncer interface {
 	Sync(ctx context.Context, db *DB) error
 }
 
-type RelationLoader interface {
-	Load(ctx context.Context, db *DB, sources any, relations []RelationLoad) error
-}
-
-type RelationWriter interface {
-	Execute(ctx context.Context, db *DB, op RelationOperation) error
-}
-
 type Serializer interface {
 	Serialize(value any, opts SerializeOptions) any
 }
-
-type RelationLoad struct{}
-type RelationOperation struct{}
 
 type DefaultFactory struct{}
 
@@ -152,14 +137,6 @@ func (DefaultFactory) NewMapper(rt *Runtime) Mapper {
 
 func (DefaultFactory) NewSyncer(rt *Runtime) Syncer {
 	return schemaSyncer{rt: rt}
-}
-
-func (DefaultFactory) NewRelationLoader(rt *Runtime) RelationLoader {
-	return noopRelationLoader{}
-}
-
-func (DefaultFactory) NewRelationWriter(rt *Runtime) RelationWriter {
-	return noopRelationWriter{}
 }
 
 func (DefaultFactory) NewSerializer(rt *Runtime) Serializer {
@@ -225,18 +202,6 @@ func (noopSyncer) Sync(ctx context.Context, db *DB) error {
 	return nil
 }
 
-type noopRelationLoader struct{}
-
-func (noopRelationLoader) Load(ctx context.Context, db *DB, sources any, relations []RelationLoad) error {
-	return nil
-}
-
-type noopRelationWriter struct{}
-
-func (noopRelationWriter) Execute(ctx context.Context, db *DB, op RelationOperation) error {
-	return nil
-}
-
 type Registry struct {
 	inner *internalregistry.Registry[ModelSchema]
 }
@@ -274,6 +239,26 @@ func (registry *Registry) TypeForSchema(target *ModelSchema) (reflect.Type, bool
 
 func (registry *Registry) Schemas() []*ModelSchema {
 	return registry.inner.Schemas()
+}
+
+func SchemaForTable(db *DB, table string) *ModelSchema {
+	if db == nil || db.runtime == nil || db.runtime.Registry == nil || table == "" {
+		return nil
+	}
+	resolver := tableNames(db)
+	physical := resolver.Physical(table)
+	for _, schema := range db.runtime.Registry.Schemas() {
+		if schema == nil {
+			continue
+		}
+		// Physical is idempotent, so the physical comparison matches whether the
+		// caller passed a logical or an already-prefixed name; the exact logical
+		// match is a cheap fast path.
+		if schema.Table == table || resolver.Physical(schema.Table) == physical {
+			return schema
+		}
+	}
+	return nil
 }
 
 func modelType(model any) reflect.Type {

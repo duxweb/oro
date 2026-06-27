@@ -39,7 +39,7 @@ func (query *TypedRawQuery[T]) Timeout(timeout time.Duration) *TypedRawQuery[T] 
 
 func (query *TypedTableQuery[T]) First(ctx context.Context) (*T, error) {
 	if structRowsDirectAvailable(query.query.db, query.query.spec) && !query.query.allShards {
-		spec, schema, err := typedTableScanSpec[T](query.query)
+		spec, schema, err := typedTableScanSpec[T](ctx, query.query)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +54,7 @@ func (query *TypedTableQuery[T]) First(ctx context.Context) (*T, error) {
 
 func (query *TypedTableQuery[T]) Get(ctx context.Context) ([]*T, error) {
 	if structRowsDirectAvailable(query.query.db, query.query.spec) && !query.query.allShards {
-		spec, schema, err := typedTableScanSpec[T](query.query)
+		spec, schema, err := typedTableScanSpec[T](ctx, query.query)
 		if err != nil {
 			return nil, err
 		}
@@ -366,8 +366,8 @@ func mapDTOs[T any](db *DB, rows []Map) ([]*T, error) {
 	return values, nil
 }
 
-func typedTableScanSpec[T any](query *TableQuery) (QuerySpec, *ModelSchema, error) {
-	spec, err := tableShardSpec(query)
+func typedTableScanSpec[T any](ctx context.Context, query *TableQuery) (QuerySpec, *ModelSchema, error) {
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return QuerySpec{}, nil, err
 	}

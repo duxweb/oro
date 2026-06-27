@@ -1,6 +1,7 @@
 package pgsql
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/duxweb/oro"
@@ -29,6 +30,66 @@ func TestCompileSelect(t *testing.T) {
 	}
 	if len(sql.Args) != 1 || sql.Args[0] != "A001" {
 		t.Fatalf("got args %#v", sql.Args)
+	}
+}
+
+func TestCompileSelectEmptyInValues(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.SelectAST{
+		Table: "products",
+		Where: []oro.Condition{oro.Field("id").In()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sql.SQL != `select * from "products" where 1 = 0` {
+		t.Fatalf("got SQL %q", sql.SQL)
+	}
+
+	sql, err = (dialect{}).Compile(oro.SelectAST{
+		Table: "products",
+		Where: []oro.Condition{oro.Field("id").NotIn()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sql.SQL != `select * from "products" where 1 = 1` {
+		t.Fatalf("got SQL %q", sql.SQL)
+	}
+}
+
+func TestCompileSelectJSONLikeCondition(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.SelectAST{
+		Table: "products",
+		Where: []oro.Condition{oro.JSON("meta").Path("name").Like("%pear%")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `select * from "products" where "meta" #>> $1 like $2`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+	if len(sql.Args) != 2 || sql.Args[0] != "{name}" || sql.Args[1] != "%pear%" {
+		t.Fatalf("got args %#v", sql.Args)
+	}
+}
+
+func TestCompileSchemaUUIDPrimaryKeyDoesNotUseIdentity(t *testing.T) {
+	sql, err := (dialect{}).CompileSchema(oro.SchemaChange{
+		Kind: oro.SchemaCreateTable,
+		Table: oro.TableSpec{
+			Name: "users",
+			Columns: []oro.ColumnSpec{
+				{ColumnName: "id", Type: "uuid", Primary: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `create table if not exists "users" ("id" uuid primary key)`
+	if len(sql) != 1 || sql[0].SQL != want {
+		t.Fatalf("got SQL %#v, want %q", sql, want)
 	}
 }
 
@@ -283,6 +344,53 @@ func TestCompileSelectConditionTree(t *testing.T) {
 		if sql.Args[index] != wantArgs[index] {
 			t.Fatalf("got args %#v, want %#v", sql.Args, wantArgs)
 		}
+	}
+}
+
+func TestCompileSelectRejectsUnsafeOperator(t *testing.T) {
+	_, err := (dialect{}).Compile(oro.SelectAST{
+		Table: "products",
+		Where: []oro.Condition{{Field: "id", Op: "= 1 OR 1=1 --", Value: 99}},
+	})
+	if !errors.Is(err, oro.ErrInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+}
+
+func TestCompileSelectEscapedLike(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.SelectAST{
+		Table: "products",
+		Where: []oro.Condition{
+			oro.Field("code").Contains(`100%_ok`),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `select * from "products" where "code" like $1 escape '\'`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+	if len(sql.Args) != 1 || sql.Args[0] != `%100\%\_ok%` {
+		t.Fatalf("got args %#v", sql.Args)
+	}
+}
+
+func TestCompileSelectRawExprArgs(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.SelectAST{
+		Table:  "products",
+		Select: []oro.SelectExpr{{Expr: "? as marker", Raw: true, Args: []any{"selected"}}},
+		Where:  []oro.Condition{{Field: "code", Op: "=", Value: "A001"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `select $1 as marker from "products" where "code" = $2`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+	if len(sql.Args) != 2 || sql.Args[0] != "selected" || sql.Args[1] != "A001" {
+		t.Fatalf("got args %#v", sql.Args)
 	}
 }
 

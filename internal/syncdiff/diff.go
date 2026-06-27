@@ -38,6 +38,12 @@ func DiffWithSnapshot(current *meta.TableSpec, target meta.TableSpec, snapshot *
 	for _, column := range current.Columns {
 		currentColumns[column.ColumnName] = column
 	}
+	snapshotColumns := map[string]meta.ColumnSpec{}
+	if snapshot != nil {
+		for _, column := range snapshot.Columns {
+			snapshotColumns[column.ColumnName] = column
+		}
+	}
 
 	changes := make([]meta.SchemaChange, 0)
 	changes = append(changes, renameChanges...)
@@ -54,7 +60,11 @@ func DiffWithSnapshot(current *meta.TableSpec, target meta.TableSpec, snapshot *
 			})
 			continue
 		}
-		if unsafeColumnChange(currentColumn, column) {
+		logicalCurrent := currentColumn
+		if snapshotColumn, ok := snapshotColumns[column.ColumnName]; ok {
+			logicalCurrent.Type = snapshotColumn.Type
+		}
+		if unsafeColumnChange(logicalCurrent, column) {
 			changes = append(changes, meta.SchemaChange{
 				Kind:    meta.SchemaUnsafeChange,
 				Table:   meta.TableSpec{Name: target.Name},
@@ -192,6 +202,16 @@ func columnTypeKind(typ string) string {
 	if typ == "" {
 		return ""
 	}
+	switch typ {
+	case "bool", "boolean", "tinyint(1)":
+		return "bool"
+	case "point":
+		return "point"
+	case "json", "jsonb", "oro.jsonraw":
+		return "json"
+	case "string_array", "int_array":
+		return "json"
+	}
 	if strings.Contains(typ, "time.time") || typ == "datetime" || strings.HasPrefix(typ, "timestamp") || typ == "date" || strings.HasPrefix(typ, "time ") {
 		return "time"
 	}
@@ -216,14 +236,7 @@ func columnTypeKind(typ string) string {
 	if strings.Contains(typ, "float") || strings.Contains(typ, "double") || strings.Contains(typ, "real") {
 		return "float"
 	}
-	switch typ {
-	case "bool", "boolean", "tinyint(1)":
-		return "bool"
-	case "point":
-		return "point"
-	default:
-		return typ
-	}
+	return typ
 }
 
 func sameIndexSpec(left meta.IndexSpec, right meta.IndexSpec) bool {

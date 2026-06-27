@@ -3,12 +3,13 @@ package oro
 import "strings"
 
 type RelationQuery struct {
-	db        *DB
-	schema    *ModelSchema
-	count     *CountCondition
-	spec      QuerySpec
-	shard     Map
-	allShards bool
+	db             *DB
+	schema         *ModelSchema
+	count          *CountCondition
+	spec           QuerySpec
+	shard          Map
+	allShards      bool
+	softDeleteMode softDeleteMode
 }
 
 func (query *RelationQuery) Where(field any, args ...any) *RelationQuery {
@@ -101,22 +102,23 @@ func (query *RelationQuery) AllShards() *RelationQuery {
 	return query
 }
 
-func (query *RelationQuery) Count(op string, value int64) *RelationQuery {
-	if !validRelationCountOperator(op) {
-		query.spec.SelectErr = &Error{Op: "where_has.count", Kind: ErrInvalidArgument}
-		return query
-	}
-	query.count = &CountCondition{Op: op, Value: value}
+func (query *RelationQuery) WithDeleted() *RelationQuery {
+	query.softDeleteMode = softDeleteWith
 	return query
 }
 
-func validRelationCountOperator(op string) bool {
-	switch op {
-	case "=", "!=", ">", ">=", "<", "<=":
-		return true
-	default:
-		return false
+func (query *RelationQuery) OnlyDeleted() *RelationQuery {
+	query.softDeleteMode = softDeleteOnly
+	return query
+}
+
+func (query *RelationQuery) Count(op string, value int64) *RelationQuery {
+	if !IsSafeColumnOperator(op) {
+		query.spec.SelectErr = &Error{Op: "where_has.count", Kind: ErrInvalidArgument}
+		return query
 	}
+	query.count = &CountCondition{Op: NormalizeConditionOperator(op), Value: value}
+	return query
 }
 
 func buildWithSpec(relation any, callbacks []func(*RelationQuery)) (WithSpec, error) {

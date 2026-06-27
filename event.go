@@ -38,6 +38,7 @@ type Event struct {
 	ModelName string
 	Table     string
 	Model     any
+	Schema    *ModelSchema
 
 	Operation    string
 	Values       Map

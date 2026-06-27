@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -67,11 +68,20 @@ func (bus *Bus[N, E]) Emit(ctx context.Context, name N, event *E) error {
 	entries := append([]entry[E](nil), bus.handlers[name]...)
 	bus.mu.RUnlock()
 	for _, entry := range entries {
-		if err := entry.handler(ctx, event); err != nil {
+		if err := callHandler(ctx, entry.handler, event); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func callHandler[E any](ctx context.Context, handler Handler[E], event *E) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("event handler panic: %v", recovered)
+		}
+	}()
+	return handler(ctx, event)
 }
 
 func (bus *Bus[N, E]) Has(name N) bool {

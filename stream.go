@@ -195,6 +195,9 @@ func streamQueryPrepared(ctx context.Context, db *DB, spec QuerySpec) (*rowStrea
 	if spec.SelectErr != nil {
 		return nil, spec.SelectErr
 	}
+	if err := finalizeReadSpec(ctx, db, &spec); err != nil {
+		return nil, err
+	}
 	conn, err := connectionForQuery(db, spec.Connection)
 	if err != nil {
 		return nil, err
@@ -205,7 +208,7 @@ func streamQueryPrepared(ctx context.Context, db *DB, spec QuerySpec) (*rowStrea
 	if err := validateQueryJoins(conn, spec.Joins); err != nil {
 		return nil, err
 	}
-	if err := resolveQuerySources(db, &spec); err != nil {
+	if err := resolveQuerySources(ctx, db, &spec); err != nil {
 		return nil, err
 	}
 	tableNames(db).ApplyQuery(&spec)

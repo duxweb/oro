@@ -78,7 +78,10 @@ func primaryValueFromModel(schema *ModelSchema, model any) (any, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	fieldValue := structValue.FieldByIndex(field.Index)
+	fieldValue, ok := fieldByIndexReadSafe(structValue, field.Index)
+	if !ok {
+		return nil, false, nil
+	}
 	if !fieldValue.IsValid() || !fieldValue.CanInterface() || isZeroValue(fieldValue) {
 		return nil, false, nil
 	}

@@ -162,7 +162,73 @@ func loadHas(ctx context.Context, db *DB, sourceSchema *ModelSchema, models []an
 }
 
 func relationRows(ctx context.Context, db *DB, schema *ModelSchema, column string, keys []any, callback func(*RelationQuery)) ([]Map, []WithSpec, error) {
-	return relationRowsWithConditions(ctx, db, schema, []Condition{{Field: column, Op: "in_values", Value: keys}}, callback)
+	return relationRowsInChunks(ctx, db, schema, column, keys, nil, callback)
+}
+
+func relationRowsInChunks(ctx context.Context, db *DB, schema *ModelSchema, column string, keys []any, extra []Condition, callback func(*RelationQuery)) ([]Map, []WithSpec, error) {
+	if len(keys) == 0 {
+		return []Map{}, nil, nil
+	}
+	size := relationBatchSize(db)
+	rows := []Map{}
+	var nestedWith []WithSpec
+	for start := 0; start < len(keys); start += size {
+		end := start + size
+		if end > len(keys) {
+			end = len(keys)
+		}
+		conditions := append([]Condition{{Field: column, Op: "in_values", Value: keys[start:end]}}, extra...)
+		chunkRows, chunkWith, err := relationRowsWithConditions(ctx, db, schema, conditions, callback)
+		if err != nil {
+			return nil, nil, err
+		}
+		rows = append(rows, chunkRows...)
+		if nestedWith == nil && len(chunkWith) > 0 {
+			nestedWith = chunkWith
+		}
+	}
+	return rows, nestedWith, nil
+}
+
+func relationBatchSize(db *DB) int {
+	size := defaultChunkSize
+	if db != nil && db.runtime != nil {
+		if db.runtime.Config.Batch.RelationSize > 0 {
+			size = db.runtime.Config.Batch.RelationSize
+		} else if db.runtime.Config.Batch.ReadSize > 0 {
+			size = db.runtime.Config.Batch.ReadSize
+		}
+	}
+	if size <= 0 {
+		return defaultChunkSize
+	}
+	if size > defaultMaxBatchParams {
+		return defaultMaxBatchParams
+	}
+	return size
+}
+
+func relationThroughRows(ctx context.Context, db *DB, spec QuerySpec, column string, keys []any) ([]Map, error) {
+	if len(keys) == 0 {
+		return []Map{}, nil
+	}
+	size := relationBatchSize(db)
+	rows := []Map{}
+	baseWhere := append([]Condition(nil), spec.Where...)
+	for start := 0; start < len(keys); start += size {
+		end := start + size
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunkSpec := cloneQuerySpec(spec)
+		chunkSpec.Where = append([]Condition{{Field: column, Op: "in_values", Value: keys[start:end]}}, baseWhere...)
+		chunkRows, err := queryRows(ctx, db, chunkSpec)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, chunkRows...)
+	}
+	return rows, nil
 }
 
 func relationRowsWithConditions(ctx context.Context, db *DB, schema *ModelSchema, conditions []Condition, callback func(*RelationQuery)) ([]Map, []WithSpec, error) {
@@ -178,11 +244,15 @@ func relationRowsWithConditions(ctx context.Context, db *DB, schema *ModelSchema
 		if query.spec.SelectErr != nil {
 			return nil, nil, query.spec.SelectErr
 		}
-		conditions, err := convertModelConditions(schema, query.spec.Where)
+		resolved, err := resolveRelationFilterConditions(ctx, db, schema, query.spec, query.spec.Where)
 		if err != nil {
 			return nil, nil, err
 		}
-		query.spec.Where = conditions
+		converted, err := convertModelConditions(schema, resolved)
+		if err != nil {
+			return nil, nil, err
+		}
+		query.spec.Where = converted
 		if err := convertModelSelects(schema, &query.spec); err != nil {
 			return nil, nil, err
 		}
@@ -194,9 +264,11 @@ func relationRowsWithConditions(ctx context.Context, db *DB, schema *ModelSchema
 		return nil, nil, err
 	}
 	query.spec.Where = append(append([]Condition(nil), conditions...), query.spec.Where...)
+	applySoftDeleteScope(schema, &query.spec, query.softDeleteMode)
 	if err := applyQueryExtensions(ctx, db, &query.spec); err != nil {
 		return nil, nil, err
 	}
+	query.spec.finalized = true
 	var rows []Map
 	var err error
 	if query.allShards {
@@ -397,8 +469,7 @@ func loadDynamicHasMany(ctx context.Context, db *DB, sourceSchema *ModelSchema, 
 		}
 		return nil
 	}
-	rows, nestedWith, err := relationRowsWithConditions(ctx, db, targetSchema, []Condition{
-		{Field: targetIDField.Column, Op: "in_values", Value: keys},
+	rows, nestedWith, err := relationRowsInChunks(ctx, db, targetSchema, targetIDField.Column, keys, []Condition{
 		{Field: targetTypeField.Column, Op: "=", Value: relation.TypeValue},
 	}, callback)
 	if err != nil {
@@ -466,7 +537,6 @@ func loadManyToMany(ctx context.Context, db *DB, sourceSchema *ModelSchema, mode
 		Table:      relation.Through,
 		ModelName:  sourceSchema.Name,
 		Model:      sourceSchema,
-		Where:      []Condition{{Field: Snake(relation.SourceForeignKey), Op: "in_values", Value: sourceKeys}},
 	}
 	if relation.Kind == RelationDynamicManyToMany {
 		throughSpec.Where = append(throughSpec.Where, Condition{
@@ -479,7 +549,7 @@ func loadManyToMany(ctx context.Context, db *DB, sourceSchema *ModelSchema, mode
 	if err := applyShardConnection(ctx, db, sourceSchema, &throughSpec, nil, false); err != nil {
 		return err
 	}
-	throughRows, err := queryRows(ctx, db, throughSpec)
+	throughRows, err := relationThroughRows(ctx, db, throughSpec, Snake(relation.SourceForeignKey), sourceKeys)
 	if err != nil {
 		return err
 	}
@@ -620,25 +690,12 @@ func comparableKey(value any) any {
 	if value == nil {
 		return nil
 	}
+	// comparableKeyValue already normalizes every integer kind (including named
+	// types and Null[T]) to int64/uint64, so only those two cases can match.
+	value = comparableKeyValue(value)
 	switch typedValue := value.(type) {
-	case int:
-		return strconv.FormatInt(int64(typedValue), 10)
-	case int8:
-		return strconv.FormatInt(int64(typedValue), 10)
-	case int16:
-		return strconv.FormatInt(int64(typedValue), 10)
-	case int32:
-		return strconv.FormatInt(int64(typedValue), 10)
 	case int64:
 		return strconv.FormatInt(typedValue, 10)
-	case uint:
-		return strconv.FormatUint(uint64(typedValue), 10)
-	case uint8:
-		return strconv.FormatUint(uint64(typedValue), 10)
-	case uint16:
-		return strconv.FormatUint(uint64(typedValue), 10)
-	case uint32:
-		return strconv.FormatUint(uint64(typedValue), 10)
 	case uint64:
 		return strconv.FormatUint(typedValue, 10)
 	}
@@ -647,4 +704,48 @@ func comparableKey(value any) any {
 		return nil
 	}
 	return value
+}
+
+func comparableKeyValue(value any) any {
+	reflectValue := reflect.ValueOf(value)
+	if !reflectValue.IsValid() {
+		return nil
+	}
+	for reflectValue.Kind() == reflect.Pointer {
+		if reflectValue.IsNil() {
+			return nil
+		}
+		reflectValue = reflectValue.Elem()
+	}
+	if isNullLikeValue(reflectValue) {
+		if !reflectValue.FieldByName("Valid").Bool() {
+			return nil
+		}
+		return comparableKeyValue(reflectValue.FieldByName("Value").Interface())
+	}
+	switch reflectValue.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return reflectValue.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return reflectValue.Uint()
+	case reflect.String:
+		return reflectValue.String()
+	case reflect.Slice:
+		if reflectValue.Type().Elem().Kind() == reflect.Uint8 {
+			return string(reflectValue.Bytes())
+		}
+	}
+	if !reflectValue.Type().Comparable() {
+		return nil
+	}
+	return reflectValue.Interface()
+}
+
+func isNullLikeValue(value reflect.Value) bool {
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return false
+	}
+	valid := value.FieldByName("Valid")
+	item := value.FieldByName("Value")
+	return valid.IsValid() && valid.Kind() == reflect.Bool && item.IsValid()
 }

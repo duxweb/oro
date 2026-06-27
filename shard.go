@@ -2,7 +2,12 @@ package oro
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/duxweb/oro/internal/shardstrategy"
 )
@@ -55,9 +60,9 @@ func shardErrors() shardstrategy.ErrorSet {
 	}
 }
 
-func shardValuesForSchema(db *DB, schema *ModelSchema, explicit Map) Map {
+func shardValuesForSchemaContext(ctx context.Context, db *DB, schema *ModelSchema, explicit Map) Map {
 	values := Map{}
-	if extensionValues, err := extensionShardValues(context.Background(), db); err == nil {
+	if extensionValues, err := extensionShardValues(ctx, db); err == nil {
 		for key, value := range extensionValues {
 			values[key] = value
 		}
@@ -111,7 +116,7 @@ func applyShardConnection(ctx context.Context, db *DB, schema *ModelSchema, spec
 }
 
 func pickShardConnection(ctx context.Context, db *DB, schema *ModelSchema, config *ShardConfig, explicit Map) (string, error) {
-	values := shardValuesForSchema(db, schema, explicit)
+	values := shardValuesForSchemaContext(ctx, db, schema, explicit)
 	for _, field := range schema.ShardFields {
 		if _, ok := values[field]; !ok {
 			return "", &Error{Op: "shard", Kind: ErrShardRequired, Model: schema.Name, Field: field}
@@ -173,8 +178,8 @@ func validateShardWriteValues(schema *ModelSchema, explicit Map, values Map) err
 	return nil
 }
 
-func validateShardWriteValuesForDB(db *DB, schema *ModelSchema, explicit Map, values Map) error {
-	return validateShardWriteValues(schema, shardValuesForSchema(db, schema, explicit), values)
+func validateShardWriteValuesForDB(ctx context.Context, db *DB, schema *ModelSchema, explicit Map, values Map) error {
+	return validateShardWriteValues(schema, shardValuesForSchemaContext(ctx, db, schema, explicit), values)
 }
 
 func validateShardUpdateValues(schema *ModelSchema, values Map) error {
@@ -194,7 +199,7 @@ func validateShardUpdateValues(schema *ModelSchema, values Map) error {
 	return nil
 }
 
-func tableShardSpec(query *TableQuery) (QuerySpec, error) {
+func tableShardSpec(ctx context.Context, query *TableQuery) (QuerySpec, error) {
 	spec := cloneQuerySpec(query.spec)
 	if spec.SelectErr != nil {
 		return QuerySpec{}, spec.SelectErr
@@ -214,7 +219,7 @@ func tableShardSpec(query *TableQuery) (QuerySpec, error) {
 	if query.allShards {
 		return spec, nil
 	}
-	connection, err := config.Strategy.Pick(context.Background(), query.shard, config.Connections)
+	connection, err := config.Strategy.Pick(ctx, query.shard, config.Connections)
 	if err != nil {
 		kind := ErrShardNotFound
 		if err == ErrShardRequired {
@@ -243,30 +248,48 @@ func ensureTableTransactionShard(db *DB, connection string, spec QuerySpec) erro
 }
 
 func queryAllShardRows(ctx context.Context, query *TableQuery) ([]Map, error) {
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	config := query.db.runtime.Config.Shards[spec.ShardGroup]
+	return fanOutShardRows(ctx, query.db, spec, config.Connections)
+}
+
+// fanOutShardRows runs spec against every shard connection (with offset/limit
+// stripped so paging is global), concatenates the rows, then applies the global
+// ORDER BY and offset/limit. Shared by the model and table all-shard paths.
+func fanOutShardRows(ctx context.Context, db *DB, spec QuerySpec, connections []string) ([]Map, error) {
+	if err := validateAllShardOrder(spec.Order, spec.Table, spec.ModelName, spec.ShardGroup); err != nil {
+		return nil, err
+	}
+	offset, limit := spec.Offset, spec.Limit
+	spec.Offset = nil
+	spec.Limit = nil
 	rows := []Map{}
-	for _, connection := range config.Connections {
+	for _, connection := range connections {
 		nextSpec := cloneQuerySpec(spec)
 		nextSpec.Connection = connection
-		nextRows, err := queryRowsPrepared(ctx, query.db, nextSpec)
+		nextRows, err := queryRowsPrepared(ctx, db, nextSpec)
 		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, nextRows...)
 	}
-	return rows, nil
+	return applyGlobalShardOrderAndPage(rows, spec.Order, offset, limit)
 }
 
 func queryAllShardCounts(ctx context.Context, query *TableQuery) ([]Map, error) {
-	spec := cloneQuerySpec(query.spec)
-	spec.Select = []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}}
-	spec.Order = nil
-	spec.Limit = nil
-	spec.Offset = nil
+	base := cloneQuerySpec(query.spec)
+	// Finalize before wrapping so scoping lands inside the grouped-count
+	// subquery; per-shard execution then skips re-applying (finalized).
+	if err := finalizeReadSpec(ctx, query.db, &base); err != nil {
+		return nil, err
+	}
+	spec, err := countQuerySpec(base)
+	if err != nil {
+		return nil, err
+	}
 	countQuery := *query
 	countQuery.spec = spec
 	return queryAllShardRows(ctx, &countQuery)
@@ -282,7 +305,7 @@ func queryAllShardExists(ctx context.Context, query *TableQuery) ([]Map, error) 
 	existsQuery := *query
 	existsQuery.spec = spec
 	rows := []Map{}
-	shardSpec, err := tableShardSpec(&existsQuery)
+	shardSpec, err := tableShardSpec(ctx, &existsQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -299,4 +322,173 @@ func queryAllShardExists(ctx context.Context, query *TableQuery) ([]Map, error) 
 		}
 	}
 	return rows, nil
+}
+
+func validateAllShardOrder(order []OrderExpr, table string, model string, shardGroup string) error {
+	for _, item := range order {
+		if item.Raw {
+			return &Error{Op: "shard", Kind: ErrUnsupported, Table: table, Model: model, Field: shardGroup}
+		}
+	}
+	return nil
+}
+
+func applyGlobalShardOrderAndPage(rows []Map, order []OrderExpr, offset *int, limit *int) ([]Map, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	if len(order) > 0 {
+		if err := validateShardOrderColumns(rows, order); err != nil {
+			return nil, err
+		}
+		sort.SliceStable(rows, func(left int, right int) bool {
+			return compareOrderedRows(rows[left], rows[right], order) < 0
+		})
+	}
+	start := 0
+	if offset != nil && *offset > 0 {
+		start = *offset
+		if start >= len(rows) {
+			return []Map{}, nil
+		}
+	}
+	end := len(rows)
+	if limit != nil && *limit >= 0 && start+*limit < end {
+		end = start + *limit
+	}
+	return rows[start:end], nil
+}
+
+func validateShardOrderColumns(rows []Map, order []OrderExpr) error {
+	for _, row := range rows {
+		for _, item := range order {
+			if _, ok := row[item.Expr]; !ok {
+				return &Error{Op: "shard", Kind: ErrInvalidQuery, Field: item.Expr}
+			}
+		}
+	}
+	return nil
+}
+
+func compareOrderedRows(left Map, right Map, order []OrderExpr) int {
+	for _, item := range order {
+		result := compareOrderValues(left[item.Expr], right[item.Expr])
+		if result == 0 {
+			continue
+		}
+		if item.Desc {
+			return -result
+		}
+		return result
+	}
+	return 0
+}
+
+func compareOrderValues(left any, right any) int {
+	if left == nil && right == nil {
+		return 0
+	}
+	if left == nil {
+		return -1
+	}
+	if right == nil {
+		return 1
+	}
+	if leftTime, ok := asTime(left); ok {
+		if rightTime, ok := asTime(right); ok {
+			return leftTime.Compare(rightTime)
+		}
+	}
+	if leftFloat, ok := asFloat64(left); ok {
+		if rightFloat, ok := asFloat64(right); ok {
+			switch {
+			case leftFloat < rightFloat:
+				return -1
+			case leftFloat > rightFloat:
+				return 1
+			default:
+				return 0
+			}
+		}
+	}
+	leftText := stringifyOrderValue(left)
+	rightText := stringifyOrderValue(right)
+	return strings.Compare(leftText, rightText)
+}
+
+func asFloat64(value any) (float64, bool) {
+	switch typedValue := value.(type) {
+	case int:
+		return float64(typedValue), true
+	case int8:
+		return float64(typedValue), true
+	case int16:
+		return float64(typedValue), true
+	case int32:
+		return float64(typedValue), true
+	case int64:
+		return float64(typedValue), true
+	case uint:
+		return float64(typedValue), true
+	case uint8:
+		return float64(typedValue), true
+	case uint16:
+		return float64(typedValue), true
+	case uint32:
+		return float64(typedValue), true
+	case uint64:
+		return float64(typedValue), true
+	case float32:
+		return float64(typedValue), true
+	case float64:
+		return typedValue, true
+	default:
+		return 0, false
+	}
+}
+
+func asTime(value any) (time.Time, bool) {
+	switch typedValue := value.(type) {
+	case time.Time:
+		return typedValue, true
+	default:
+		return time.Time{}, false
+	}
+}
+
+func stringifyOrderValue(value any) string {
+	switch typedValue := value.(type) {
+	case string:
+		return typedValue
+	case []byte:
+		return string(typedValue)
+	case int:
+		return strconv.FormatInt(int64(typedValue), 10)
+	case int8:
+		return strconv.FormatInt(int64(typedValue), 10)
+	case int16:
+		return strconv.FormatInt(int64(typedValue), 10)
+	case int32:
+		return strconv.FormatInt(int64(typedValue), 10)
+	case int64:
+		return strconv.FormatInt(typedValue, 10)
+	case uint:
+		return strconv.FormatUint(uint64(typedValue), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(typedValue), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(typedValue), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(typedValue), 10)
+	case uint64:
+		return strconv.FormatUint(typedValue, 10)
+	case float32:
+		return strconv.FormatFloat(float64(typedValue), 'g', -1, 32)
+	case float64:
+		return strconv.FormatFloat(typedValue, 'g', -1, 64)
+	case time.Time:
+		return typedValue.Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(value)
+	}
 }

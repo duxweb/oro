@@ -190,6 +190,40 @@ func TestNestedSetCreateAndUpdateFromParentID(t *testing.T) {
 		"c":    {5, 8, 0},
 		"b2":   {6, 7, 1},
 	})
+
+	if _, err := tree.UpdateValues(ctx, b.ID, oro.Map{"ParentID": root.ID, "Name": ""}); err != nil {
+		t.Fatalf("update values with zero payload: %v", err)
+	}
+	blank, err := db.Use[category]().Where("ID", b.ID).First(ctx)
+	if err != nil {
+		t.Fatalf("load blank: %v", err)
+	}
+	if blank.Name != "" || !blank.ParentID.Valid || blank.ParentID.Value != root.ID {
+		t.Fatalf("unexpected explicit update values result %#v", blank)
+	}
+}
+
+func TestNestedSetUpdateDoesNotOverwriteUnprovidedFields(t *testing.T) {
+	db, ctx := openNestedSetDB(t)
+	tree := nestedset.Use[category](db)
+
+	root, err := tree.CreateRoot(ctx, &category{TenantID: 7, Name: "root"})
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	payload := &category{}
+	payload.ID = root.ID
+	payload.Name = "renamed"
+	updated, err := tree.Update(ctx, payload)
+	if err != nil {
+		t.Fatalf("update partial struct: %v", err)
+	}
+	if updated.TenantID != 7 {
+		t.Fatalf("tenant was overwritten, got %d", updated.TenantID)
+	}
+	if updated.Name != "renamed" {
+		t.Fatalf("name was not updated, got %q", updated.Name)
+	}
 }
 
 func TestNestedSetMoveAndDelete(t *testing.T) {

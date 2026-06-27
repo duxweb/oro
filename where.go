@@ -1,5 +1,7 @@
 package oro
 
+import "strings"
+
 func buildCondition(field any, args ...any) Condition {
 	conditions, err := buildConditions(field, args...)
 	if err != nil {
@@ -35,7 +37,7 @@ func buildConditions(field any, args ...any) ([]Condition, error) {
 	}
 	if len(args) == 2 {
 		op, ok := args[0].(string)
-		if !ok || op == "" {
+		if !ok || !IsSafeConditionOperator(op) {
 			return nil, &Error{Op: "where", Kind: ErrInvalidArgument, Field: fieldName}
 		}
 		return []Condition{{Field: fieldName, Op: op, Value: args[1]}}, nil
@@ -59,7 +61,7 @@ func buildSingleCondition(field any, args ...any) (Condition, bool, error) {
 	}
 	if len(args) == 2 {
 		op, ok := args[0].(string)
-		if !ok || op == "" {
+		if !ok || !IsSafeConditionOperator(op) {
 			return Condition{}, false, &Error{Op: "where", Kind: ErrInvalidArgument, Field: fieldName}
 		}
 		return Condition{Field: fieldName, Op: op, Value: args[1]}, true, nil
@@ -157,11 +159,37 @@ func buildColumnCondition(left string, args ...string) Condition {
 		columnCondition.Right = args[0]
 	}
 	if len(args) >= 2 {
-		columnCondition.Op = args[0]
+		if IsSafeColumnOperator(args[0]) {
+			columnCondition.Op = args[0]
+		} else {
+			return invalidCondition("where", left)
+		}
 		columnCondition.Right = args[1]
 	}
 	condition.Value = columnCondition
 	return condition
+}
+
+func IsSafeConditionOperator(op string) bool {
+	switch NormalizeConditionOperator(op) {
+	case "=", "!=", "<>", "<", "<=", ">", ">=", "like", "not like", "ilike", "not ilike", "is", "is not":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsSafeColumnOperator(op string) bool {
+	switch NormalizeConditionOperator(op) {
+	case "=", "!=", "<>", "<", "<=", ">", ">=":
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeConditionOperator(op string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(op))), " ")
 }
 
 func buildInCondition(field string, source QuerySource) Condition {

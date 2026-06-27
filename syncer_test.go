@@ -199,6 +199,58 @@ func TestDiffTableSpecAllowsDriverColumnTypeVariants(t *testing.T) {
 	}
 }
 
+func TestDiffTableSpecAllowsLogicalTypesFromSnapshot(t *testing.T) {
+	current := &TableSpec{
+		Name: "products",
+		Columns: []ColumnSpec{
+			{ColumnName: "active", Type: "tinyint(1)", Nullable: true},
+			{ColumnName: "meta", Type: "jsonb", Nullable: true},
+			{ColumnName: "tags", Type: "json", Nullable: true},
+			{ColumnName: "location", Type: "point", Nullable: true},
+		},
+	}
+	target := TableSpec{
+		Name: "products",
+		Columns: []ColumnSpec{
+			{ColumnName: "active", Type: "bool", Nullable: true},
+			{ColumnName: "meta", Type: "json", Nullable: true},
+			{ColumnName: "tags", Type: "string_array", Nullable: true},
+			{ColumnName: "location", Type: "point", Nullable: true},
+		},
+	}
+
+	changes := diffTableSpec(current, target)
+	if len(changes) != 0 {
+		t.Fatalf("unexpected changes %#v", changes)
+	}
+}
+
+func TestDiffTableSpecUsesSnapshotLogicalTypeForExistingColumns(t *testing.T) {
+	current := &TableSpec{
+		Name: "products",
+		Columns: []ColumnSpec{
+			{FieldName: "Meta", ColumnName: "meta", Type: "longtext", Nullable: true},
+		},
+	}
+	target := TableSpec{
+		Name: "products",
+		Columns: []ColumnSpec{
+			{FieldName: "Meta", ColumnName: "meta", Type: "json", Nullable: true},
+		},
+	}
+	snapshot := &TableSpec{
+		Name: "products",
+		Columns: []ColumnSpec{
+			{FieldName: "Meta", ColumnName: "meta", Type: "json", Nullable: true},
+		},
+	}
+
+	changes := diffTableSpecWithSnapshot(current, target, snapshot)
+	if len(changes) != 0 {
+		t.Fatalf("unexpected changes %#v", changes)
+	}
+}
+
 func TestDiffTableSpecDetectsNullableTightening(t *testing.T) {
 	current := &TableSpec{
 		Name: "products",

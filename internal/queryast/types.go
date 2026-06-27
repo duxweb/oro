@@ -77,6 +77,7 @@ type JoinCondition struct {
 	Value  any
 	Column bool
 	Group  []JoinCondition
+	Err    error
 }
 
 type InsertAST struct {
@@ -119,6 +120,7 @@ type Condition struct {
 	Op         string
 	Value      any
 	Conditions []Condition
+	Escape     string
 }
 
 type ColumnCondition struct {

@@ -10,6 +10,12 @@ type relationFilterOptions struct {
 	not    bool
 }
 
+type relationFilterPayload struct {
+	relation any
+	callback func(*RelationQuery)
+	options  relationFilterOptions
+}
+
 func (query *ModelQuery[T]) WhereHas(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "and"}, callbacks...)
 }
@@ -28,17 +34,15 @@ func (query *ModelQuery[T]) OrWhereDoesntHave(relation any, callbacks ...func(*R
 
 func (query *ModelQuery[T]) whereHas(relation any, options relationFilterOptions, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	clone := *query
-	schema, err := schemaForModel[T](query.db)
-	if err != nil {
-		clone.spec.SelectErr = err
-		return &clone
-	}
-	filter, err := buildRelationFilter(context.Background(), query.db, schema, query.spec, relation, firstRelationCallback(callbacks), options)
-	if err != nil {
-		clone.spec.SelectErr = err
-		return &clone
-	}
-	clone.spec.Where = append(clone.spec.Where, filter)
+	clone.spec.Where = append(clone.spec.Where, Condition{
+		Bool: options.boolOp,
+		Op:   "relation_filter",
+		Value: relationFilterPayload{
+			relation: relation,
+			callback: firstRelationCallback(callbacks),
+			options:  options,
+		},
+	})
 	return &clone
 }
 
@@ -63,13 +67,53 @@ func (query *RelationQuery) whereHas(relation any, options relationFilterOptions
 		query.spec.SelectErr = &Error{Op: "where_has", Kind: ErrInvalidArgument}
 		return query
 	}
-	filter, err := buildRelationFilter(context.Background(), query.db, query.schema, query.spec, relation, firstRelationCallback(callbacks), options)
-	if err != nil {
-		query.spec.SelectErr = err
-		return query
-	}
-	query.spec.Where = append(query.spec.Where, filter)
+	query.spec.Where = append(query.spec.Where, Condition{
+		Bool: options.boolOp,
+		Op:   "relation_filter",
+		Value: relationFilterPayload{
+			relation: relation,
+			callback: firstRelationCallback(callbacks),
+			options:  options,
+		},
+	})
 	return query
+}
+
+func resolveRelationFilterConditions(ctx context.Context, db *DB, schema *ModelSchema, sourceSpec QuerySpec, conditions []Condition) ([]Condition, error) {
+	if len(conditions) == 0 {
+		return nil, nil
+	}
+	resolved := make([]Condition, 0, len(conditions))
+	for _, condition := range conditions {
+		op := strings.ToLower(strings.TrimSpace(condition.Op))
+		if op == "group" || op == "not" {
+			nested, err := resolveRelationFilterConditions(ctx, db, schema, sourceSpec, condition.Conditions)
+			if err != nil {
+				return nil, err
+			}
+			condition.Conditions = nested
+			resolved = append(resolved, condition)
+			continue
+		}
+		if op == "relation_filter" {
+			payload, ok := condition.Value.(relationFilterPayload)
+			if !ok {
+				return nil, &Error{Op: "where_has", Kind: ErrInvalidArgument, Model: schema.Name}
+			}
+			options := payload.options
+			if condition.Bool != "" {
+				options.boolOp = condition.Bool
+			}
+			filter, err := buildRelationFilter(ctx, db, schema, sourceSpec, payload.relation, payload.callback, options)
+			if err != nil {
+				return nil, err
+			}
+			resolved = append(resolved, filter)
+			continue
+		}
+		resolved = append(resolved, condition)
+	}
+	return resolved, nil
 }
 
 func buildRelationFilter(ctx context.Context, db *DB, sourceSchema *ModelSchema, sourceSpec QuerySpec, relation any, callback func(*RelationQuery), options relationFilterOptions) (Condition, error) {
@@ -161,7 +205,7 @@ func relationFilterSubquery(ctx context.Context, db *DB, sourceSchema *ModelSche
 	if err := applyRelationFilterCorrelation(db, sourceSchema, targetSchema, sourceSpec, relation, query); err != nil {
 		return nil, nil, err
 	}
-	if err := convertRelationFilterQuery(db, targetSchema, sourceSpec, query); err != nil {
+	if err := convertRelationFilterQuery(ctx, db, targetSchema, sourceSpec, query); err != nil {
 		return nil, nil, err
 	}
 	if count != nil {
@@ -287,13 +331,17 @@ func applyManyToManyRelationFilterCorrelation(db *DB, sourceSchema *ModelSchema,
 	return nil
 }
 
-func convertRelationFilterQuery(db *DB, targetSchema *ModelSchema, sourceSpec QuerySpec, query *TableQuery) error {
-	conditions, err := convertModelConditions(targetSchema, query.spec.Where)
+func convertRelationFilterQuery(ctx context.Context, db *DB, targetSchema *ModelSchema, sourceSpec QuerySpec, query *TableQuery) error {
+	conditions, err := resolveRelationFilterConditions(ctx, db, targetSchema, query.spec, query.spec.Where)
+	if err != nil {
+		return err
+	}
+	conditions, err = convertModelConditions(targetSchema, conditions)
 	if err != nil {
 		return err
 	}
 	query.spec.Where = conditions
-	if err := applyQueryExtensions(context.Background(), db, &query.spec); err != nil {
+	if err := applyQueryExtensions(ctx, db, &query.spec); err != nil {
 		return err
 	}
 	if err := convertModelSelects(targetSchema, &query.spec); err != nil {
@@ -302,7 +350,7 @@ func convertRelationFilterQuery(db *DB, targetSchema *ModelSchema, sourceSpec Qu
 	if err := convertRelationFilterJoins(targetSchema, query); err != nil {
 		return err
 	}
-	if err := applyShardConnection(context.Background(), db, targetSchema, &query.spec, query.shard, query.allShards); err != nil {
+	if err := applyShardConnection(ctx, db, targetSchema, &query.spec, query.shard, query.allShards); err != nil {
 		return err
 	}
 	query.spec.Connection = sourceSpec.Connection

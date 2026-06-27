@@ -136,6 +136,9 @@ func TestCreateWithCurrentLocaleAndUpdateTranslations(t *testing.T) {
 	if _, err := translation.Use[product](db).Locale("en-US").WhereTrans("Name", "Pear").First(ctx); err != nil {
 		t.Fatalf("where trans: %v", err)
 	}
+	if found, err := translation.Use[product](db).Locale("en-US").WhereTransLike("Name", "%ea%").First(ctx); err != nil || found == nil || found.Code != "P002B" {
+		t.Fatalf("where trans like found=%#v err=%v", found, err)
+	}
 
 	if _, err := translation.Use[product](db).Locale("zh-CN").Where("ID", created.ID).Update(ctx, oro.Map{
 		"Name": "新梨子",

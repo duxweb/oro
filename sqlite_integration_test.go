@@ -2575,6 +2575,36 @@ func TestSQLiteGroupByHaving(t *testing.T) {
 	}
 }
 
+func TestSQLiteCountWithGroupByCountsGroups(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	for _, row := range []oro.Map{
+		{"code": "GC001", "price": 10},
+		{"code": "GC002", "price": 10},
+		{"code": "GC003", "price": 30},
+	} {
+		if _, err := db.Table("products").Create(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tableCount, err := db.Table("products").GroupBy("price").Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tableCount != 2 {
+		t.Fatalf("table grouped count = %d, want 2", tableCount)
+	}
+
+	modelCount, err := db.Use[integrationProduct]().GroupBy("Price").Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelCount != 2 {
+		t.Fatalf("model grouped count = %d, want 2", modelCount)
+	}
+}
+
 func TestSQLiteAggregates(t *testing.T) {
 	db, ctx := openSQLiteTestDB(t)
 
@@ -3078,6 +3108,20 @@ func TestSQLiteModelHooksAndEvents(t *testing.T) {
 	}
 	offEventErr()
 
+	offPanicErr := db.On(oro.AfterCreate, func(ctx context.Context, event *oro.Event) error {
+		if event.ModelName == "integrationHookProduct" {
+			panic("event panic")
+		}
+		return nil
+	})
+	_, err = db.Use[integrationHookProduct]().
+		SkipHooks().
+		Create(ctx, &integrationHookProduct{Code: "P", Price: 1})
+	if !errors.Is(err, oro.ErrEvent) {
+		t.Fatalf("expected panic to be converted to event error, got %v", err)
+	}
+	offPanicErr()
+
 	var txEvents []oro.EventName
 	db.On(oro.AfterCommit, func(ctx context.Context, event *oro.Event) error {
 		txEvents = append(txEvents, event.Name)
@@ -3117,5 +3161,137 @@ func TestSQLiteScansTime(t *testing.T) {
 	}
 	if _, ok := row["created_at"].(time.Time); !ok {
 		t.Fatalf("expected time.Time, got %T %#v", row["created_at"], row["created_at"])
+	}
+}
+
+func TestSQLiteEagerLoadWhereHas(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	for _, statement := range []string{
+		`create table articles (
+			id integer primary key autoincrement,
+			title text not null,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)`,
+		`create table comments (
+			id integer primary key autoincrement,
+			article_id integer,
+			body text not null,
+			status text not null,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)`,
+	} {
+		if _, err := db.Raw(statement).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// All models referenced by integrationArticle's relations must be registered
+	// so relation schemas resolve, even though this test only queries articles
+	// and comments.
+	if err := db.Register(integrationArticle{}, integrationComment{}, integrationImage{}, integrationTag{}); err != nil {
+		t.Fatal(err)
+	}
+
+	a1, err := db.Use[integrationArticle]().Create(ctx, &integrationArticle{Title: "A1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, err := db.Use[integrationArticle]().Create(ctx, &integrationArticle{Title: "A2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, comment := range []*integrationComment{
+		{ArticleID: a1.ID, Body: "c1", Status: "approved"},
+		{ArticleID: a1.ID, Body: "c2", Status: "pending"},
+		{ArticleID: a2.ID, Body: "c3", Status: "approved"},
+	} {
+		if _, err := db.Use[integrationComment]().Create(ctx, comment); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Regression: WhereHas inside an eager-load .With() callback must resolve
+	// the deferred relation-filter payload. Previously this failed with
+	// "where: oro: unknown field" because the eager-load path converted
+	// conditions without resolving relation filters first.
+	articles, err := db.Use[integrationArticle]().
+		With(integrationArticle{}.Comments(), func(q *oro.RelationQuery) {
+			q.Where("Status", "approved").
+				WhereHas(integrationComment{}.Article(), func(parent *oro.RelationQuery) {
+					parent.Where("Title", "A1")
+				})
+		}).
+		OrderBy("ID").
+		Get(ctx)
+	if err != nil {
+		t.Fatalf("eager WhereHas: %v", err)
+	}
+	if len(articles) != 2 {
+		t.Fatalf("expected 2 articles, got %d", len(articles))
+	}
+
+	a1Comments, err := articles[0].Comments().Many[integrationComment]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a1Comments) != 1 || a1Comments[0].Body != "c1" {
+		t.Fatalf("A1: expected [c1], got %#v", a1Comments)
+	}
+
+	a2Comments, err := articles[1].Comments().Many[integrationComment]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a2Comments) != 0 {
+		t.Fatalf("A2: expected no comments, got %#v", a2Comments)
+	}
+}
+
+func TestSQLiteTableQuerySoftDeleteScope(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	// openSQLiteTestDB registers integrationProduct (soft-delete) and creates
+	// the products table. Give each row a distinct price so grouped counts are
+	// meaningful, then soft-delete one via the model API.
+	prices := map[string]uint{"A": 10, "B": 20, "C": 30}
+	for code, price := range prices {
+		if _, err := db.Use[integrationProduct]().Create(ctx, &integrationProduct{Code: code, Price: price}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err := db.Use[integrationProduct]().Where("Code", "C").Delete(ctx)
+	if err != nil || deleted != 1 {
+		t.Fatalf("soft delete: n=%d err=%v", deleted, err)
+	}
+
+	// #2: a low-level table query on the same table must exclude soft-deleted rows.
+	rows, err := db.Table("products").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("table Get: expected 2 live rows, got %d", len(rows))
+	}
+
+	count, err := db.Table("products").Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("table Count: expected 2, got %d", count)
+	}
+
+	// #3: grouped count via a table query must be scoped, so the soft-deleted
+	// row's distinct price group is not counted (2 live groups, not 3).
+	groupCount, err := db.Table("products").Select("price").GroupBy("price").Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groupCount != 2 {
+		t.Fatalf("grouped table Count: expected 2 groups, got %d", groupCount)
 	}
 }

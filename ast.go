@@ -59,6 +59,7 @@ type QuerySpec struct {
 	Cache      CacheSpec
 	Timeout    int64
 	Model      *ModelSchema
+	finalized  bool
 }
 
 type CacheSpec struct {

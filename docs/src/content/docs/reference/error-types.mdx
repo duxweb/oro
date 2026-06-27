@@ -6,7 +6,7 @@ description: Oro error types and errors.Is usage.
 Use `errors.Is` with Oro standard errors. Database-specific errors are wrapped so the original detail remains available for logs.
 
 ```go
-if errors.Is(err, oro.ErrDuplicateKey) {
+if errors.Is(err, oro.ErrConstraint) {
     return conflict()
 }
 ```
@@ -18,10 +18,9 @@ if errors.Is(err, oro.ErrDuplicateKey) {
 | `ErrInvalidArgument` | invalid input to an ORM method |
 | `ErrUnsafeUpdate` | update without conditions |
 | `ErrUnsafeDelete` | delete without conditions |
-| `ErrDuplicateKey` | unique constraint violation |
-| `ErrForeignKey` | foreign key violation |
+| `ErrConstraint` | database constraint violation |
 | `ErrStaleData` | optimistic lock mismatch |
-| `ErrNoConnection` | missing connection or driver |
+| `ErrUnknownConnection` | missing connection |
 | `ErrUnsupported` | feature not supported by the dialect |
 
 ## Not found

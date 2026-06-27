@@ -128,7 +128,7 @@ func defaultRelationAggregateAlias(relation RelationSchema, expr RelationAggrega
 	}
 }
 
-func resolveModelRelationAggregates(db *DB, sourceSchema *ModelSchema, spec *QuerySpec) error {
+func resolveModelRelationAggregates(ctx context.Context, db *DB, sourceSchema *ModelSchema, spec *QuerySpec) error {
 	for index := range spec.Select {
 		if spec.Select[index].Expr != "__oro_relation_aggregate__" || len(spec.Select[index].Args) == 0 {
 			continue
@@ -137,7 +137,7 @@ func resolveModelRelationAggregates(db *DB, sourceSchema *ModelSchema, spec *Que
 		if !ok {
 			return &Error{Op: "relation_aggregate", Kind: ErrInvalidArgument, Model: sourceSchema.Name}
 		}
-		resolved, err := buildRelationAggregateSelect(db, sourceSchema, *spec, expr)
+		resolved, err := buildRelationAggregateSelect(ctx, db, sourceSchema, *spec, expr)
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func resolveModelRelationAggregates(db *DB, sourceSchema *ModelSchema, spec *Que
 	return nil
 }
 
-func buildRelationAggregateSelect(db *DB, sourceSchema *ModelSchema, sourceSpec QuerySpec, expr RelationAggregateExpr) (SelectExpr, error) {
+func buildRelationAggregateSelect(ctx context.Context, db *DB, sourceSchema *ModelSchema, sourceSpec QuerySpec, expr RelationAggregateExpr) (SelectExpr, error) {
 	relation, err := resolveRelationFilterSchema(sourceSchema, expr.Relation)
 	if err != nil {
 		return SelectExpr{}, err
@@ -158,7 +158,7 @@ func buildRelationAggregateSelect(db *DB, sourceSchema *ModelSchema, sourceSpec 
 	if err != nil {
 		return SelectExpr{}, err
 	}
-	subquery, _, err := relationFilterSubquery(context.Background(), db, sourceSchema, targetSchema, sourceSpec, relation, expr.Callback)
+	subquery, _, err := relationFilterSubquery(ctx, db, sourceSchema, targetSchema, sourceSpec, relation, expr.Callback)
 	if err != nil {
 		return SelectExpr{}, err
 	}
@@ -191,7 +191,7 @@ func relationAggregateSubquerySelect(schema *ModelSchema, expr RelationAggregate
 		if !ok {
 			return SelectExpr{}, &Error{Op: "relation_aggregate", Kind: ErrUnknownField, Model: schema.Name, Field: expr.Field}
 		}
-		return SelectExpr{Expr: aggregateSQL(expr.Func, field.Column), Raw: true}, nil
+		return SelectExpr{Expr: "__oro_aggregate__", Args: []any{AggregateExpr{Func: expr.Func, Field: field.Column}}}, nil
 	default:
 		return SelectExpr{}, &Error{Op: "relation_aggregate", Kind: ErrInvalidArgument, Model: schema.Name}
 	}

@@ -198,6 +198,25 @@ func TestBeginCommitRollbackIdempotency(t *testing.T) {
 	}
 }
 
+func TestClosedTransactionDoesNotFallBackToPool(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Table("products").Create(ctx, oro.Map{"code": "CLOSED", "price": 10}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Table("products").Create(ctx, oro.Map{"code": "LEAK", "price": 20})
+	if !errors.Is(err, oro.ErrClosed) {
+		t.Fatalf("expected closed transaction error, got %v", err)
+	}
+}
+
 func TestTransactionRetriesRetryableCommitError(t *testing.T) {
 	ctx := context.Background()
 	state := &retrySQLState{commitErrors: []error{oro.ErrSerializationFailure}}

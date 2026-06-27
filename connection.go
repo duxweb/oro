@@ -142,15 +142,15 @@ func (manager *ConnectionManager) PickRead(conn *Connection) *sql.DB {
 	return conn.Reads[int((next-1)%uint64(len(conn.Reads)))]
 }
 
-func (conn *Connection) statement(ctx context.Context, db *sql.DB, query string) (*sql.Stmt, error) {
+func (conn *Connection) statement(ctx context.Context, db *sql.DB, query string) (*sql.Stmt, func(), error) {
 	if conn == nil || db == nil || conn.stmts == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	cache := conn.stmts[db]
 	if cache == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return cache.prepare(ctx, db, query)
+	return cache.acquire(ctx, db, query)
 }
 
 func (conn *Connection) closeStatements() error {

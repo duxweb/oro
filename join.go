@@ -79,6 +79,10 @@ func buildJoinColumnCondition(boolOp string, left string, args ...string) JoinCo
 		condition.Right = args[0]
 	}
 	if len(args) >= 2 {
+		if !IsSafeColumnOperator(args[0]) {
+			condition.Err = &Error{Op: "join", Kind: ErrInvalidArgument, Field: left}
+			return condition
+		}
 		condition.Op = args[0]
 		condition.Right = args[1]
 	}
@@ -92,6 +96,10 @@ func buildJoinValueCondition(boolOp string, field string, args ...any) JoinCondi
 	}
 	if len(args) >= 2 {
 		op, _ := args[0].(string)
+		if !IsSafeConditionOperator(op) {
+			condition.Err = &Error{Op: "join", Kind: ErrInvalidArgument, Field: field}
+			return condition
+		}
 		condition.Op = op
 		condition.Value = args[1]
 	}

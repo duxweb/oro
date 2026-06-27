@@ -3,6 +3,7 @@ package pgsql
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"strings"
 
 	"github.com/duxweb/oro"
@@ -86,11 +87,12 @@ func (inspector inspector) Table(ctx context.Context, name string) (*oro.TableSp
 
 func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.IndexSpec, error) {
 	rows, err := inspector.db.QueryContext(ctx, `
-		select index_class.relname, index_info.indisunique, pg_get_indexdef(index_info.indexrelid, key_order.ordinality::int, true)
+		select index_class.relname, index_info.indisunique, access_method.amname, pg_get_indexdef(index_info.indexrelid), pg_get_indexdef(index_info.indexrelid, key_order.ordinality::int, true)
 		from pg_index index_info
 		join pg_class table_class on table_class.oid = index_info.indrelid
 		join pg_namespace namespace on namespace.oid = table_class.relnamespace
 		join pg_class index_class on index_class.oid = index_info.indexrelid
+		join pg_am access_method on access_method.oid = index_class.relam
 		join lateral unnest(index_info.indkey::int2[]) with ordinality as key_order(attnum, ordinality) on true
 		where namespace.nspname = current_schema()
 			and table_class.relname = $1
@@ -108,15 +110,21 @@ func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.Ind
 	for rows.Next() {
 		var name string
 		var unique bool
+		var accessMethod string
+		var definition string
 		var field string
-		if err := rows.Scan(&name, &unique, &field); err != nil {
+		if err := rows.Scan(&name, &unique, &accessMethod, &definition, &field); err != nil {
 			return nil, err
 		}
 		index := indexByName[name]
 		if index == nil {
-			index = &oro.IndexSpec{Name: name, Unique: unique}
+			index = &oro.IndexSpec{Name: name, Unique: unique, FullText: accessMethod == "gin"}
 			indexByName[name] = index
 			order = append(order, name)
+		}
+		if index.FullText {
+			index.Fields = pgFullTextIndexFields(definition)
+			continue
 		}
 		index.Fields = append(index.Fields, field)
 	}
@@ -129,6 +137,29 @@ func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.Ind
 		indexes = append(indexes, *indexByName[name])
 	}
 	return indexes, nil
+}
+
+func pgFullTextIndexFields(definition string) []string {
+	fields := []string{}
+	remaining := definition
+	for {
+		start := strings.Index(remaining, "coalesce(")
+		if start < 0 {
+			break
+		}
+		remaining = remaining[start+len("coalesce("):]
+		end := strings.Index(remaining, ",")
+		if end < 0 {
+			break
+		}
+		field := strings.TrimSpace(remaining[:end])
+		field = strings.Trim(field, `"`)
+		if field != "" && !slices.Contains(fields, field) {
+			fields = append(fields, field)
+		}
+		remaining = remaining[end+1:]
+	}
+	return fields
 }
 
 func (inspector inspector) Constraints(ctx context.Context, table string) ([]oro.ConstraintSpec, error) {

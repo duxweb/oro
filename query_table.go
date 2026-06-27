@@ -284,7 +284,7 @@ func (query *TableQuery) First(ctx context.Context) (Map, error) {
 		}
 		return rows[0], nil
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func (query *TableQuery) Get(ctx context.Context) ([]Map, error) {
 	if query.allShards {
 		return queryAllShardRows(ctx, query)
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (query *TableQuery) Stream(ctx context.Context) (Stream[Map], error) {
 	if query.allShards {
 		return nil, &Error{Op: "stream", Kind: ErrUnsupported, Table: query.spec.Table, Field: query.spec.ShardGroup}
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (query *TableQuery) Chunk(ctx context.Context, size int, fn func([]Map) err
 	if err := chunkSpecError(query.spec); err != nil {
 		return err
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -382,14 +382,19 @@ func (query *TableQuery) Count(ctx context.Context) (int64, error) {
 		}
 		return total, nil
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
-	spec.Select = []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}}
-	spec.Order = nil
-	spec.Limit = nil
-	spec.Offset = nil
+	// Finalize before wrapping so scoping (tenant/soft-delete) lands inside the
+	// grouped-count subquery instead of the discarded outer wrapper.
+	if err := finalizeReadSpec(ctx, query.db, &spec); err != nil {
+		return 0, err
+	}
+	spec, err = countQuerySpec(spec)
+	if err != nil {
+		return 0, err
+	}
 
 	row, err := queryFirstRowPrepared(ctx, query.db, spec)
 	if err != nil || row == nil {
@@ -406,7 +411,7 @@ func (query *TableQuery) Exists(ctx context.Context) (bool, error) {
 		}
 		return len(rows) > 0, nil
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return false, err
 	}
@@ -430,7 +435,7 @@ func (query *TableQuery) Sum(ctx context.Context, field string) (Decimal, error)
 	if err := ensureAggregateSpec(query.spec); err != nil {
 		return Decimal("0"), err
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return Decimal("0"), err
 	}
@@ -444,7 +449,7 @@ func (query *TableQuery) Avg(ctx context.Context, field string) (Decimal, error)
 	if err := ensureAggregateSpec(query.spec); err != nil {
 		return Decimal("0"), err
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return Decimal("0"), err
 	}
@@ -458,7 +463,7 @@ func (query *TableQuery) Min[T any](ctx context.Context, field string) (Null[T],
 	if err := ensureAggregateSpec(query.spec); err != nil {
 		return NullZero[T](), err
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return NullZero[T](), err
 	}
@@ -472,7 +477,7 @@ func (query *TableQuery) Max[T any](ctx context.Context, field string) (Null[T],
 	if err := ensureAggregateSpec(query.spec); err != nil {
 		return NullZero[T](), err
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return NullZero[T](), err
 	}
@@ -486,7 +491,7 @@ func (query *TableQuery) Create(ctx context.Context, values Map, options ...Writ
 	if len(values) == 0 {
 		return nil, &Error{Op: "create", Kind: ErrInvalidArgument, Table: query.spec.Table}
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +515,7 @@ func (query *TableQuery) Upsert(ctx context.Context, values Map, options ...Writ
 	if len(values) == 0 {
 		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Table: query.spec.Table}
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +545,7 @@ func (query *TableQuery) CreateMany(ctx context.Context, values []Map, options .
 		return &CreateResult{}, nil
 	}
 
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +597,7 @@ func (query *TableQuery) CreateManyResult(ctx context.Context, values []Map, opt
 		return []Map{}, nil
 	}
 
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -652,7 +657,7 @@ func (query *TableQuery) Update(ctx context.Context, values Map, options ...Writ
 	if len(values) == 0 {
 		return 0, &Error{Op: "update", Kind: ErrInvalidArgument, Table: query.spec.Table}
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -666,7 +671,7 @@ func (query *TableQuery) Delete(ctx context.Context) (int64, error) {
 	if query.allShards {
 		return 0, &Error{Op: "delete", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
 	}
-	spec, err := tableShardSpec(query)
+	spec, err := tableShardSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}

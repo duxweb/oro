@@ -226,9 +226,40 @@ func (tree *Tree[T]) updateValues(model *T) (oro.Map, error) {
 		if !structField.IsExported() || structField.Anonymous {
 			continue
 		}
-		values[structField.Name] = value.Field(index).Interface()
+		fieldValue := value.Field(index)
+		if isZero(fieldValue) {
+			continue
+		}
+		values[structField.Name] = fieldValue.Interface()
 	}
 	return values, nil
+}
+
+func (tree *Tree[T]) cleanUpdateValues(values oro.Map) oro.Map {
+	copied := copyMap(values)
+	delete(copied, tree.config.ParentField)
+	delete(copied, tree.config.LeftField)
+	delete(copied, tree.config.RightField)
+	delete(copied, tree.config.DepthField)
+	for field := range tree.config.Scope {
+		delete(copied, field)
+	}
+	return copied
+}
+
+func (tree *Tree[T]) hasTreeCoordinates(model *T) bool {
+	if model == nil {
+		return false
+	}
+	left, err := namedField(model, tree.config.LeftField)
+	if err != nil || isZero(left) {
+		return false
+	}
+	right, err := namedField(model, tree.config.RightField)
+	if err != nil || isZero(right) {
+		return false
+	}
+	return true
 }
 
 func sameParent(left oro.Null[uint64], right oro.Null[uint64]) bool {

@@ -42,6 +42,7 @@ func (query *ModelQuery[T]) createManyBatchFast(ctx context.Context, spec QueryS
 	var ids any
 	rowsAffected := int64(0)
 	batchSize := createBatchSize(query.db.runtime.Config, options)
+	batchSize = paramCappedBatchSize(len(plan.columns), batchSize, defaultMaxBatchParams)
 	for start := 0; start < len(models); start += batchSize {
 		end := min(start+batchSize, len(models))
 		chunkIDs, affected, err := query.createModelsChunkBatchFast(ctx, spec, schema, conn, plan, models[start:end])
@@ -164,7 +165,10 @@ func buildModelBatchInsert[T any](plan modelBatchInsertPlan, models []*T) (model
 			return modelBatchInsert{}, err
 		}
 		for _, field := range plan.fields {
-			fieldValue := structValue.FieldByIndex(field.Index)
+			fieldValue, ok := fieldByIndexReadSafe(structValue, field.Index)
+			if !ok {
+				return modelBatchInsert{}, &Error{Op: "create", Kind: ErrInvalidArgument, Field: field.Name}
+			}
 			if !fieldValue.IsValid() || !fieldValue.CanInterface() {
 				return modelBatchInsert{}, &Error{Op: "create", Kind: ErrInvalidArgument, Field: field.Name}
 			}
@@ -219,7 +223,10 @@ func modelBatchPrimaryShape[T any](models []*T, field FieldSchema) (explicit boo
 		if err != nil {
 			return false, false, err
 		}
-		fieldValue := structValue.FieldByIndex(field.Index)
+		fieldValue, ok := fieldByIndexReadSafe(structValue, field.Index)
+		if !ok {
+			return false, false, nil
+		}
 		if !fieldValue.IsValid() || !fieldValue.CanInterface() {
 			return false, false, nil
 		}
@@ -395,7 +402,10 @@ func assignModelPrimaryValue(schema *ModelSchema, model any, field FieldSchema, 
 	if err != nil {
 		return err
 	}
-	fieldValue := structValue.FieldByIndex(field.Index)
+	fieldValue, ok := fieldByIndexSafe(structValue, field.Index)
+	if !ok {
+		return nil
+	}
 	if !fieldValue.IsValid() || !fieldValue.CanSet() {
 		return nil
 	}

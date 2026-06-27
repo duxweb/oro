@@ -24,7 +24,7 @@ if product == nil {
 Use `errors.Is` for checks:
 
 ```go
-if errors.Is(err, oro.ErrDuplicateKey) {
+if errors.Is(err, oro.ErrConstraint) {
     return conflict()
 }
 ```
@@ -36,10 +36,9 @@ Common errors:
 | `ErrInvalidArgument` | invalid method arguments |
 | `ErrUnsafeUpdate` | update without conditions |
 | `ErrUnsafeDelete` | delete without conditions |
-| `ErrDuplicateKey` | unique constraint violation |
-| `ErrForeignKey` | foreign-key constraint violation |
+| `ErrConstraint` | database constraint violation |
 | `ErrStaleData` | optimistic-lock mismatch |
-| `ErrNoConnection` | missing or unavailable connection |
+| `ErrUnknownConnection` | missing or unavailable connection |
 | `ErrUnsupported` | unsupported dialect feature |
 
 ## Driver errors

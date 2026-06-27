@@ -208,6 +208,9 @@ func (d dialect) compileSelect(stmt oro.SelectAST) (oro.CompiledSQL, error) {
 		if *stmt.Offset < 0 {
 			return oro.CompiledSQL{}, &oro.Error{Op: "sqlite.select", Kind: oro.ErrInvalidArgument, Field: "Offset"}
 		}
+		if stmt.Limit == nil {
+			sql += " limit -1"
+		}
 		sql += fmt.Sprintf(" offset %d", *stmt.Offset)
 	}
 	if stmt.Lock.Mode != oro.LockNone && (stmt.Lock.NoWait || stmt.Lock.SkipLocked) {
@@ -245,6 +248,7 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		return "exists " + expr + " as " + d.QuoteIdent(item.Alias), args, nil
 	}
 	expr := item.Expr
+	args := []any{}
 	if item.Expr == "__oro_aggregate__" {
 		aggregateSQL, err := d.compileAggregateSelect(item)
 		if err != nil {
@@ -253,11 +257,13 @@ func (d dialect) compileSelectExpr(item oro.SelectExpr) (string, []any, error) {
 		expr = aggregateSQL
 	} else if !item.Raw {
 		expr = d.QuoteIdent(item.Expr)
+	} else {
+		args = append(args, item.Args...)
 	}
 	if item.Alias != "" {
 		expr += " as " + d.QuoteIdent(item.Alias)
 	}
-	return expr, nil, nil
+	return expr, args, nil
 }
 
 func (d dialect) compileAggregateSelect(item oro.SelectExpr) (string, error) {
@@ -652,15 +658,25 @@ func (d dialect) compileWhere(conditions []oro.Condition) (string, []any, error)
 		case "is null", "is not null":
 			parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+op)
 		default:
+			if !oro.IsSafeConditionOperator(condition.Op) {
+				return "", nil, &oro.Error{Op: "sqlite.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+			}
 			if source, ok := condition.Value.(*oro.SourceAST); ok {
 				sql, sourceArgs, err := d.compileScalarSource(*source, "sqlite.where")
 				if err != nil {
 					return "", nil, err
 				}
-				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+condition.Op+" "+sql)
+				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+oro.NormalizeConditionOperator(condition.Op)+" "+sql)
 				args = append(args, sourceArgs...)
 			} else {
-				parts = append(parts, prefix+d.QuoteIdent(condition.Field)+" "+condition.Op+" ?")
+				sql := prefix + d.QuoteIdent(condition.Field) + " " + oro.NormalizeConditionOperator(condition.Op) + " ?"
+				if condition.Escape != "" {
+					if condition.Escape != `\` {
+						return "", nil, &oro.Error{Op: "sqlite.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+					}
+					sql += " escape '\\'"
+				}
+				parts = append(parts, sql)
 				args = append(args, condition.Value)
 			}
 		}
@@ -673,7 +689,10 @@ func (d dialect) compileColumnCondition(condition oro.Condition) (string, error)
 	if !ok || columnCondition.Right == "" {
 		return "", &oro.Error{Op: "sqlite.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
 	}
-	return d.QuoteIdent(condition.Field) + " " + columnCondition.Op + " " + d.QuoteIdent(columnCondition.Right), nil
+	if !oro.IsSafeColumnOperator(columnCondition.Op) {
+		return "", &oro.Error{Op: "sqlite.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+	}
+	return d.QuoteIdent(condition.Field) + " " + oro.NormalizeConditionOperator(columnCondition.Op) + " " + d.QuoteIdent(columnCondition.Right), nil
 }
 
 func (d dialect) compileInCondition(condition oro.Condition) (string, []any, error) {
@@ -689,8 +708,14 @@ func (d dialect) compileInCondition(condition oro.Condition) (string, []any, err
 
 func (d dialect) compileInValuesCondition(condition oro.Condition, not bool) (string, []any, error) {
 	values, ok := condition.Value.([]any)
-	if !ok || len(values) == 0 {
+	if !ok {
 		return "", nil, &oro.Error{Op: "sqlite.where", Kind: oro.ErrInvalidArgument, Field: condition.Field}
+	}
+	if len(values) == 0 {
+		if not {
+			return "1 = 1", nil, nil
+		}
+		return "1 = 0", nil, nil
 	}
 	placeholders := make([]string, len(values))
 	for index := range placeholders {
@@ -770,6 +795,8 @@ func (d dialect) compileJSONCondition(condition oro.Condition) (string, []any, e
 		return "json_type(" + d.QuoteIdent(jsonCondition.Field) + ", ?) is not null", []any{path}, nil
 	case "contains":
 		return "", nil, &oro.Error{Op: "sqlite.json", Kind: oro.ErrUnsupported}
+	case "like":
+		return expr + " like ?", []any{path, jsonCondition.Value}, nil
 	default:
 		return "", nil, &oro.Error{Op: "sqlite.json", Kind: oro.ErrInvalidArgument}
 	}
@@ -860,12 +887,7 @@ func compileDefault(defaultValue *oro.DefaultSpec) string {
 }
 
 func isIntegerType(typ string) bool {
-	switch typ {
-	case "uint", "uint64", "uint32", "int", "int64", "int32":
-		return true
-	default:
-		return strings.Contains(typ, "int")
-	}
+	return strings.Contains(typ, "int")
 }
 
 func (d dialect) compileCreateIndex(table string, index oro.IndexSpec) ([]oro.CompiledSQL, error) {

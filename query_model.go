@@ -346,7 +346,7 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 	if query.allShards && len(query.spec.Order) == 0 {
 		return nil, &Error{Op: "first", Kind: ErrOrderRequired}
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 }
 
 func (query *ModelQuery[T]) Get(ctx context.Context) ([]*T, error) {
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -466,24 +466,14 @@ func queryModelAllShardRows(ctx context.Context, db *DB, spec QuerySpec) ([]Map,
 	if !ok {
 		return nil, &Error{Op: "shard", Kind: ErrShardNotFound, Model: spec.ModelName, Field: spec.ShardGroup}
 	}
-	rows := []Map{}
-	for _, connection := range config.Connections {
-		nextSpec := cloneQuerySpec(spec)
-		nextSpec.Connection = connection
-		nextRows, err := queryRowsPrepared(ctx, db, nextSpec)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, nextRows...)
-	}
-	return rows, nil
+	return fanOutShardRows(ctx, db, spec, config.Connections)
 }
 
 func (query *ModelQuery[T]) Stream(ctx context.Context) (Stream[*T], error) {
 	if query.allShards {
 		return nil, &Error{Op: "stream", Kind: ErrUnsupported}
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +506,7 @@ func (query *ModelQuery[T]) Chunk(ctx context.Context, size int, fn func([]*T) e
 	if err := chunkSpecError(query.spec); err != nil {
 		return err
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -577,7 +567,7 @@ func (query *ModelQuery[T]) Create(ctx context.Context, model *T, options ...Wri
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
 	}
-	spec, schema, err := modelInsertSpec(query)
+	spec, schema, err := modelInsertSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +578,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if query.allShards {
 		return nil, &Error{Op: "upsert", Kind: ErrShardRequired}
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +591,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 		return nil, err
 	}
 	writeDB := withSpecConnection(query.db, spec)
-	if err := validateShardWriteValuesForDB(writeDB, schema, query.shard, row); err != nil {
+	if err := validateShardWriteValuesForDB(ctx, writeDB, schema, query.shard, row); err != nil {
 		return nil, err
 	}
 	conflict, err := convertModelConflict(schema, writeOptions.conflict)
@@ -633,7 +623,7 @@ func (query *ModelQuery[T]) Update(ctx context.Context, values Map, options ...W
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "update", Kind: ErrUnsafeUpdate}
 	}
-	spec, schema, err := modelWriteSpec(query)
+	spec, schema, err := modelWriteSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -652,7 +642,7 @@ func (query *ModelQuery[T]) Delete(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "delete", Kind: ErrUnsafeDelete}
 	}
-	spec, schema, err := modelWriteSpec(query)
+	spec, schema, err := modelWriteSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -670,7 +660,7 @@ func (query *ModelQuery[T]) ForceDelete(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "delete", Kind: ErrUnsafeDelete}
 	}
-	spec, schema, err := modelWriteSpec(query)
+	spec, schema, err := modelWriteSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -684,7 +674,7 @@ func (query *ModelQuery[T]) Restore(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "restore", Kind: ErrUnsafeUpdate}
 	}
-	spec, schema, err := modelWriteSpec(query)
+	spec, schema, err := modelWriteSpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -706,7 +696,7 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 	if len(models) == 0 {
 		return &CreateResult{}, nil
 	}
-	spec, schema, err := modelInsertSpec(query)
+	spec, schema, err := modelInsertSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +745,7 @@ func (query *ModelQuery[T]) CreateManyResult(ctx context.Context, models []*T, o
 	if len(models) == 0 {
 		return []*T{}, nil
 	}
-	spec, schema, err := modelInsertSpec(query)
+	spec, schema, err := modelInsertSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -804,7 +794,7 @@ func (query *ModelQuery[T]) createManyBatch(ctx context.Context, spec QuerySpec,
 			if err != nil {
 				return err
 			}
-			if err := validateShardWriteValuesForDB(tx, schema, txQuery.shard, row); err != nil {
+			if err := validateShardWriteValuesForDB(ctx, tx, schema, txQuery.shard, row); err != nil {
 				return err
 			}
 			rows = append(rows, row)
@@ -1022,7 +1012,7 @@ func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options
 }
 
 func (query *ModelQuery[T]) Find(ctx context.Context, id any) (*T, error) {
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -1047,15 +1037,15 @@ func (query *ModelQuery[T]) Find(ctx context.Context, id any) (*T, error) {
 }
 
 func (query *ModelQuery[T]) Count(ctx context.Context) (int64, error) {
-	spec, _, err := modelQuerySpec(query)
+	spec, _, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return 0, err
 	}
 	if query.allShards {
-		spec.Select = []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}}
-		spec.Order = nil
-		spec.Limit = nil
-		spec.Offset = nil
+		spec, err = countQuerySpec(spec)
+		if err != nil {
+			return 0, err
+		}
 		rows, err := queryModelAllShardRows(ctx, query.db, spec)
 		if err != nil {
 			return 0, err
@@ -1070,10 +1060,10 @@ func (query *ModelQuery[T]) Count(ctx context.Context) (int64, error) {
 		}
 		return total, nil
 	}
-	spec.Select = []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}}
-	spec.Order = nil
-	spec.Limit = nil
-	spec.Offset = nil
+	spec, err = countQuerySpec(spec)
+	if err != nil {
+		return 0, err
+	}
 
 	row, err := queryFirstRowPrepared(ctx, query.db, spec)
 	if err != nil || row == nil {
@@ -1083,7 +1073,7 @@ func (query *ModelQuery[T]) Count(ctx context.Context) (int64, error) {
 }
 
 func (query *ModelQuery[T]) Exists(ctx context.Context) (bool, error) {
-	spec, _, err := modelQuerySpec(query)
+	spec, _, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return false, err
 	}
@@ -1113,7 +1103,7 @@ func (query *ModelQuery[T]) Exists(ctx context.Context) (bool, error) {
 }
 
 func (query *ModelQuery[T]) Sum(ctx context.Context, field string) (Decimal, error) {
-	spec, schema, err := aggregateModelSpec(query, field)
+	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
 		return Decimal("0"), err
 	}
@@ -1121,7 +1111,7 @@ func (query *ModelQuery[T]) Sum(ctx context.Context, field string) (Decimal, err
 }
 
 func (query *ModelQuery[T]) Avg(ctx context.Context, field string) (Decimal, error) {
-	spec, schema, err := aggregateModelSpec(query, field)
+	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
 		return Decimal("0"), err
 	}
@@ -1129,7 +1119,7 @@ func (query *ModelQuery[T]) Avg(ctx context.Context, field string) (Decimal, err
 }
 
 func (query *ModelQuery[T]) Min[V any](ctx context.Context, field string) (Null[V], error) {
-	spec, schema, err := aggregateModelSpec(query, field)
+	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
 		return NullZero[V](), err
 	}
@@ -1137,7 +1127,7 @@ func (query *ModelQuery[T]) Min[V any](ctx context.Context, field string) (Null[
 }
 
 func (query *ModelQuery[T]) Max[V any](ctx context.Context, field string) (Null[V], error) {
-	spec, schema, err := aggregateModelSpec(query, field)
+	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
 		return NullZero[V](), err
 	}
@@ -1155,7 +1145,7 @@ func (query *ModelQuery[T]) createInTransaction(ctx context.Context, spec QueryS
 }
 
 func (query *ModelQuery[T]) create(ctx context.Context, model *T, options ...WriteOption) (*T, error) {
-	spec, schema, err := modelInsertSpec(query)
+	spec, schema, err := modelInsertSpec(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -1187,7 +1177,7 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	if err != nil {
 		return nil, err
 	}
-	if err := validateShardWriteValuesForDB(query.db, schema, query.shard, row); err != nil {
+	if err := validateShardWriteValuesForDB(ctx, query.db, schema, query.shard, row); err != nil {
 		return nil, err
 	}
 	if useHooks {
@@ -1453,6 +1443,7 @@ func modelEvent(db *DB, schema *ModelSchema, model any, operation string) *Event
 		ModelName: schema.Name,
 		Table:     schema.Table,
 		Model:     model,
+		Schema:    schema,
 		Operation: operation,
 	}
 }

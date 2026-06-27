@@ -121,9 +121,13 @@ func (serializer reflectSerializer) serializeStruct(value reflect.Value, opts Se
 		}
 		if !field.IsExported() || field.Anonymous {
 			if field.Anonymous && field.Type == reflect.TypeOf(Model{}) {
-				serializer.serializeBaseModel(value.FieldByIndex(field.Index), output, opts, seen)
+				if fieldValue, ok := fieldByIndexReadSafe(value, field.Index); ok {
+					serializer.serializeBaseModel(fieldValue, output, opts, seen)
+				}
 			} else if field.Anonymous && isFlattenableExtensionStruct(field.Type) {
-				serializer.serializeEmbeddedFields(value.FieldByIndex(field.Index), output, opts, seen)
+				if fieldValue, ok := fieldByIndexReadSafe(value, field.Index); ok {
+					serializer.serializeEmbeddedFields(fieldValue, output, opts, seen)
+				}
 			}
 			continue
 		}
@@ -136,7 +140,10 @@ func (serializer reflectSerializer) serializeStruct(value reflect.Value, opts Se
 				continue
 			}
 		}
-		fieldValue := value.FieldByIndex(field.Index)
+		fieldValue, ok := fieldByIndexReadSafe(value, field.Index)
+		if !ok {
+			continue
+		}
 		if isOmitEmpty(field) && fieldValue.IsZero() {
 			continue
 		}
@@ -189,7 +196,10 @@ func (serializer reflectSerializer) serializeEmbeddedFields(value reflect.Value,
 		if skip {
 			continue
 		}
-		fieldValue := value.FieldByIndex(field.Index)
+		fieldValue, ok := fieldByIndexReadSafe(value, field.Index)
+		if !ok {
+			continue
+		}
 		if isOmitEmpty(field) && fieldValue.IsZero() {
 			continue
 		}

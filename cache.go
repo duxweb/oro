@@ -86,7 +86,7 @@ func cachedRows(ctx context.Context, db *DB, spec QuerySpec, compiled CompiledSQ
 	if !cacheEnabled(db, spec) {
 		return load()
 	}
-	key, err := cacheKey(db, spec, compiled)
+	key, err := cacheKey(ctx, db, spec, compiled)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +151,11 @@ func decodeCachedRows(value []byte) ([]Map, error) {
 	return rows, nil
 }
 
-func cacheKey(db *DB, spec QuerySpec, compiled CompiledSQL) (string, error) {
+func cacheKey(ctx context.Context, db *DB, spec QuerySpec, compiled CompiledSQL) (string, error) {
 	if spec.Cache.Key != "" {
 		return spec.Cache.Key, nil
 	}
-	extensionValues, err := extensionCacheKeyValues(context.Background(), db)
+	extensionValues, err := extensionCacheKeyValues(ctx, db)
 	if err != nil {
 		return "", &Error{Op: "cache", Kind: ErrInvalidArgument, Cause: err}
 	}

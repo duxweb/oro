@@ -61,7 +61,10 @@ func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
 			if len(field.Index) == 0 {
 				continue
 			}
-			fieldValue := structValue.FieldByIndex(field.Index)
+			fieldValue, ok := fieldByIndexSafe(structValue, field.Index)
+			if !ok {
+				continue
+			}
 			if !fieldValue.IsValid() || !fieldValue.CanSet() {
 				continue
 			}
@@ -80,7 +83,10 @@ func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
 		if !ok {
 			continue
 		}
-		fieldValue := structValue.FieldByIndex(structField.Index)
+		fieldValue, ok := fieldByIndexSafe(structValue, structField.Index)
+		if !ok {
+			continue
+		}
 		if !fieldValue.CanSet() {
 			continue
 		}

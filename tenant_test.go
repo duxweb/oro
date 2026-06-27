@@ -170,6 +170,103 @@ func TestTenantSharedTableScopesCRUD(t *testing.T) {
 	}
 }
 
+func TestTenantScopesRegisteredTableQueries(t *testing.T) {
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID", "AppID"))},
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := db.Register(tenantOrder{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	tenantOne := tenant.Use(db, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
+	if _, err := tenantOne.Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "A101", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).
+		Use[tenantOrder]().
+		Create(ctx, &tenantOrder{Code: "B101", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := tenantOne.Table("tenant_orders").OrderBy("code").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["code"] != "A101" {
+		t.Fatalf("unexpected tenant table rows %#v", rows)
+	}
+
+	stream, err := tenantOne.Table("tenant_orders").OrderBy("code").Stream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	streamed := []oro.Map{}
+	for stream.Next() {
+		streamed = append(streamed, stream.Value())
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(streamed) != 1 || streamed[0]["code"] != "A101" {
+		t.Fatalf("unexpected tenant table stream rows %#v", streamed)
+	}
+}
+
+func TestTenantContextValuesScopeModelQueries(t *testing.T) {
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Extensions: []oro.Extension{tenant.Extension(tenant.Fields("TenantID", "AppID"))},
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := db.Register(tenantOrder{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "CTX1", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.Use(db, oro.Map{"TenantID": uint64(2), "AppID": uint64(10)}).Use[tenantOrder]().Create(ctx, &tenantOrder{Code: "CTX2", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
+
+	scopedCtx := tenant.With(ctx, oro.Map{"TenantID": uint64(1), "AppID": uint64(10)})
+	rows, err := db.Use[tenantOrder]().Get(scopedCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Code != "CTX1" {
+		t.Fatalf("unexpected context tenant rows %#v", rows)
+	}
+}
+
 func TestTenantModelOverrideAndNoTenant(t *testing.T) {
 	ctx := context.Background()
 	db, err := oro.Open(oro.Config{

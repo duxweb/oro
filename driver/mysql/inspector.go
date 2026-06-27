@@ -87,7 +87,7 @@ func (inspector inspector) Table(ctx context.Context, name string) (*oro.TableSp
 
 func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.IndexSpec, error) {
 	rows, err := inspector.db.QueryContext(ctx, `
-		select index_name, non_unique, column_name
+		select index_name, non_unique, column_name, index_type
 		from information_schema.statistics
 		where table_schema = database()
 			and table_name = ?
@@ -104,7 +104,8 @@ func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.Ind
 		var name string
 		var nonUnique int
 		var columnName string
-		if err := rows.Scan(&name, &nonUnique, &columnName); err != nil {
+		var indexType string
+		if err := rows.Scan(&name, &nonUnique, &columnName, &indexType); err != nil {
 			return nil, err
 		}
 		if name == "PRIMARY" {
@@ -112,7 +113,7 @@ func (inspector inspector) Indexes(ctx context.Context, table string) ([]oro.Ind
 		}
 		index := indexByName[name]
 		if index == nil {
-			index = &oro.IndexSpec{Name: name, Unique: nonUnique == 0}
+			index = &oro.IndexSpec{Name: name, Unique: nonUnique == 0, FullText: strings.EqualFold(indexType, "FULLTEXT")}
 			indexByName[name] = index
 			order = append(order, name)
 		}

@@ -309,3 +309,15 @@ func TestRegisterUnknownModelConnection(t *testing.T) {
 		t.Fatalf("expected unknown connection, got %v", err)
 	}
 }
+
+func TestChunkMapsForCreateParams(t *testing.T) {
+	values := []Map{
+		{"a": 1, "b": 2},
+		{"a": 3, "b": 4},
+		{"a": 5, "b": 6},
+	}
+	chunks := chunkMapsForCreateParams(values, 100, 4)
+	if len(chunks) != 2 || len(chunks[0]) != 2 || len(chunks[1]) != 1 {
+		t.Fatalf("unexpected chunks %#v", chunks)
+	}
+}

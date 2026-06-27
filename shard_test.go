@@ -189,20 +189,37 @@ func TestShardAllShardsQueries(t *testing.T) {
 	if _, err := db.Use[shardOrder]().Shard(oro.Map{"TenantID": uint64(2)}).Create(ctx, &shardOrder{TenantID: 2, Code: "B001", Status: "new"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Use[shardOrder]().Shard(oro.Map{"TenantID": uint64(3)}).Create(ctx, &shardOrder{TenantID: 3, Code: "AAA", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
 
 	rows, err := db.Use[shardOrder]().AllShards().OrderBy("Code").Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("expected two all shard rows, got %#v", rows)
+	if len(rows) != 3 || rows[0].Code != "A001" || rows[1].Code != "AAA" || rows[2].Code != "B001" {
+		t.Fatalf("unexpected all shard global order %#v", rows)
+	}
+	first, err := db.Use[shardOrder]().AllShards().OrderBy("Code").First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil || first.Code != "A001" {
+		t.Fatalf("expected global first A001, got %#v", first)
+	}
+	paged, err := db.Use[shardOrder]().AllShards().OrderBy("Code").Offset(1).Limit(1).Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paged) != 1 || paged[0].Code != "AAA" {
+		t.Fatalf("unexpected global page %#v", paged)
 	}
 	count, err := db.Use[shardOrder]().AllShards().Count(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("expected all shard count 2, got %d", count)
+	if count != 3 {
+		t.Fatalf("expected all shard count 3, got %d", count)
 	}
 	exists, err := db.Use[shardOrder]().AllShards().Where("Code", "A001").Exists(ctx)
 	if err != nil {
@@ -220,19 +237,22 @@ func TestShardAllShardsQueries(t *testing.T) {
 func TestShardTableQuery(t *testing.T) {
 	db, ctx := newShardTestDB(t)
 
-	row, err := db.Table("shard_orders").Shard("orders", oro.Map{"TenantID": uint64(1)}).Create(ctx, oro.Map{"tenant_id": uint64(1), "code": "TBL1", "status": "new"})
+	row, err := db.Table("shard_orders").Shard("orders", oro.Map{"TenantID": uint64(1)}).Create(ctx, oro.Map{"tenant_id": uint64(1), "code": "TBL2", "status": "new"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row["code"] != "TBL1" {
+	if row["code"] != "TBL2" {
 		t.Fatalf("unexpected table shard row %#v", row)
 	}
-	rows, err := db.Table("shard_orders").AllShards("orders").Get(ctx)
+	if _, err := db.Table("shard_orders").Shard("orders", oro.Map{"TenantID": uint64(2)}).Create(ctx, oro.Map{"tenant_id": uint64(2), "code": "TBL1", "status": "new"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Table("shard_orders").AllShards("orders").OrderBy("code").Limit(1).Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected table all shard row, got %#v", rows)
+	if len(rows) != 1 || rows[0]["code"] != "TBL1" {
+		t.Fatalf("expected globally sorted table shard row, got %#v", rows)
 	}
 }
 

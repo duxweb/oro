@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/duxweb/oro"
+	"github.com/duxweb/oro/internal/reflectx"
 )
 
 const extensionName = "translation"
@@ -173,9 +174,7 @@ func (query *Query[T]) WhereTrans(field string, value any) *Query[T] {
 }
 
 func (query *Query[T]) WhereTransLike(field string, value any) *Query[T] {
-	clone := *query
-	clone.query = clone.base().Where(oro.Condition{Op: "invalid", Value: &oro.Error{Op: "translation.where", Kind: oro.ErrUnsupported, Field: field}})
-	return &clone
+	return query.transCondition(field, "like", value)
 }
 
 func (query *Query[T]) transCondition(field string, op string, value any) *Query[T] {
@@ -191,7 +190,9 @@ func (query *Query[T]) transCondition(field string, op string, value any) *Query
 		return &clone
 	}
 	condition := oro.JSON(query.config.field()).Path(locale, field)
-	_ = op
+	if op == "like" {
+		return query.clone(query.base().Where(condition.Like(value)))
+	}
 	return query.clone(query.base().Where(condition.Eq(value)))
 }
 
@@ -509,7 +510,10 @@ func (query *Query[T]) translationValuesFromModel(model any) (oro.Map, error) {
 		if !field.IsExported() || field.Anonymous || !query.isTranslatedField(field.Name) {
 			continue
 		}
-		fieldValue := structValue.FieldByIndex(field.Index)
+		fieldValue, ok := reflectx.FieldByIndex(structValue, field.Index)
+		if !ok {
+			continue
+		}
 		if !fieldValue.IsValid() || !fieldValue.CanInterface() || fieldValue.IsZero() {
 			continue
 		}
@@ -676,14 +680,22 @@ func applyTranslations(model any, translations Values, locale string, fallback s
 			continue
 		}
 		if value, ok := translatedValue(translations, locale, field.Name); ok {
-			if err := assignFieldValue(structValue.FieldByIndex(field.Index), value); err != nil {
+			fieldValue, ok := reflectx.FieldByIndexAlloc(structValue, field.Index)
+			if !ok {
+				continue
+			}
+			if err := assignFieldValue(fieldValue, value); err != nil {
 				return err
 			}
 			continue
 		}
 		if fallback != "" {
 			if value, ok := translatedValue(translations, fallback, field.Name); ok {
-				if err := assignFieldValue(structValue.FieldByIndex(field.Index), value); err != nil {
+				fieldValue, ok := reflectx.FieldByIndexAlloc(structValue, field.Index)
+				if !ok {
+					continue
+				}
+				if err := assignFieldValue(fieldValue, value); err != nil {
 					return err
 				}
 			}

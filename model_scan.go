@@ -206,7 +206,7 @@ func openModelRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) (*modelR
 	if err := validateQueryJoins(conn, spec.Joins); err != nil {
 		return nil, err
 	}
-	if err := resolveQuerySources(db, &spec); err != nil {
+	if err := resolveQuerySources(ctx, db, &spec); err != nil {
 		return nil, err
 	}
 	tableNames(db).ApplyQuery(&spec)
@@ -422,7 +422,10 @@ func scanStructRow(rows *modelRows, dest any, schema *ModelSchema, mappers []mod
 		if len(mapper.fieldIndex) == 0 {
 			continue
 		}
-		fieldValue := structValue.FieldByIndex(mapper.fieldIndex)
+		fieldValue, ok := fieldByIndexSafe(structValue, mapper.fieldIndex)
+		if !ok {
+			continue
+		}
 		if !fieldValue.IsValid() || !fieldValue.CanSet() {
 			continue
 		}

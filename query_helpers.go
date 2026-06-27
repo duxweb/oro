@@ -14,6 +14,7 @@ import (
 const defaultChunkSize = 1000
 const defaultResultCapacity = 8
 const defaultCreateBatchSize = 1000
+const defaultMaxBatchParams = 30000
 
 type AggregateExpr struct {
 	Func  string
@@ -68,7 +69,34 @@ func createBatchSize(config Config, options writeOptions) int {
 }
 
 func chunkMapsForCreate(values []Map, size int) [][]Map {
+	return chunkMapsForCreateParams(values, size, defaultMaxBatchParams)
+}
+
+// paramCappedBatchSize lowers size so that size*columns stays within maxParams,
+// keeping batch inserts under the driver's bind-parameter limit. A non-positive
+// maxParams or columns leaves size unchanged.
+func paramCappedBatchSize(columns int, size int, maxParams int) int {
+	if maxParams <= 0 || columns <= 0 {
+		return size
+	}
+	paramRows := maxParams / columns
+	if paramRows <= 0 {
+		paramRows = 1
+	}
+	if paramRows < size {
+		return paramRows
+	}
+	return size
+}
+
+func chunkMapsForCreateParams(values []Map, size int, maxParams int) [][]Map {
 	if size <= 0 || size >= len(values) {
+		size = len(values)
+	}
+	if len(values) > 0 {
+		size = paramCappedBatchSize(len(values[0]), size, maxParams)
+	}
+	if size >= len(values) {
 		return [][]Map{values}
 	}
 	chunks := make([][]Map, 0, (len(values)+size-1)/size)
@@ -183,15 +211,8 @@ func (expr AggregateExpr) As(alias string) AggregateExpr {
 	return expr
 }
 
-func aggregateSQL(fn string, field string) string {
-	if field == "*" {
-		return fmt.Sprintf("%s(*)", fn)
-	}
-	return fmt.Sprintf("%s(%s)", fn, field)
-}
-
 func aggregateDecimal(ctx context.Context, db *DB, spec QuerySpec, fn string, field string) (Decimal, error) {
-	spec.Select = []SelectExpr{{Expr: aggregateSQL(fn, field), Alias: "value", Raw: true}}
+	spec.Select = []SelectExpr{{Expr: "__oro_aggregate__", Alias: "value", Args: []any{AggregateExpr{Func: fn, Field: field}}}}
 	spec.Order = nil
 	spec.Limit = nil
 	spec.Offset = nil
@@ -210,7 +231,7 @@ func aggregateDecimal(ctx context.Context, db *DB, spec QuerySpec, fn string, fi
 }
 
 func aggregateNull[T any](ctx context.Context, db *DB, spec QuerySpec, fn string, field string) (Null[T], error) {
-	spec.Select = []SelectExpr{{Expr: aggregateSQL(fn, field), Alias: "value", Raw: true}}
+	spec.Select = []SelectExpr{{Expr: "__oro_aggregate__", Alias: "value", Args: []any{AggregateExpr{Func: fn, Field: field}}}}
 	spec.Order = nil
 	spec.Limit = nil
 	spec.Offset = nil
@@ -426,10 +447,13 @@ func connectionForQuery(db *DB, connectionName string) (*Connection, error) {
 	if db == nil || db.runtime == nil || db.runtime.Conns == nil {
 		return nil, &Error{Op: "connection", Kind: ErrInvalidArgument}
 	}
+	if db.session.tx != nil && db.session.tx.closed {
+		return nil, &Error{Op: "connection", Kind: ErrClosed}
+	}
 	if connectionName == "" {
 		connectionName = db.session.connection
 	}
-	if db.session.tx != nil && !db.session.tx.closed && connectionName != db.session.tx.connection {
+	if db.session.tx != nil && connectionName != db.session.tx.connection {
 		return nil, &Error{Op: "connection", Kind: ErrTransactionConnection, Field: connectionName}
 	}
 	return db.runtime.Conns.Get(connectionName)
@@ -438,6 +462,9 @@ func connectionForQuery(db *DB, connectionName string) (*Connection, error) {
 func execForQuery(db *DB, conn *Connection) ExecContext {
 	if db != nil && db.session.tx != nil && !db.session.tx.closed && db.session.tx.connection == conn.Name {
 		return db.session.tx.tx
+	}
+	if db != nil && db.session.tx != nil && db.session.tx.closed {
+		return nil
 	}
 	return conn.Primary
 }
@@ -531,10 +558,7 @@ func queryRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) ([]Map, erro
 	if spec.SelectErr != nil {
 		return nil, spec.SelectErr
 	}
-	if err := applyConnectionExtensions(ctx, db, &spec); err != nil {
-		return nil, err
-	}
-	if err := applyQueryExtensions(ctx, db, &spec); err != nil {
+	if err := finalizeReadSpec(ctx, db, &spec); err != nil {
 		return nil, err
 	}
 	conn, err := connectionForQuery(db, spec.Connection)
@@ -547,7 +571,7 @@ func queryRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) ([]Map, erro
 	if err := validateQueryJoins(conn, spec.Joins); err != nil {
 		return nil, err
 	}
-	if err := resolveQuerySources(db, &spec); err != nil {
+	if err := resolveQuerySources(ctx, db, &spec); err != nil {
 		return nil, err
 	}
 	tableNames(db).ApplyQuery(&spec)
@@ -568,77 +592,77 @@ func queryRowsPrepared(ctx context.Context, db *DB, spec QuerySpec) ([]Map, erro
 	})
 }
 
-func resolveQuerySources(db *DB, spec *QuerySpec) error {
-	if err := resolveSource(db, &spec.From); err != nil {
+func resolveQuerySources(ctx context.Context, db *DB, spec *QuerySpec) error {
+	if err := resolveSource(ctx, db, &spec.From); err != nil {
 		return err
 	}
 	for index := range spec.Select {
-		if err := resolveSelectSource(db, &spec.Select[index]); err != nil {
+		if err := resolveSelectSource(ctx, db, &spec.Select[index]); err != nil {
 			return err
 		}
 	}
-	if err := resolveConditionSources(db, spec.Where); err != nil {
+	if err := resolveConditionSources(ctx, db, spec.Where); err != nil {
 		return err
 	}
-	if err := resolveConditionSources(db, spec.Having); err != nil {
+	if err := resolveConditionSources(ctx, db, spec.Having); err != nil {
 		return err
 	}
 	for index := range spec.Joins {
 		if spec.Joins[index].Err != nil {
 			return spec.Joins[index].Err
 		}
-		if err := resolveSource(db, &spec.Joins[index].Source); err != nil {
+		if err := resolveSource(ctx, db, &spec.Joins[index].Source); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func resolveSelectSource(db *DB, item *SelectExpr) error {
+func resolveSelectSource(ctx context.Context, db *DB, item *SelectExpr) error {
 	if item == nil || item.Source == nil {
 		if item != nil && item.Expr == "__oro_relation_exists__" && len(item.Args) == 1 {
 			switch source := item.Args[0].(type) {
 			case SourceAST:
-				if err := resolveSource(db, &source); err != nil {
+				if err := resolveSource(ctx, db, &source); err != nil {
 					return err
 				}
 				item.Args[0] = source
 			case *SourceAST:
-				if err := resolveSource(db, source); err != nil {
+				if err := resolveSource(ctx, db, source); err != nil {
 					return err
 				}
 			}
 		}
 		return nil
 	}
-	return resolveSource(db, item.Source)
+	return resolveSource(ctx, db, item.Source)
 }
 
-func resolveConditionSources(db *DB, conditions []Condition) error {
+func resolveConditionSources(ctx context.Context, db *DB, conditions []Condition) error {
 	for index := range conditions {
-		if err := resolveConditionSources(db, conditions[index].Conditions); err != nil {
+		if err := resolveConditionSources(ctx, db, conditions[index].Conditions); err != nil {
 			return err
 		}
 		switch value := conditions[index].Value.(type) {
 		case CountCondition:
 			if value.Source != nil {
-				if err := resolveSource(db, value.Source); err != nil {
+				if err := resolveSource(ctx, db, value.Source); err != nil {
 					return err
 				}
 				conditions[index].Value = value
 			}
 		case *SourceAST:
-			if err := resolveSource(db, value); err != nil {
+			if err := resolveSource(ctx, db, value); err != nil {
 				return err
 			}
 		case SourceAST:
-			if err := resolveSource(db, &value); err != nil {
+			if err := resolveSource(ctx, db, &value); err != nil {
 				return err
 			}
 			conditions[index].Value = value
 		case QuerySource:
 			source := value.sourceAST()
-			if err := resolveSource(db, &source); err != nil {
+			if err := resolveSource(ctx, db, &source); err != nil {
 				return err
 			}
 			conditions[index].Value = &source
@@ -647,11 +671,11 @@ func resolveConditionSources(db *DB, conditions []Condition) error {
 	return nil
 }
 
-func resolveSource(db *DB, source *SourceAST) error {
+func resolveSource(ctx context.Context, db *DB, source *SourceAST) error {
 	if source == nil || source.PendingQuery() == nil {
 		return nil
 	}
-	resolved, err := compileQuerySource(db, source.PendingQuery())
+	resolved, err := compileQuerySource(ctx, db, source.PendingQuery())
 	if err != nil {
 		return err
 	}
@@ -659,11 +683,14 @@ func resolveSource(db *DB, source *SourceAST) error {
 	return nil
 }
 
-func compileQuerySource(db *DB, query any) (SourceAST, error) {
+func compileQuerySource(ctx context.Context, db *DB, query any) (SourceAST, error) {
 	switch typedQuery := query.(type) {
 	case *TableQuery:
-		spec := cloneQuerySpec(typedQuery.spec)
-		if err := resolveQuerySources(db, &spec); err != nil {
+		spec, err := tableShardSpec(ctx, typedQuery)
+		if err != nil {
+			return SourceAST{}, err
+		}
+		if err := resolveQuerySources(ctx, db, &spec); err != nil {
 			return SourceAST{}, err
 		}
 		tableNames(db).ApplyQuery(&spec)
@@ -679,22 +706,22 @@ func compileQuerySource(db *DB, query any) (SourceAST, error) {
 	case *RawQuery:
 		return SourceAST{Raw: &typedQuery.raw}, nil
 	default:
-		return compileModelQuerySource(db, query)
+		return compileModelQuerySource(ctx, db, query)
 	}
 }
 
-func compileModelQuerySource(db *DB, query any) (SourceAST, error) {
+func compileModelQuerySource(ctx context.Context, db *DB, query any) (SourceAST, error) {
 	modelQuery, ok := query.(interface {
-		querySourceSpec() (QuerySpec, error)
+		querySourceSpec(context.Context) (QuerySpec, error)
 	})
 	if !ok {
 		return SourceAST{}, &Error{Op: "source", Kind: ErrInvalidArgument}
 	}
-	spec, err := modelQuery.querySourceSpec()
+	spec, err := modelQuery.querySourceSpec(ctx)
 	if err != nil {
 		return SourceAST{}, err
 	}
-	if err := resolveQuerySources(db, &spec); err != nil {
+	if err := resolveQuerySources(ctx, db, &spec); err != nil {
 		return SourceAST{}, err
 	}
 	tableNames(db).ApplyQuery(&spec)
@@ -709,8 +736,8 @@ func compileModelQuerySource(db *DB, query any) (SourceAST, error) {
 	return SourceAST{Query: &selectAST}, nil
 }
 
-func (query *ModelQuery[T]) querySourceSpec() (QuerySpec, error) {
-	spec, _, err := modelQuerySpec(query)
+func (query *ModelQuery[T]) querySourceSpec(ctx context.Context) (QuerySpec, error) {
+	spec, _, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return QuerySpec{}, err
 	}
@@ -731,6 +758,21 @@ func validateQueryJoins(conn *Connection, joins []JoinAST) error {
 	for _, join := range joins {
 		if join.Type == JoinFull && !conn.Dialect.Capabilities().FullJoin {
 			return &Error{Op: "join", Kind: ErrUnsupported}
+		}
+		if err := validateJoinConditions(join.Conditions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateJoinConditions(conditions []JoinCondition) error {
+	for _, condition := range conditions {
+		if condition.Err != nil {
+			return condition.Err
+		}
+		if err := validateJoinConditions(condition.Group); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -789,6 +831,51 @@ func queryFirstRowPrepared(ctx context.Context, db *DB, spec QuerySpec) (Map, er
 		return nil, err
 	}
 	return rows[0], nil
+}
+
+func countQuerySpec(spec QuerySpec) (QuerySpec, error) {
+	if len(spec.Group) == 0 {
+		spec.Select = []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}}
+		spec.Order = nil
+		spec.Limit = nil
+		spec.Offset = nil
+		return spec, nil
+	}
+	source := cloneQuerySpec(spec)
+	source.Order = nil
+	source.Limit = nil
+	source.Offset = nil
+	source.With = nil
+	source.Cache = CacheSpec{}
+	sourceAST, err := querySpecSelectAST(source)
+	if err != nil {
+		return QuerySpec{}, err
+	}
+	return QuerySpec{
+		Connection: spec.Connection,
+		ShardGroup: spec.ShardGroup,
+		From: SourceAST{
+			Query: sourceAST,
+			Alias: "oro_count_groups",
+		},
+		Select:     []SelectExpr{{Expr: "count(*)", Alias: "total", Raw: true}},
+		SkipEvents: spec.SkipEvents,
+		UsePrimary: spec.UsePrimary,
+		Cache:      spec.Cache,
+		Timeout:    spec.Timeout,
+	}, nil
+}
+
+func querySpecSelectAST(spec QuerySpec) (*SelectAST, error) {
+	statement, err := (noopQueryPlanner{}).BuildSelect(spec)
+	if err != nil {
+		return nil, err
+	}
+	selectAST, ok := statement.(SelectAST)
+	if !ok {
+		return nil, &Error{Op: "count", Kind: ErrInvalidQuery}
+	}
+	return &selectAST, nil
 }
 
 func execRawRows(ctx context.Context, db *DB, raw RawSpec, cache CacheSpec, timeout time.Duration) ([]Map, error) {
@@ -1409,7 +1496,7 @@ func schemaForModel[T any](db *DB) (*ModelSchema, error) {
 	return schema, nil
 }
 
-func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
+func modelQuerySpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
 	schema, err := schemaForModel[T](query.db)
 	if err != nil {
 		return QuerySpec{}, nil, err
@@ -1419,21 +1506,25 @@ func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 	spec.ModelName = schema.Name
 	spec.Model = schema
 	applyModelConnection(query.db, schema, &spec)
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyShardConnection(ctx, query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
+	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	conditions, err := convertModelConditions(schema, spec.Where)
+	conditions, err := resolveRelationFilterConditions(ctx, query.db, schema, spec, spec.Where)
+	if err != nil {
+		return QuerySpec{}, nil, err
+	}
+	conditions, err = convertModelConditions(schema, conditions)
 	if err != nil {
 		return QuerySpec{}, nil, err
 	}
 	spec.Where = conditions
-	if err := applyQueryExtensions(context.Background(), query.db, &spec); err != nil {
+	if err := applyQueryExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := resolveModelRelationAggregates(query.db, schema, &spec); err != nil {
+	if err := resolveModelRelationAggregates(ctx, query.db, schema, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	if err := convertModelSelects(schema, &spec); err != nil {
@@ -1443,10 +1534,11 @@ func modelQuerySpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 		return QuerySpec{}, nil, err
 	}
 	applySoftDeleteScope(schema, &spec, query.softDeleteMode)
+	spec.finalized = true
 	return spec, schema, nil
 }
 
-func modelWriteSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
+func modelWriteSpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
 	schema, err := schemaForModel[T](query.db)
 	if err != nil {
 		return QuerySpec{}, nil, err
@@ -1456,32 +1548,32 @@ func modelWriteSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error
 	spec.ModelName = schema.Name
 	spec.Model = schema
 	applyModelConnection(query.db, schema, &spec)
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyShardConnection(ctx, query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
+	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	conditions, err := convertModelConditions(schema, spec.Where)
+	conditions, err := resolveRelationFilterConditions(ctx, query.db, schema, spec, spec.Where)
+	if err != nil {
+		return QuerySpec{}, nil, err
+	}
+	conditions, err = convertModelConditions(schema, conditions)
 	if err != nil {
 		return QuerySpec{}, nil, err
 	}
 	spec.Where = conditions
-	if err := applyQueryExtensions(context.Background(), query.db, &spec); err != nil {
+	if err := applyQueryExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	if err := convertModelSelects(schema, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if query.softDeleteMode == softDeleteDefault {
-		if softDeleteField, ok := softDeleteField(schema); ok {
-			spec.Where = append(spec.Where, isNullCondition(softDeleteField.Column))
-		}
-	}
+	applySoftDeleteScope(schema, &spec, query.softDeleteMode)
 	return spec, schema, nil
 }
 
-func modelInsertSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
+func modelInsertSpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
 	schema, err := schemaForModel[T](query.db)
 	if err != nil {
 		return QuerySpec{}, nil, err
@@ -1491,10 +1583,10 @@ func modelInsertSpec[T any](query *ModelQuery[T]) (QuerySpec, *ModelSchema, erro
 	spec.ModelName = schema.Name
 	spec.Model = schema
 	applyModelConnection(query.db, schema, &spec)
-	if err := applyShardConnection(context.Background(), query.db, schema, &spec, query.shard, query.allShards); err != nil {
+	if err := applyShardConnection(ctx, query.db, schema, &spec, query.shard, query.allShards); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyConnectionExtensions(context.Background(), query.db, &spec); err != nil {
+	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	return spec, schema, nil
@@ -1513,11 +1605,14 @@ func applyModelConnection(db *DB, schema *ModelSchema, spec *QuerySpec) {
 	}
 }
 
-func aggregateModelSpec[T any](query *ModelQuery[T], field string) (QuerySpec, *ModelSchema, error) {
+func aggregateModelSpec[T any](ctx context.Context, query *ModelQuery[T], field string) (QuerySpec, *ModelSchema, error) {
+	if query.allShards {
+		return QuerySpec{}, nil, &Error{Op: "aggregate", Kind: ErrUnsupported}
+	}
 	if err := ensureAggregateSpec(query.spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	spec, schema, err := modelQuerySpec(query)
+	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
 		return QuerySpec{}, nil, err
 	}
@@ -1653,6 +1748,40 @@ func applySoftDeleteScope(schema *ModelSchema, spec *QuerySpec, mode softDeleteM
 	case softDeleteOnly:
 		spec.Where = append(spec.Where, isNotNullCondition(field))
 	}
+}
+
+// applyTableSoftDeleteScope adds the default soft-delete predicate to a table
+// query whose table maps to a registered soft-delete model. Model queries apply
+// the scope in modelQuerySpec instead, so this only fires for db.Table(...).
+func applyTableSoftDeleteScope(db *DB, spec *QuerySpec) {
+	if spec.Model != nil || spec.Table == "" {
+		return
+	}
+	schema := SchemaForTable(db, spec.Table)
+	if schema == nil {
+		return
+	}
+	applySoftDeleteScope(schema, spec, softDeleteDefault)
+}
+
+// finalizeReadSpec applies connection and query extensions plus table-level
+// soft-delete scoping exactly once. Model and relation specs are finalized by
+// their own builders; this is the single choke point for table queries (and the
+// inner source of a grouped count) so tenant/soft-delete scoping is never
+// skipped.
+func finalizeReadSpec(ctx context.Context, db *DB, spec *QuerySpec) error {
+	if spec.finalized {
+		return nil
+	}
+	if err := applyConnectionExtensions(ctx, db, spec); err != nil {
+		return err
+	}
+	if err := applyQueryExtensions(ctx, db, spec); err != nil {
+		return err
+	}
+	applyTableSoftDeleteScope(db, spec)
+	spec.finalized = true
+	return nil
 }
 
 func applyQualifiedSoftDeleteScope(schema *ModelSchema, spec *QuerySpec, qualifier string, mode softDeleteMode) {
@@ -2133,7 +2262,10 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 			continue
 		}
 
-		fieldValue := structValue.FieldByIndex(field.Index)
+		fieldValue, ok := fieldByIndexReadSafe(structValue, field.Index)
+		if !ok {
+			continue
+		}
 		if !fieldValue.IsValid() || !fieldValue.CanInterface() {
 			continue
 		}
@@ -2180,7 +2312,10 @@ func assignModelCreateValues(schema *ModelSchema, model any, row Map) error {
 		if !ok {
 			continue
 		}
-		fieldValue := structValue.FieldByIndex(field.Index)
+		fieldValue, ok := fieldByIndexSafe(structValue, field.Index)
+		if !ok {
+			continue
+		}
 		if !fieldValue.IsValid() || !fieldValue.CanSet() {
 			continue
 		}
