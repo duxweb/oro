@@ -1,0 +1,760 @@
+:root {
+  --dux-cta-bg: #f0fdf4;
+  --dux-cta-ink: #052e16;
+  --dux-cta-muted: color-mix(in srgb, #052e16 62%, transparent);
+  --dux-cta-primary-bg: var(--dux-accent);
+  --dux-cta-primary-text: #ffffff;
+  --dux-cta-ghost-border: color-mix(in srgb, #052e16 18%, transparent);
+  --dux-cta-ghost-text: #052e16;
+  --dux-cta-ghost-hover: #052e16;
+  --dux-doc-link-hover-bg: #f0fdf4;
+}
+
+:root[data-theme="dark"] {
+  --dux-cta-bg: color-mix(in srgb, #052e16 42%, var(--dux-bg));
+  --dux-cta-ink: #ffffff;
+  --dux-cta-muted: rgba(255, 255, 255, 0.68);
+  --dux-cta-primary-bg: #ffffff;
+  --dux-cta-primary-text: #0f172a;
+  --dux-cta-ghost-border: rgba(255, 255, 255, 0.28);
+  --dux-cta-ghost-text: #ffffff;
+  --dux-cta-ghost-hover: #ffffff;
+  --dux-doc-link-hover-bg: color-mix(in srgb, var(--dux-surface) 94%, var(--dux-accent));
+}
+
+/* ---------- Oro homepage hero ---------- */
+.oro-home-hero {
+  padding-block: 1rem 2.5rem;
+}
+
+@media (min-width: 48rem) {
+  .oro-home-hero {
+    padding-block: 2.5rem 4rem;
+  }
+}
+
+.oro-hero__content,
+.oro-hero__demo {
+  max-width: 48rem;
+  margin-inline: auto;
+}
+
+.oro-hero__content {
+  text-align: center;
+}
+
+.oro-hero__eyebrow-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.oro-hero__eyebrow {
+  margin: 0;
+  color: var(--dux-ink);
+  font-family: var(--vela-font-mono);
+  font-size: 1.5rem;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.oro-hero__badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--dux-line);
+  border-radius: 999px;
+  background: var(--dux-surface);
+  color: var(--dux-muted);
+  font-family: var(--vela-font-mono);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  padding: 0.3rem 0.65rem;
+}
+
+.oro-hero__title {
+  margin: 0;
+  color: var(--dux-ink);
+  font-size: clamp(2rem, 4vw, 2.5rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.oro-hero__tagline {
+  max-width: 40rem;
+  margin: 1.5rem auto 0;
+  color: var(--dux-muted);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.oro-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 2.25rem;
+}
+
+.oro-hero__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 1.5rem;
+  list-style: none;
+  margin: 2rem 0 0;
+  padding: 0;
+}
+
+.oro-hero__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: var(--dux-muted);
+  font-family: var(--vela-font-mono);
+  font-size: 0.8rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.oro-hero__pill-mark {
+  color: var(--dux-accent);
+}
+
+.oro-hero__demo {
+  margin-top: 3rem;
+}
+
+.oro-hero__install-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.oro-install {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid var(--dux-line);
+  border-radius: 999px;
+  background: var(--dux-surface);
+  color: var(--dux-ink);
+  font-family: var(--vela-font-mono);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+}
+
+.oro-install__prompt {
+  color: var(--dux-accent);
+  user-select: none;
+}
+
+.oro-install__code {
+  overflow-x: auto;
+  white-space: nowrap;
+  background: transparent;
+  padding: 0;
+}
+
+.oro-install__copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dux-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.oro-install__copy:hover {
+  background: var(--dux-bg);
+  color: var(--dux-ink);
+}
+
+.oro-install__icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.oro-install__copy .dux-copy__ok,
+.oro-install__copy[data-copied="true"] .dux-copy__i {
+  display: none;
+}
+
+.oro-install__copy[data-copied="true"] .dux-copy__ok {
+  display: block;
+}
+
+.oro-install__ok {
+  color: var(--dux-accent);
+}
+
+.oro-code-window {
+  overflow: hidden;
+  border: 1px solid var(--dux-code-line);
+  border-radius: 1rem;
+  background: var(--dux-code-bg);
+}
+
+.oro-code-window__bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 2.5rem;
+  border-bottom: 1px solid var(--dux-code-line);
+  background: var(--dux-code-bar);
+  padding-inline: 1rem;
+}
+
+.oro-code-window__dots {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.oro-code-window__dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+}
+
+.oro-code-window__dot--red { background: #ff5f57; }
+.oro-code-window__dot--yellow { background: #febc2e; }
+.oro-code-window__dot--green { background: #28c840; }
+
+.oro-code-window__title {
+  position: absolute;
+  inset-inline: 0;
+  pointer-events: none;
+  color: var(--dux-term-title);
+  font-family: var(--vela-font-mono);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.oro-code-window__pre {
+  overflow-x: auto;
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  font-family: var(--vela-font-mono);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  text-align: left;
+}
+
+.dux-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.62rem 1.25rem;
+  font-size: var(--dux-fs-sm);
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: opacity 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.dux-btn--primary {
+  background: var(--dux-primary-bg);
+  color: var(--dux-primary-text);
+}
+
+.dux-btn--primary:hover {
+  opacity: 0.9;
+}
+
+.dux-btn__arrow {
+  transition: transform 0.14s ease;
+}
+
+.dux-btn--primary:hover .dux-btn__arrow {
+  transform: translateX(3px);
+}
+
+.dux-btn--ghost {
+  border-color: var(--dux-line-strong);
+  color: var(--dux-ink);
+}
+
+.dux-btn--ghost:hover {
+  border-color: var(--dux-ink);
+}
+
+/* ---------- Syntax token colors ---------- */
+/* default: on a light surface (pillar one-liners) */
+.tok-com { color: var(--dux-muted); }
+.tok-str { color: var(--dux-accent); }
+.tok-key { color: var(--dux-accent); }
+.tok-fn { color: var(--dux-ink); font-weight: 600; }
+
+/* Dark code blocks (hero window + pillar chips) — restrained, low-noise palette */
+.oro-hero-win,
+.dux-code-dark {
+  color: #c9d1d9;
+}
+
+.dux-code-dark {
+  background: var(--dux-code-bg);
+  border: 1px solid var(--dux-code-line);
+}
+
+/* Feature pillars */
+.dux-pillars {
+  display: grid;
+  align-items: start;
+  gap: 1rem;
+  margin-top: 2.25rem;
+}
+
+@media (min-width: 48rem) {
+  .dux-pillars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.dux-pillar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 1.5rem;
+  border-radius: 1.25rem;
+  background: var(--dux-surface);
+}
+
+.dux-pillar__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.dux-pillar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--dux-accent) 14%, transparent);
+  color: var(--dux-accent);
+}
+
+.dux-pillar__svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.dux-pillar h3 {
+  margin: 0;
+  color: var(--dux-ink);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.dux-pillar__desc {
+  margin: 0 0 1.4rem;
+  color: var(--dux-muted);
+  font-size: 0.9rem;
+  line-height: 1.68;
+}
+
+.dux-mini-code {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--dux-inline-code-line);
+  border-radius: 0.75rem;
+  background: var(--dux-inline-code-bg);
+  color: var(--dux-inline-code-text);
+  min-width: 0;
+}
+
+.dux-mini-code pre {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+  overflow-x: auto;
+  margin: 0;
+  padding: 0.82rem 0.95rem;
+}
+
+.dux-mini-code code {
+  font-family: var(--vela-font-mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.dux-mini-code .tok-com { color: var(--dux-inline-code-comment); }
+.dux-mini-code .tok-str { color: var(--dux-inline-code-string); }
+.dux-mini-code .tok-key { color: var(--dux-inline-code-key); }
+.dux-mini-code .tok-fn { color: var(--dux-inline-code-fn); font-weight: 500; }
+
+.oro-hero-win .tok-com,
+.dux-code-dark .tok-com { color: #6e7681; }
+.oro-hero-win .tok-str,
+.dux-code-dark .tok-str { color: #86efac; }
+.oro-hero-win .tok-key,
+.dux-code-dark .tok-key { color: #86efac; }
+.oro-hero-win .tok-fn,
+.dux-code-dark .tok-fn { color: #eef1f6; font-weight: 500; }
+
+/* ---------- Landing sections (used from MDX) ---------- */
+.dux-section {
+  margin-top: clamp(3rem, 6vw, 5rem);
+}
+
+.dux-section-head {
+  max-width: 46rem;
+}
+
+.dux-section-head .eyebrow {
+  display: block;
+  font-family: var(--vela-font-mono);
+  font-size: var(--dux-fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dux-accent);
+  margin-bottom: 0.75rem;
+}
+
+.vela-markdown-content .dux-section-head h2 {
+  font-size: var(--dux-fs-lg);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: var(--dux-ink);
+}
+
+.dux-section-head p {
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.6;
+  margin-top: 0.85rem;
+  max-width: 40rem;
+}
+
+.dux-section .expressive-code {
+  margin-top: 2rem;
+}
+
+/* Showcase */
+.dux-showcase {
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border-radius: 1.75rem;
+  background: var(--dux-surface);
+}
+
+@media (min-width: 60rem) {
+  .dux-showcase {
+    grid-template-columns: minmax(0, 0.95fr) minmax(24rem, 1.05fr);
+  }
+}
+
+.dux-showcase .eyebrow {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--dux-accent);
+  font-family: var(--vela-font-mono);
+  font-size: var(--dux-fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dux-showcase h2 {
+  margin: 0;
+  color: var(--dux-ink);
+  font-size: var(--dux-fs-lg);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.dux-showcase p {
+  margin: 1rem 0 0;
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.7;
+}
+
+.dux-showcase ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dux-showcase li {
+  color: var(--dux-ink);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.55;
+}
+
+.dux-showcase li::before {
+  content: "→";
+  margin-right: 0.55rem;
+  color: var(--dux-accent);
+}
+
+.dux-showcase-code {
+  overflow-x: auto;
+  margin: 0;
+  padding: 1.2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--dux-inline-code-line);
+  background: var(--dux-inline-code-bg);
+  color: var(--dux-inline-code-text);
+}
+
+.dux-showcase-code code {
+  font-family: var(--vela-font-mono);
+  font-size: 0.82rem;
+  line-height: 1.8;
+  white-space: pre;
+}
+
+.dux-showcase-code .tok-com { color: var(--dux-inline-code-comment); }
+.dux-showcase-code .tok-str { color: var(--dux-inline-code-string); }
+.dux-showcase-code .tok-key { color: var(--dux-inline-code-key); }
+.dux-showcase-code .tok-fn { color: var(--dux-inline-code-fn); font-weight: 500; }
+
+/* Doc links */
+.dux-doc-links {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+@media (min-width: 56rem) {
+  .dux-doc-links {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.dux-doc-links a {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0.65rem;
+  min-height: 9rem;
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--dux-surface) 72%, transparent);
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.dux-doc-links a::after {
+  content: "→";
+  position: absolute;
+  right: 1.25rem;
+  top: 1.15rem;
+  color: var(--dux-muted);
+  font-size: 1rem;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.dux-doc-links a:hover {
+  background: var(--dux-doc-link-hover-bg);
+  transform: translateY(-1px);
+}
+
+:root[data-theme="dark"] .dux-doc-links a:hover {
+  background: color-mix(in srgb, var(--dux-surface) 94%, var(--dux-accent));
+}
+
+.dux-doc-links a:hover::after {
+  color: var(--dux-accent);
+  transform: translateX(3px);
+}
+
+.dux-doc-links em {
+  color: var(--dux-accent);
+  font-family: var(--vela-font-mono);
+  font-size: var(--dux-fs-xs);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dux-doc-links strong {
+  color: var(--dux-ink);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.dux-doc-links span {
+  display: block;
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.6;
+}
+
+.dux-doc-links a:hover strong {
+  color: var(--dux-accent);
+}
+
+/* CTA */
+.dux-cta {
+  position: relative;
+  overflow: hidden;
+  margin-top: clamp(3.5rem, 7vw, 6rem);
+  border: 0;
+  border-radius: 1.75rem;
+  background: var(--dux-cta-bg);
+  padding: clamp(3rem, 7vw, 5rem) clamp(1.5rem, 5vw, 3rem);
+  text-align: center;
+}
+
+.dux-cta::before {
+  display: none;
+}
+
+.dux-cta > * {
+  position: relative;
+}
+
+.vela-markdown-content .dux-cta h2 {
+  border: 0;
+  padding: 0;
+  margin: 0 auto 0.7rem;
+  max-width: 24ch;
+  font-size: var(--dux-fs-xl);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--dux-cta-ink);
+}
+
+.dux-cta p {
+  color: var(--dux-cta-muted);
+  font-size: var(--dux-fs-sm);
+  margin: 0 auto 1.9rem;
+  max-width: 34rem;
+  line-height: 1.6;
+}
+
+.dux-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.dux-cta .dux-btn--primary {
+  background: var(--dux-cta-primary-bg);
+  color: var(--dux-cta-primary-text);
+}
+
+.dux-cta .dux-btn--ghost {
+  border-color: var(--dux-cta-ghost-border);
+  color: var(--dux-cta-ghost-text);
+}
+
+.dux-cta .dux-btn--ghost:hover {
+  border-color: var(--dux-cta-ghost-hover);
+  color: var(--dux-cta-ghost-hover);
+}
+
+/* Footer */
+.dux-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  margin-top: clamp(3.5rem, 7vw, 6rem);
+  padding-block: 1.6rem 2.2rem;
+  border-top: 1px solid var(--dux-line);
+}
+
+.dux-footer__brand {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dux-footer__logo {
+  color: var(--dux-ink);
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.dux-footer__tagline,
+.dux-footer__copy {
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1.55;
+}
+
+.dux-footer__copy {
+  margin: 0;
+  font-size: var(--dux-fs-xs);
+}
+
+.dux-footer__meta {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dux-footer__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.15rem;
+}
+
+.dux-footer__nav a {
+  color: var(--dux-muted);
+  font-size: var(--dux-fs-sm);
+  line-height: 1;
+  text-decoration: none;
+  transition: color 0.14s ease;
+}
+
+.dux-footer__nav a:hover {
+  color: var(--dux-ink);
+}
+
+@media (min-width: 48rem) {
+  .dux-footer {
+    grid-template-columns: minmax(16rem, 1fr) auto;
+    align-items: start;
+    gap: 2rem;
+  }
+
+  .dux-footer__meta {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .dux-footer__nav {
+    justify-content: flex-end;
+    padding-top: 0.1rem;
+  }
+
+  .dux-footer__copy {
+    text-align: right;
+  }
+}

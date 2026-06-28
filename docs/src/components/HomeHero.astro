@@ -1,0 +1,127 @@
+---
+import { highlightCode } from './highlight';
+
+const { entry, route } = Astro.props;
+const lang = route?.lang ?? 'en';
+const hero = entry.data.hero ?? {};
+const isZh = (lang || '').toLowerCase().startsWith('zh');
+
+const home = entry.data.home ?? {};
+const eyebrow = home.eyebrow ?? hero.eyebrow ?? entry.data.title;
+const badge = home.badge ?? '';
+const installCmd = home.install ?? '';
+const fileName = home.codeTitle ?? 'example.ts';
+const code = home.code ?? (isZh
+  ? `// 用清晰的文档结构介绍你的项目\nconst project = defineProject({\n  docs: true,\n  examples: true,\n})`
+  : `// describe your project with a clean docs structure\nconst project = defineProject({\n  docs: true,\n  examples: true,\n})`);
+const symbols = home.symbols ?? ['defineProject', 'project', 'docs', 'examples'];
+
+const title = hero?.title ?? entry.data.title;
+const tagline = hero?.tagline ?? '';
+const actions = hero?.actions ?? [];
+const pills = home.pills ?? (isZh
+  ? ['简洁主题', '多语言', '可自定义首页', '清晰文档']
+  : ['Clean theme', 'Multilingual', 'Custom homepage', 'Readable docs']);
+---
+
+<div class="oro-home-hero not-content">
+  <div class="oro-hero__content">
+    <div class="oro-hero__eyebrow-row">
+      {eyebrow && <p class="oro-hero__eyebrow">{eyebrow}</p>}
+      {badge && (
+        <span class="oro-hero__badge">
+          {badge}
+        </span>
+      )}
+    </div>
+    <h1
+      class="oro-hero__title"
+      set:html={title}
+    />
+    {tagline && (
+      <p
+        class="oro-hero__tagline"
+        set:html={tagline}
+      />
+    )}
+
+    {actions.length > 0 && (
+      <div class="oro-hero__actions">
+        {actions.map((action) => (
+          <a
+            href={action.link}
+            class={`dux-btn ${action.variant === 'primary' ? 'dux-btn--primary' : 'dux-btn--ghost'}`}
+            {...action.attrs}
+          >
+            <span>{action.text}</span>
+            {action.variant === 'primary' && <span aria-hidden="true" class="dux-btn__arrow">→</span>}
+          </a>
+        ))}
+      </div>
+    )}
+
+    {pills.length > 0 && (
+      <ul class="oro-hero__pills" aria-label={isZh ? '核心特性' : 'core principles'}>
+        {pills.map((pill) => (
+          <li class="oro-hero__pill">
+            <span class="oro-hero__pill-mark" aria-hidden="true">✓</span>
+            {pill}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+
+  <div class="oro-hero__demo">
+    {installCmd && (
+      <div class="oro-hero__install-wrap">
+        <div
+          class="oro-install"
+          role="group"
+          aria-label="install"
+        >
+          <span class="oro-install__prompt" aria-hidden="true">$</span>
+          <code class="oro-install__code">{installCmd}</code>
+          <button
+            type="button"
+            class="dux-copy oro-install__copy"
+            data-copy={installCmd}
+            aria-label={isZh ? '复制' : 'copy'}
+          >
+            <svg class="dux-copy__i oro-install__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            <svg class="dux-copy__ok oro-install__icon oro-install__ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          </button>
+        </div>
+      </div>
+    )}
+
+    <div class="oro-code-window">
+      <div class="oro-code-window__bar">
+        <span class="oro-code-window__dots">
+          <span class="oro-code-window__dot oro-code-window__dot--red"></span>
+          <span class="oro-code-window__dot oro-code-window__dot--yellow"></span>
+          <span class="oro-code-window__dot oro-code-window__dot--green"></span>
+        </span>
+        <span class="oro-code-window__title">{fileName}</span>
+      </div>
+      <pre class="oro-hero-win oro-code-window__pre"><code set:html={highlightCode(code, symbols)} /></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.dux-copy').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.copy ?? '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return;
+      }
+      btn.dataset.copied = 'true';
+      window.setTimeout(() => {
+        btn.dataset.copied = 'false';
+      }, 1400);
+    });
+  });
+</script>

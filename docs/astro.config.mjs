@@ -1,32 +1,48 @@
 import { defineConfig } from 'astro/config';
-import starlight from '@astrojs/starlight';
-import tailwindcss from '@tailwindcss/vite';
+import vela from '@duxweb/vela';
 
 export default defineConfig({
   site: 'https://duxweb.github.io',
   base: '/oro',
-  vite: {
-    plugins: [tailwindcss()],
-  },
   integrations: [
-    starlight({
+    vela({
       title: 'Oro',
       description: 'A humane, generic-first ORM for Go — no codegen, no import cycles, no black box.',
       favicon: '/favicon.svg',
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/duxweb/oro' }],
-      components: {
-        Hero: './src/components/Hero.astro',
-        ThemeSelect: './src/components/ThemeSelect.astro',
-        LanguageSelect: './src/components/LanguageSelect.astro',
+      theme: {
+        accent: '#16a34a',
+        dark: '#4ade80',
       },
-      customCss: ['./src/styles/tailwind.css', './src/styles/custom.css'],
-      expressiveCode: {
-        themes: ['github-dark'],
-        styleOverrides: {
-          borderRadius: '0.7rem',
-          borderColor: 'transparent',
-          frames: { shadowColor: 'transparent' },
+      meta: {
+        image: '/og.png',
+        imageAlt: 'Oro ORM documentation',
+        keywords: ['go orm', 'generic orm', 'database', 'sqlite', 'mysql', 'postgresql'],
+        twitter: '@duxweb',
+      },
+      nav: [
+        {
+          label: 'Docs',
+          translations: { 'zh-CN': '文档' },
+          items: [
+            { label: 'Quick Start', translations: { 'zh-CN': '快速开始' }, slug: 'quick-start' },
+            { label: 'Guides', translations: { 'zh-CN': '指南' }, slug: 'guides/model-definition' },
+            { label: 'Reference', translations: { 'zh-CN': '参考' }, slug: 'reference/api' },
+          ],
         },
+        { label: 'Extensions', translations: { 'zh-CN': '扩展' }, slug: 'extensions' },
+        { label: 'Benchmarks', translations: { 'zh-CN': '性能' }, slug: 'advanced/performance-benchmarks' },
+        { label: 'GitHub', href: 'https://github.com/duxweb/oro', external: true },
+      ],
+      components: {
+        Hero: './src/components/HomeHero.astro',
+      },
+      customCss: ['./src/styles/home.css'],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/duxweb/oro' }],
+      versions: [{ label: 'v0.x', href: 'https://duxweb.github.io/oro/' }],
+      editLink: {
+        pattern: 'https://github.com/duxweb/oro/edit/main/:path',
+        label: 'Edit this page',
+        translations: { 'zh-CN': '编辑此页' },
       },
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
       defaultLocale: 'root',
@@ -40,7 +56,10 @@ export default defineConfig({
           lang: 'zh-CN',
         },
       },
-      sidebar: [
+      docs: {
+        main: {
+          match: '/',
+          sidebar: [
         {
           label: 'Start',
           translations: { 'zh-CN': '开始' },
@@ -125,7 +144,9 @@ export default defineConfig({
             { label: 'Error Types', translations: { 'zh-CN': '错误类型' }, slug: 'reference/error-types' }
           ]
         }
-      ]
+          ]
+        }
+      }
     })
   ]
 });

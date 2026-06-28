@@ -14,10 +14,45 @@ hero:
     - text: GitHub
       link: https://github.com/duxweb/oro
       variant: minimal
+home:
+  eyebrow: Oro ORM
+  badge: Go 1.27+
+  install: go get github.com/duxweb/oro
+  codeTitle: product.go
+  pills:
+    - 人性化语义
+    - 零代码生成
+    - 无循环依赖
+    - 非黑盒
+  symbols:
+    - oro
+    - db
+    - Use
+    - Where
+    - Field
+    - Product
+    - Get
+    - Gte
+    - Like
+  code: |
+    // 模型就是普通的 Go struct
+    type Product struct {
+        oro.Model
+        Code  string
+        Price uint
+    }
+
+    // 像说话一样写条件
+    list, _ := db.Use[Product]().
+        Where(
+            oro.Field("Price").Gte(100),
+            oro.Field("Code").Like("P%"),
+        ).
+        Get(ctx)
 ---
 
-import Pillars from '../../../components/Pillars.astro';
-import ShowcaseCode from '../../../components/ShowcaseCode.astro';
+import HomePillars from '../../../components/HomePillars.astro';
+import HomeShowcaseCode from '../../../components/HomeShowcaseCode.astro';
 
 <div class="dux-section">
   <div class="dux-section-head">
@@ -26,7 +61,7 @@ import ShowcaseCode from '../../../components/ShowcaseCode.astro';
     <p>查询看得懂，模型不用生成，关联不制造循环依赖，返回值也有明确类型边界。</p>
   </div>
 
-  <Pillars items={[
+  <HomePillars items={[
     {
       icon: 'semantics',
       title: '查询可读',
@@ -70,7 +105,7 @@ db.Table("products").First(ctx) // oro.Map`,
         <li>关系放在方法里，减少模块拆包后的 import cycle。</li>
       </ul>
     </div>
-    <ShowcaseCode code={`func (Product) Define(s *oro.SchemaBuilder) {
+    <HomeShowcaseCode code={`func (Product) Define(s *oro.SchemaBuilder) {
     s.Table("products")
     s.Field("Code").String().Unique()
     s.Field("Price").Uint().Default(0)
@@ -110,11 +145,13 @@ db.Raw("select ...")  // Map or MapTo[T]()`} />
     <span class="dux-footer__logo">Oro</span>
     <span class="dux-footer__tagline">面向 Go 的人性化泛型 ORM。</span>
   </div>
-  <nav class="dux-footer__nav" aria-label="页脚">
-    <a href="quick-start/">快速开始</a>
-    <a href="guides/model-definition/">指南</a>
-    <a href="reference/api/">API</a>
-    <a href="https://github.com/duxweb/oro">GitHub</a>
-  </nav>
-  <p class="dux-footer__copy">© 2026 Oro · 基于 MIT 协议开源。</p>
+  <div class="dux-footer__meta">
+    <nav class="dux-footer__nav" aria-label="页脚">
+      <a href="quick-start/">快速开始</a>
+      <a href="guides/model-definition/">指南</a>
+      <a href="reference/api/">API</a>
+      <a href="https://github.com/duxweb/oro">GitHub</a>
+    </nav>
+    <p class="dux-footer__copy">© 2026 Oro · 基于 MIT 协议开源。</p>
+  </div>
 </footer>

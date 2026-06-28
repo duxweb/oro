@@ -1,0 +1,12 @@
+---
+import { highlightCode } from './highlight';
+
+interface Props {
+  code: string;
+  symbols?: string[];
+}
+
+const { code, symbols = [] } = Astro.props;
+---
+
+<pre class="dux-showcase-code"><code set:html={highlightCode(code, symbols)} /></pre>
