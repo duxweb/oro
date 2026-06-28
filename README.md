@@ -386,7 +386,7 @@ Benchmarks run against SQLite, MySQL, and PostgreSQL using the same database dri
 | WhereList | Oro leads this run | Oro leads this run | Oro is competitive |
 | DeleteByCode | Oro leads this run | Oro leads this run | Oro is competitive |
 
-See the full benchmark tables, environment, versions, and commands in the [Performance Benchmarks](https://duxweb.github.io/oro/advanced/performance-benchmarks/) page.
+See the full benchmark tables, environment, versions, and commands in the [Performance Benchmarks](https://duxweb.github.io/oro/performance/) page.
 
 ## Comparison
 

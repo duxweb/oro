@@ -374,7 +374,7 @@ Benchmark 在 SQLite、MySQL、PostgreSQL 下执行，并且每个 ORM 使用相
 | WhereList | 本轮 Oro 领先 | 本轮 Oro 领先 | Oro 表现稳定 |
 | DeleteByCode | 本轮 Oro 领先 | 本轮 Oro 领先 | Oro 表现稳定 |
 
-完整环境、版本、命令和结果见 [性能基准](https://duxweb.github.io/oro/zh-cn/advanced/performance-benchmarks/)。
+完整环境、版本、命令和结果见 [性能基准](https://duxweb.github.io/oro/zh-cn/performance/)。
 
 ## 对比
 

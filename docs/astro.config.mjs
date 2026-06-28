@@ -30,7 +30,7 @@ export default defineConfig({
           ],
         },
         { label: 'Extensions', translations: { 'zh-CN': '扩展' }, slug: 'extensions' },
-        { label: 'Benchmarks', translations: { 'zh-CN': '性能' }, slug: 'advanced/performance-benchmarks' },
+        { label: 'Performance', translations: { 'zh-CN': '性能' }, slug: 'performance' },
         { label: 'GitHub', href: 'https://github.com/duxweb/oro', external: true },
       ],
       components: {
@@ -113,21 +113,7 @@ export default defineConfig({
             { label: 'Serialization', translations: { 'zh-CN': '序列化输出' }, slug: 'advanced/serialization' },
             { label: 'Error Handling', translations: { 'zh-CN': '错误处理' }, slug: 'advanced/error-handling' },
             { label: 'Logging', translations: { 'zh-CN': '日志' }, slug: 'advanced/logging' },
-            { label: 'Testing Matrix', translations: { 'zh-CN': '测试矩阵' }, slug: 'advanced/testing' },
-            { label: 'Performance Benchmarks', translations: { 'zh-CN': '性能基准' }, slug: 'advanced/performance-benchmarks' }
-          ]
-        },
-        {
-          label: 'Extensions',
-          translations: { 'zh-CN': '扩展包' },
-          items: [
-            { label: 'Overview', translations: { 'zh-CN': '概览' }, slug: 'extensions' },
-            { label: 'Tenant', translations: { 'zh-CN': 'Tenant 租户扩展' }, slug: 'extensions/tenant' },
-            { label: 'Soft Delete', translations: { 'zh-CN': 'Soft Delete 软删除' }, slug: 'extensions/softdelete' },
-            { label: 'Audit', translations: { 'zh-CN': 'Audit 审计' }, slug: 'extensions/audit' },
-            { label: 'Metrics', translations: { 'zh-CN': 'Metrics 指标' }, slug: 'extensions/metrics' },
-            { label: 'Translation', translations: { 'zh-CN': 'Translation 多语言模型' }, slug: 'extensions/translation' },
-            { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
+            { label: 'Testing Matrix', translations: { 'zh-CN': '测试矩阵' }, slug: 'advanced/testing' }
           ]
         },
         {
@@ -144,6 +130,40 @@ export default defineConfig({
             { label: 'Error Types', translations: { 'zh-CN': '错误类型' }, slug: 'reference/error-types' }
           ]
         }
+          ]
+        },
+        extensions: {
+          match: '/extensions',
+          sidebar: [
+            {
+              label: 'Extensions',
+              translations: { 'zh-CN': '扩展包' },
+              items: [
+                { label: 'Overview', translations: { 'zh-CN': '概览' }, slug: 'extensions' },
+                { label: 'Tenant', translations: { 'zh-CN': 'Tenant 租户扩展' }, slug: 'extensions/tenant' },
+                { label: 'Soft Delete', translations: { 'zh-CN': 'Soft Delete 软删除' }, slug: 'extensions/softdelete' },
+                { label: 'Audit', translations: { 'zh-CN': 'Audit 审计' }, slug: 'extensions/audit' },
+                { label: 'Metrics', translations: { 'zh-CN': 'Metrics 指标' }, slug: 'extensions/metrics' },
+                { label: 'Translation', translations: { 'zh-CN': 'Translation 多语言模型' }, slug: 'extensions/translation' },
+                { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
+              ]
+            }
+          ]
+        },
+        performance: {
+          match: '/performance',
+          sidebar: [
+            {
+              label: 'Performance',
+              translations: { 'zh-CN': '性能' },
+              items: [
+                {
+                  label: 'Benchmarks',
+                  translations: { 'zh-CN': '性能基准' },
+                  slug: 'performance'
+                }
+              ]
+            }
           ]
         }
       }
