@@ -13,6 +13,7 @@ type ModelQuery[T any] struct {
 	allShards      bool
 	softDeleteMode softDeleteMode
 	selectHidden   []string
+	applies        []Apply
 	skipHooks      bool
 	skipEvents     bool
 }
@@ -368,6 +369,9 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 		if err := query.afterFind(ctx, schema, model); err != nil {
 			return nil, err
 		}
+		if err := query.afterApply(ctx, schema, model); err != nil {
+			return nil, err
+		}
 		return model, nil
 	}
 	row, err := queryFirstRowPrepared(ctx, query.db, spec)
@@ -382,6 +386,9 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 		return nil, err
 	}
 	if err := query.afterFind(ctx, schema, model); err != nil {
+		return nil, err
+	}
+	if err := query.afterApply(ctx, schema, model); err != nil {
 		return nil, err
 	}
 	return model, nil
@@ -407,6 +414,9 @@ func (query *ModelQuery[T]) Get(ctx context.Context) ([]*T, error) {
 			if err := query.afterFind(ctx, schema, model); err != nil {
 				return nil, err
 			}
+			if err := query.afterApply(ctx, schema, model); err != nil {
+				return nil, err
+			}
 		}
 		return models, nil
 	}
@@ -428,6 +438,9 @@ func (query *ModelQuery[T]) Get(ctx context.Context) ([]*T, error) {
 	}
 	for _, model := range models {
 		if err := query.afterFind(ctx, schema, model); err != nil {
+			return nil, err
+		}
+		if err := query.afterApply(ctx, schema, model); err != nil {
 			return nil, err
 		}
 	}
@@ -452,6 +465,9 @@ func (query *ModelQuery[T]) getAllShards(ctx context.Context, spec QuerySpec, sc
 	}
 	for _, model := range models {
 		if err := query.afterFind(ctx, schema, model); err != nil {
+			return nil, err
+		}
+		if err := query.afterApply(ctx, schema, model); err != nil {
 			return nil, err
 		}
 	}
@@ -491,6 +507,9 @@ func (query *ModelQuery[T]) Stream(ctx context.Context) (Stream[*T], error) {
 			if err := query.afterFind(ctx, schema, model); err != nil {
 				return nil, err
 			}
+			if err := query.afterApply(ctx, schema, model); err != nil {
+				return nil, err
+			}
 			return model, nil
 		},
 	}, nil
@@ -527,6 +546,9 @@ func (query *ModelQuery[T]) Chunk(ctx context.Context, size int, fn func([]*T) e
 				return err
 			}
 			if err := query.afterFind(ctx, schema, model); err != nil {
+				return err
+			}
+			if err := query.afterApply(ctx, schema, model); err != nil {
 				return err
 			}
 			models = append(models, model)
@@ -578,8 +600,14 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if query.allShards {
 		return nil, &Error{Op: "upsert", Kind: ErrShardRequired}
 	}
-	spec, schema, err := modelQuerySpec(ctx, query)
+	spec, schema, err := modelInsertSpec(ctx, query)
 	if err != nil {
+		return nil, err
+	}
+	if model == nil {
+		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument}
+	}
+	if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageValues, schema, &spec, nil, model, nil); err != nil {
 		return nil, err
 	}
 	writeOptions := applyWriteOptions(options)
@@ -613,6 +641,9 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
 		return nil, err
 	}
+	if err := query.afterApply(ctx, schema, model); err != nil {
+		return nil, err
+	}
 	return model, nil
 }
 
@@ -623,12 +654,15 @@ func (query *ModelQuery[T]) Update(ctx context.Context, values Map, options ...W
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "update", Kind: ErrUnsafeUpdate}
 	}
-	spec, schema, err := modelWriteSpec(ctx, query)
+	spec, schema, err := modelWriteSpecMode(ctx, query, ApplyUpdate)
 	if err != nil {
 		return 0, err
 	}
 	writeOptions := applyWriteOptions(options)
 	hookValues := copyMap(values)
+	if hookValues == nil && query.hasApplies() {
+		hookValues = Map{}
+	}
 	if err := validateShardUpdateValues(schema, hookValues); err != nil {
 		return 0, err
 	}
@@ -642,7 +676,7 @@ func (query *ModelQuery[T]) Delete(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "delete", Kind: ErrUnsafeDelete}
 	}
-	spec, schema, err := modelWriteSpec(ctx, query)
+	spec, schema, err := modelWriteSpecMode(ctx, query, ApplyDelete)
 	if err != nil {
 		return 0, err
 	}
@@ -660,7 +694,7 @@ func (query *ModelQuery[T]) ForceDelete(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "delete", Kind: ErrUnsafeDelete}
 	}
-	spec, schema, err := modelWriteSpec(ctx, query)
+	spec, schema, err := modelWriteSpecMode(ctx, query, ApplyDelete)
 	if err != nil {
 		return 0, err
 	}
@@ -674,7 +708,7 @@ func (query *ModelQuery[T]) Restore(ctx context.Context) (int64, error) {
 	if len(query.spec.Where) == 0 {
 		return 0, &Error{Op: "restore", Kind: ErrUnsafeUpdate}
 	}
-	spec, schema, err := modelWriteSpec(ctx, query)
+	spec, schema, err := modelWriteSpecMode(ctx, query, ApplyRestore)
 	if err != nil {
 		return 0, err
 	}
@@ -979,6 +1013,9 @@ func canCreateModelsDirect(db *DB, spec QuerySpec) bool {
 }
 
 func (query *ModelQuery[T]) canBatchCreate(models []*T) bool {
+	if query.hasApplies() {
+		return false
+	}
 	if shouldEmitEvent(query.db, query.skipEvents, BeforeCreate, AfterCreate) {
 		return false
 	}
@@ -1031,6 +1068,9 @@ func (query *ModelQuery[T]) Find(ctx context.Context, id any) (*T, error) {
 		return nil, err
 	}
 	if err := query.afterFind(ctx, schema, model); err != nil {
+		return nil, err
+	}
+	if err := query.afterApply(ctx, schema, model); err != nil {
 		return nil, err
 	}
 	return model, nil
@@ -1172,6 +1212,9 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 			return nil, err
 		}
 	}
+	if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageValues, schema, &spec, nil, model, nil); err != nil {
+		return nil, err
+	}
 	writeOptions := applyWriteOptions(options)
 	row, err := buildModelInsertMap(schema, model, writeOptions)
 	if err != nil {
@@ -1198,6 +1241,9 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 		return nil, &Error{Op: "create", Kind: ErrScan, Model: schema.Name, Table: schema.Table}
 	}
 	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
+		return nil, err
+	}
+	if err := query.afterApply(ctx, schema, model); err != nil {
 		return nil, err
 	}
 	if useHooks {
@@ -1237,6 +1283,9 @@ func (query *ModelQuery[T]) updateInTransaction(ctx context.Context, spec QueryS
 		values = hook.Values
 		if emitEvents {
 			event.Values = values
+		}
+		if err := applyModelApplies(ctx, txQuery, ApplyUpdate, ApplyStageValues, schema, &spec, values, hookModel, nil); err != nil {
+			return err
 		}
 		converted, err := convertModelMap(schema, values, options, true)
 		if err != nil {
@@ -1309,6 +1358,9 @@ func (query *ModelQuery[T]) deleteInTransaction(ctx context.Context, spec QueryS
 			if emitEvents {
 				event.Values = values
 			}
+			if err := applyModelApplies(ctx, txQuery, ApplyDelete, ApplyStageValues, schema, &spec, values, hookModel, nil); err != nil {
+				return err
+			}
 			converted, convertErr := convertModelMap(schema, values, writeOptions{}, true)
 			if convertErr != nil {
 				return convertErr
@@ -1320,6 +1372,9 @@ func (query *ModelQuery[T]) deleteInTransaction(ctx context.Context, spec QueryS
 			}
 			result, err = updateRows(ctx, tx, WriteSpec{QuerySpec: spec, Values: []Map{converted}, Operation: "delete"})
 		} else {
+			if err := applyModelApplies(ctx, txQuery, ApplyDelete, ApplyStageValues, schema, &spec, nil, hookModel, nil); err != nil {
+				return err
+			}
 			result, err = deleteRows(ctx, tx, WriteSpec{QuerySpec: spec})
 		}
 		if err != nil {
@@ -1368,6 +1423,9 @@ func (query *ModelQuery[T]) restoreInTransaction(ctx context.Context, spec Query
 		values = hook.Values
 		if emitEvents {
 			event.Values = values
+		}
+		if err := applyModelApplies(ctx, txQuery, ApplyRestore, ApplyStageValues, schema, &spec, values, hookModel, nil); err != nil {
+			return err
 		}
 		converted, err := convertModelMap(schema, values, writeOptions{}, true)
 		if err != nil {
@@ -1418,6 +1476,10 @@ func (query *ModelQuery[T]) afterFind(ctx context.Context, schema *ModelSchema, 
 		}
 	}
 	return nil
+}
+
+func (query *ModelQuery[T]) afterApply(ctx context.Context, schema *ModelSchema, model *T) error {
+	return applyModelApplies(ctx, query, ApplyAfterFind, ApplyStageResult, schema, nil, nil, model, nil)
 }
 
 func (query *ModelQuery[T]) runModelWrite(ctx context.Context, spec QuerySpec, fn func(*ModelQuery[T]) error) error {

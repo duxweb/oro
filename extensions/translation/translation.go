@@ -88,11 +88,7 @@ func (extension extension) State() any {
 }
 
 func Use[T any](db *oro.DB, options ...Option) *Query[T] {
-	config := resolveConfig(options)
-	if configured, ok := configFromDB(db); ok {
-		config = mergeConfig(configured, config)
-	}
-	return &Query[T]{db: db, config: config}
+	return &Query[T]{query: db.Use[T](), config: dbConfig(db, options...)}
 }
 
 func WithLocale(ctx context.Context, locale string) context.Context {
@@ -107,24 +103,216 @@ func WithFallback(ctx context.Context, fallback string) context.Context {
 	return context.WithValue(ctx, contextKey{}, current)
 }
 
-func Locale(ctx context.Context) (string, bool) {
+func LocaleFromContext(ctx context.Context) (string, bool) {
 	state, ok := stateFromContext(ctx)
 	return state.locale, ok && state.locale != ""
 }
 
+type Apply struct {
+	config   Config
+	locale   string
+	fallback string
+	values   Values
+	where    []transWhere
+}
+
+type transWhere struct {
+	field string
+	op    string
+	value any
+}
+
+type applyState struct {
+	config   Config
+	locale   string
+	fallback string
+	values   Values
+	where    []transWhere
+	done     map[oro.ApplyStage]bool
+}
+
+const applyStateKey = "translation"
+
+func Configured(options ...Option) Apply {
+	return Apply{config: resolveConfig(options)}
+}
+
+func Locale(locale string) Apply {
+	return Apply{locale: locale}
+}
+
+func Fallback(locale string) Apply {
+	return Apply{fallback: locale}
+}
+
+func Write(values Values) Apply {
+	return Apply{values: values}
+}
+
+func WhereTrans(field string, value any) Apply {
+	return Apply{where: []transWhere{{field: field, op: "=", value: value}}}
+}
+
+func WhereTransLike(field string, value any) Apply {
+	return Apply{where: []transWhere{{field: field, op: "like", value: value}}}
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+	if ctx == nil {
+		return &oro.Error{Op: "translation.apply", Kind: oro.ErrInvalidArgument}
+	}
+	state := translationApplyState(ctx)
+	state.config = mergeConfig(state.config, apply.config)
+	if apply.locale != "" {
+		state.locale = apply.locale
+	}
+	if apply.fallback != "" {
+		state.fallback = apply.fallback
+	}
+	if len(apply.values) > 0 {
+		if state.values == nil {
+			state.values = Values{}
+		}
+		mergeTranslations(state.values, apply.values)
+	}
+	state.where = append(state.where, apply.where...)
+	return nil
+}
+
+func (apply Apply) AfterApplyOro(ctx *oro.ApplyContext) error {
+	if ctx == nil {
+		return &oro.Error{Op: "translation.apply", Kind: oro.ErrInvalidArgument}
+	}
+	state := translationApplyState(ctx)
+	if state.done[ctx.Stage] {
+		return nil
+	}
+	state.done[ctx.Stage] = true
+	switch ctx.Stage {
+	case oro.ApplyStageSpec:
+		return apply.applySpec(ctx, state)
+	case oro.ApplyStageValues:
+		return apply.applyValues(ctx, state)
+	case oro.ApplyStageResult:
+		return apply.applyResult(ctx, state)
+	default:
+		return nil
+	}
+}
+
+func (apply Apply) applySpec(ctx *oro.ApplyContext, state *applyState) error {
+	if ctx.Mode != oro.ApplyRead && ctx.Mode != oro.ApplyUpdate && ctx.Mode != oro.ApplyDelete && ctx.Mode != oro.ApplyRestore {
+		return nil
+	}
+	if len(state.where) == 0 && ctx.Mode != oro.ApplyRead {
+		return nil
+	}
+	if ctx.Mode == oro.ApplyRead {
+		ctx.SelectHidden(state.config.field())
+	}
+	locale := state.effectiveLocale(ctx.Context)
+	for _, condition := range state.where {
+		if !isTranslatedField(state.config, condition.field) {
+			return &oro.Error{Op: "translation.where", Kind: oro.ErrUnknownField, Field: condition.field}
+		}
+		if locale == "" {
+			return &oro.Error{Op: "translation.where", Kind: oro.ErrInvalidArgument, Field: condition.field}
+		}
+		jsonPath := oro.JSON(state.config.field()).Path(locale, condition.field)
+		if condition.op == "like" {
+			if err := ctx.Where(jsonPath.Like(condition.value)); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := ctx.Where(jsonPath.Eq(condition.value)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (apply Apply) applyValues(ctx *oro.ApplyContext, state *applyState) error {
+	switch ctx.Mode {
+	case oro.ApplyInsert:
+		if ctx.Model == nil {
+			return nil
+		}
+		return prepareModelForWrite(ctx.Context, ctx.Model, state.config, state.effectiveLocale(ctx.Context), state.values)
+	case oro.ApplyUpdate:
+		mapped, hasTranslations, err := prepareMapForUpdate(ctx, state.config, state.effectiveLocale(ctx.Context), state.values)
+		if err != nil {
+			return err
+		}
+		if !hasTranslations && len(state.values) == 0 {
+			return nil
+		}
+		for key := range ctx.Values {
+			delete(ctx.Values, key)
+		}
+		for key, value := range mapped {
+			ctx.Values[key] = value
+		}
+	}
+	return nil
+}
+
+func (apply Apply) applyResult(ctx *oro.ApplyContext, state *applyState) error {
+	if ctx.Mode != oro.ApplyAfterFind || ctx.Model == nil {
+		return nil
+	}
+	translations, err := translationsFromModel(ctx.Model, state.config.field())
+	if err != nil || len(translations) == 0 {
+		return err
+	}
+	return applyTranslations(ctx.Model, translations, state.effectiveLocale(ctx.Context), state.effectiveFallback(ctx.Context), state.config.Fields)
+}
+
+func translationApplyState(ctx *oro.ApplyContext) *applyState {
+	if ctx.State == nil {
+		ctx.State = oro.Map{}
+	}
+	if state, ok := ctx.State[applyStateKey].(*applyState); ok {
+		return state
+	}
+	state := &applyState{config: dbConfig(ctx.DB), done: map[oro.ApplyStage]bool{}}
+	ctx.State[applyStateKey] = state
+	return state
+}
+
+func (state *applyState) effectiveLocale(ctx context.Context) string {
+	if state.locale != "" {
+		return state.locale
+	}
+	if contextState, ok := stateFromContext(ctx); ok && contextState.locale != "" {
+		return contextState.locale
+	}
+	return state.config.DefaultLocale
+}
+
+func (state *applyState) effectiveFallback(ctx context.Context) string {
+	if state.fallback != "" {
+		return state.fallback
+	}
+	if contextState, ok := stateFromContext(ctx); ok && contextState.fallback != "" {
+		return contextState.fallback
+	}
+	return state.config.FallbackLocale
+}
+
 type Query[T any] struct {
-	db       *oro.DB
 	query    *oro.ModelQuery[T]
 	config   Config
 	locale   string
 	fallback string
 }
 
+func (query *Query[T]) apply() Apply {
+	return Apply{config: query.config, locale: query.locale, fallback: query.fallback}
+}
+
 func (query *Query[T]) base() *oro.ModelQuery[T] {
-	if query.query != nil {
-		return query.query
-	}
-	return query.db.Use[T]()
+	return query.query.Apply(query.apply())
 }
 
 func (query *Query[T]) clone(next *oro.ModelQuery[T]) *Query[T] {
@@ -146,103 +334,67 @@ func (query *Query[T]) Fallback(locale string) *Query[T] {
 }
 
 func (query *Query[T]) Where(field any, args ...any) *Query[T] {
-	return query.clone(query.base().Where(field, args...))
+	return query.clone(query.query.Where(field, args...))
 }
 
 func (query *Query[T]) OrWhere(field any, args ...any) *Query[T] {
-	return query.clone(query.base().OrWhere(field, args...))
+	return query.clone(query.query.OrWhere(field, args...))
 }
 
 func (query *Query[T]) WhereGroup(fn func(w *oro.WhereBuilder)) *Query[T] {
-	return query.clone(query.base().WhereGroup(fn))
+	return query.clone(query.query.WhereGroup(fn))
 }
 
 func (query *Query[T]) OrWhereGroup(fn func(w *oro.WhereBuilder)) *Query[T] {
-	return query.clone(query.base().OrWhereGroup(fn))
+	return query.clone(query.query.OrWhereGroup(fn))
 }
 
 func (query *Query[T]) WhereWhen(condition bool, fn func(w *oro.WhereBuilder)) *Query[T] {
-	return query.clone(query.base().WhereWhen(condition, fn))
+	return query.clone(query.query.WhereWhen(condition, fn))
 }
 
 func (query *Query[T]) WhereRaw(sql string, args ...any) *Query[T] {
-	return query.clone(query.base().WhereRaw(sql, args...))
+	return query.clone(query.query.WhereRaw(sql, args...))
 }
 
 func (query *Query[T]) WhereTrans(field string, value any) *Query[T] {
-	return query.transCondition(field, "=", value)
+	return query.clone(query.query.Apply(WhereTrans(field, value)))
 }
 
 func (query *Query[T]) WhereTransLike(field string, value any) *Query[T] {
-	return query.transCondition(field, "like", value)
-}
-
-func (query *Query[T]) transCondition(field string, op string, value any) *Query[T] {
-	if !query.isTranslatedField(field) {
-		clone := *query
-		clone.query = clone.base().Where(oro.Condition{Op: "invalid", Value: &oro.Error{Op: "translation.where", Kind: oro.ErrUnknownField, Field: field}})
-		return &clone
-	}
-	locale := query.effectiveLocale(context.Background())
-	if locale == "" {
-		clone := *query
-		clone.query = clone.base().Where(oro.Condition{Op: "invalid", Value: &oro.Error{Op: "translation.where", Kind: oro.ErrInvalidArgument, Field: field}})
-		return &clone
-	}
-	condition := oro.JSON(query.config.field()).Path(locale, field)
-	if op == "like" {
-		return query.clone(query.base().Where(condition.Like(value)))
-	}
-	return query.clone(query.base().Where(condition.Eq(value)))
+	return query.clone(query.query.Apply(WhereTransLike(field, value)))
 }
 
 func (query *Query[T]) OrderBy(fields ...string) *Query[T] {
-	return query.clone(query.base().OrderBy(fields...))
+	return query.clone(query.query.OrderBy(fields...))
 }
 
 func (query *Query[T]) OrderByDesc(fields ...string) *Query[T] {
-	return query.clone(query.base().OrderByDesc(fields...))
+	return query.clone(query.query.OrderByDesc(fields...))
 }
 
 func (query *Query[T]) Limit(limit int) *Query[T] {
-	return query.clone(query.base().Limit(limit))
+	return query.clone(query.query.Limit(limit))
 }
 
 func (query *Query[T]) Offset(offset int) *Query[T] {
-	return query.clone(query.base().Offset(offset))
+	return query.clone(query.query.Offset(offset))
 }
 
 func (query *Query[T]) With(relation any, callbacks ...func(*oro.RelationQuery)) *Query[T] {
-	return query.clone(query.base().With(relation, callbacks...))
+	return query.clone(query.query.With(relation, callbacks...))
 }
 
 func (query *Query[T]) First(ctx context.Context) (*T, error) {
-	model, err := query.withTranslationField().First(ctx)
-	if err != nil || model == nil {
-		return model, err
-	}
-	return model, query.applyModel(ctx, model)
+	return query.base().First(ctx)
 }
 
 func (query *Query[T]) Find(ctx context.Context, id any) (*T, error) {
-	model, err := query.withTranslationField().Find(ctx, id)
-	if err != nil || model == nil {
-		return model, err
-	}
-	return model, query.applyModel(ctx, model)
+	return query.base().Find(ctx, id)
 }
 
 func (query *Query[T]) Get(ctx context.Context) ([]*T, error) {
-	models, err := query.withTranslationField().Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, model := range models {
-		if err := query.applyModel(ctx, model); err != nil {
-			return nil, err
-		}
-	}
-	return models, nil
+	return query.base().Get(ctx)
 }
 
 func (query *Query[T]) Count(ctx context.Context) (int64, error) {
@@ -254,35 +406,19 @@ func (query *Query[T]) Exists(ctx context.Context) (bool, error) {
 }
 
 func (query *Query[T]) Create(ctx context.Context, model *T, values ...Values) (*T, error) {
-	if model == nil {
-		return nil, &oro.Error{Op: "translation.create", Kind: oro.ErrInvalidArgument}
+	applies := []oro.Apply{query.apply()}
+	if len(values) > 0 {
+		applies = append(applies, Write(values[0]))
 	}
-	if err := query.prepareModelForWrite(ctx, model, values...); err != nil {
-		return nil, err
-	}
-	created, err := query.base().Create(ctx, model)
-	if err != nil || created == nil {
-		return created, err
-	}
-	return created, query.applyModel(ctx, created)
+	return query.query.Apply(applies...).Create(ctx, model)
 }
 
 func (query *Query[T]) Update(ctx context.Context, values oro.Map, transValues ...Values) (int64, error) {
-	mapped, hasTranslations, err := query.prepareMapForUpdate(ctx, values)
-	if err != nil {
-		return 0, err
+	applies := []oro.Apply{query.apply()}
+	if len(transValues) > 0 {
+		applies = append(applies, Write(transValues[0]))
 	}
-	if hasTranslations || len(transValues) > 0 {
-		if query.canAffectMany(ctx) {
-			return 0, &oro.Error{Op: "translation.update", Kind: oro.ErrUnsupported}
-		}
-		merged, err := query.mergeExistingTranslations(ctx, mapped, transValues...)
-		if err != nil {
-			return 0, err
-		}
-		mapped = merged
-	}
-	return query.base().Update(ctx, mapped)
+	return query.query.Apply(applies...).Update(ctx, values)
 }
 
 func (query *Query[T]) Delete(ctx context.Context) (int64, error) {
@@ -297,18 +433,16 @@ func (query *Query[T]) Restore(ctx context.Context) (int64, error) {
 	return query.base().Restore(ctx)
 }
 
-func (query *Query[T]) applyModel(ctx context.Context, model *T) error {
-	translations, err := translationsFromModel(model, query.config.field())
-	if err != nil || len(translations) == 0 {
-		return err
+func dbConfig(db *oro.DB, options ...Option) Config {
+	config := resolveConfig(options)
+	if configured, ok := configFromDB(db); ok {
+		config = mergeConfig(configured, config)
 	}
-	locale := query.effectiveLocale(ctx)
-	fallback := query.effectiveFallback(ctx)
-	return applyTranslations(model, translations, locale, fallback, query.config.Fields)
+	return config
 }
 
-func (query *Query[T]) prepareModelForWrite(ctx context.Context, model *T, values ...Values) error {
-	translations, err := translationsFromModel(model, query.config.field())
+func prepareModelForWrite(ctx context.Context, model any, config Config, locale string, values Values) error {
+	translations, err := translationsFromModel(model, config.field())
 	if err != nil {
 		return err
 	}
@@ -316,31 +450,29 @@ func (query *Query[T]) prepareModelForWrite(ctx context.Context, model *T, value
 		translations = Values{}
 	}
 	if len(values) > 0 {
-		filtered := query.filterValues(values[0])
+		filtered := filterValues(config, values)
 		mergeTranslations(translations, filtered)
-		if err := query.applyOriginalFallbackForCreate(ctx, model, filtered); err != nil {
+		if err := applyOriginalFallbackForCreate(ctx, model, config, locale, filtered); err != nil {
 			return err
 		}
 	} else {
-		row, err := query.translationValuesFromModel(model)
+		row, err := translationValuesFromModel(model, config)
 		if err != nil {
 			return err
 		}
 		if len(row) > 0 {
-			locale := query.effectiveLocale(ctx)
 			if locale == "" {
 				return &oro.Error{Op: "translation.create", Kind: oro.ErrInvalidArgument, Field: "locale"}
 			}
 			translations[locale] = row
 		}
 	}
-	return setTranslations(model, query.config.field(), translations)
+	return setTranslations(model, config.field(), translations)
 }
 
-func (query *Query[T]) applyOriginalFallbackForCreate(ctx context.Context, model *T, values Values) error {
-	locale := query.config.DefaultLocale
+func applyOriginalFallbackForCreate(ctx context.Context, model any, config Config, locale string, values Values) error {
 	if locale == "" {
-		locale = query.effectiveLocale(ctx)
+		locale = config.DefaultLocale
 		if locale == "" {
 			locale = firstLocale(values)
 		}
@@ -361,110 +493,61 @@ func (query *Query[T]) applyOriginalFallbackForCreate(ctx context.Context, model
 	return nil
 }
 
-func (query *Query[T]) prepareMapForUpdate(ctx context.Context, values oro.Map) (oro.Map, bool, error) {
-	mapped := copyMap(values)
-	if len(mapped) == 0 {
+func prepareMapForUpdate(ctx *oro.ApplyContext, config Config, locale string, transValues Values) (oro.Map, bool, error) {
+	mapped := copyMap(ctx.Values)
+	if len(mapped) == 0 && len(transValues) == 0 {
 		return mapped, false, nil
 	}
 	row := oro.Map{}
 	for key, value := range mapped {
-		if query.isTranslatedField(key) {
+		if isTranslatedField(config, key) {
 			row[key] = value
 			delete(mapped, key)
 		}
 	}
-	if len(row) == 0 {
-		return mapped, false, nil
-	}
-	locale := query.effectiveLocale(ctx)
-	if locale == "" {
-		return nil, false, &oro.Error{Op: "translation.update", Kind: oro.ErrInvalidArgument, Field: "locale"}
-	}
 	translations := Values{}
 	if len(row) > 0 {
+		if locale == "" {
+			return nil, false, &oro.Error{Op: "translation.update", Kind: oro.ErrInvalidArgument, Field: "locale"}
+		}
 		translations[locale] = row
 	}
-	query.syncOriginalValues(mapped, translations)
-	if len(translations) > 0 {
-		mapped[query.config.field()] = mustMarshalRaw(translations)
+	filtered := filterValues(config, transValues)
+	mergeTranslations(translations, filtered)
+	if len(translations) == 0 {
+		return mapped, false, nil
 	}
-	return mapped, len(translations) > 0, nil
-}
-
-func (query *Query[T]) mergeExistingTranslations(ctx context.Context, mapped oro.Map, transValues ...Values) (oro.Map, error) {
-	model, err := query.withTranslationField().First(ctx)
-	if err != nil || model == nil {
-		return mapped, err
+	if ctx.DB == nil || ctx.Spec == nil {
+		return nil, false, &oro.Error{Op: "translation.update", Kind: oro.ErrInvalidArgument}
 	}
-	translations, err := translationsFromModel(model, query.config.field())
-	if err != nil {
-		return nil, err
-	}
-	if translations == nil {
-		translations = Values{}
-	}
-	if raw, ok := mapped[query.config.field()]; ok {
-		next, err := normalizeTranslations(raw)
+	if count, err := ctx.CountRows(); err != nil || count != 1 {
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		mergeTranslations(translations, next)
-		query.syncOriginalValues(mapped, next)
-		delete(mapped, query.config.field())
+		return nil, false, &oro.Error{Op: "translation.update", Kind: oro.ErrUnsupported}
 	}
-	for _, values := range transValues {
-		filtered := query.filterValues(values)
-		mergeTranslations(translations, filtered)
-		query.syncOriginalValues(mapped, filtered)
-	}
-	mapped[query.config.field()] = mustMarshalRaw(translations)
-	return mapped, nil
-}
-
-func (query *Query[T]) withTranslationField() *oro.ModelQuery[T] {
-	modelQuery := query.base()
-	schema, err := oro.SchemaOf[T](query.db)
+	current, err := ctx.FirstRowColumns(config.field())
 	if err != nil {
-		return modelQuery.SelectHidden(query.config.field())
+		return nil, false, err
 	}
-	selects := make([]any, 0, len(schema.Fields))
-	for _, field := range schema.Fields {
-		if field.Hidden || field.Ignore || field.Virtual {
-			continue
-		}
-		selects = append(selects, field.Name)
+	existing, err := normalizeTranslations(current[config.field()])
+	if err != nil {
+		return nil, false, err
 	}
-	if len(selects) > 0 {
-		modelQuery = modelQuery.Select(selects...)
+	if existing == nil {
+		existing = Values{}
 	}
-	return modelQuery.SelectHidden(query.config.field())
+	mergeTranslations(existing, translations)
+	syncOriginalValues(config, mapped, translations)
+	mapped[config.field()] = mustMarshalRaw(existing)
+	return mapped, true, nil
 }
 
-func (query *Query[T]) effectiveLocale(ctx context.Context) string {
-	if query.locale != "" {
-		return query.locale
-	}
-	if state, ok := stateFromContext(ctx); ok && state.locale != "" {
-		return state.locale
-	}
-	return query.config.DefaultLocale
-}
-
-func (query *Query[T]) effectiveFallback(ctx context.Context) string {
-	if query.fallback != "" {
-		return query.fallback
-	}
-	if state, ok := stateFromContext(ctx); ok && state.fallback != "" {
-		return state.fallback
-	}
-	return query.config.FallbackLocale
-}
-
-func (query *Query[T]) isTranslatedField(field string) bool {
-	if field == "" || field == query.config.field() {
+func isTranslatedField(config Config, field string) bool {
+	if field == "" || field == config.field() {
 		return false
 	}
-	for _, item := range query.config.Fields {
+	for _, item := range config.Fields {
 		if item == field {
 			return true
 		}
@@ -472,14 +555,14 @@ func (query *Query[T]) isTranslatedField(field string) bool {
 	return false
 }
 
-func (query *Query[T]) filterValues(values Values) Values {
+func filterValues(config Config, values Values) Values {
 	if len(values) == 0 {
 		return nil
 	}
 	out := Values{}
 	for locale, row := range values {
 		for field, value := range row {
-			if !query.isTranslatedField(field) {
+			if !isTranslatedField(config, field) {
 				continue
 			}
 			if out[locale] == nil {
@@ -491,12 +574,7 @@ func (query *Query[T]) filterValues(values Values) Values {
 	return out
 }
 
-func (query *Query[T]) canAffectMany(ctx context.Context) bool {
-	count, err := query.base().Count(ctx)
-	return err != nil || count != 1
-}
-
-func (query *Query[T]) translationValuesFromModel(model any) (oro.Map, error) {
+func translationValuesFromModel(model any, config Config) (oro.Map, error) {
 	modelValue := reflect.ValueOf(model)
 	if !modelValue.IsValid() || modelValue.Kind() != reflect.Pointer || modelValue.IsNil() {
 		return nil, &oro.Error{Op: "translation", Kind: oro.ErrInvalidArgument}
@@ -507,7 +585,7 @@ func (query *Query[T]) translationValuesFromModel(model any) (oro.Map, error) {
 	}
 	row := oro.Map{}
 	for _, field := range reflect.VisibleFields(structValue.Type()) {
-		if !field.IsExported() || field.Anonymous || !query.isTranslatedField(field.Name) {
+		if !field.IsExported() || field.Anonymous || !isTranslatedField(config, field.Name) {
 			continue
 		}
 		fieldValue, ok := reflectx.FieldByIndex(structValue, field.Index)
@@ -522,14 +600,14 @@ func (query *Query[T]) translationValuesFromModel(model any) (oro.Map, error) {
 	return row, nil
 }
 
-func (query *Query[T]) syncOriginalValues(mapped oro.Map, values Values) {
-	locale := query.config.DefaultLocale
+func syncOriginalValues(config Config, mapped oro.Map, values Values) {
+	locale := config.DefaultLocale
 	if locale == "" {
 		return
 	}
 	row := values[locale]
 	for field, value := range row {
-		if !query.isTranslatedField(field) {
+		if !isTranslatedField(config, field) {
 			continue
 		}
 		if _, exists := mapped[field]; !exists {

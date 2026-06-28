@@ -1512,6 +1512,10 @@ func modelQuerySpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec
 	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
+	selectHidden := append([]string(nil), query.selectHidden...)
+	if err := applyModelApplies(ctx, query, ApplyRead, ApplyStageSpec, schema, &spec, nil, nil, &selectHidden); err != nil {
+		return QuerySpec{}, nil, err
+	}
 	conditions, err := resolveRelationFilterConditions(ctx, query.db, schema, spec, spec.Where)
 	if err != nil {
 		return QuerySpec{}, nil, err
@@ -1530,7 +1534,7 @@ func modelQuerySpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec
 	if err := convertModelSelects(schema, &spec); err != nil {
 		return QuerySpec{}, nil, err
 	}
-	if err := applyModelSelectVisibility(query.db, schema, &spec, query.selectHidden); err != nil {
+	if err := applyModelSelectVisibility(query.db, schema, &spec, selectHidden); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	applySoftDeleteScope(schema, &spec, query.softDeleteMode)
@@ -1539,6 +1543,10 @@ func modelQuerySpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec
 }
 
 func modelWriteSpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec, *ModelSchema, error) {
+	return modelWriteSpecMode(ctx, query, ApplyUpdate)
+}
+
+func modelWriteSpecMode[T any](ctx context.Context, query *ModelQuery[T], mode ApplyMode) (QuerySpec, *ModelSchema, error) {
 	schema, err := schemaForModel[T](query.db)
 	if err != nil {
 		return QuerySpec{}, nil, err
@@ -1552,6 +1560,9 @@ func modelWriteSpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpec
 		return QuerySpec{}, nil, err
 	}
 	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
+		return QuerySpec{}, nil, err
+	}
+	if err := applyModelApplies(ctx, query, mode, ApplyStageSpec, schema, &spec, nil, nil, nil); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	conditions, err := resolveRelationFilterConditions(ctx, query.db, schema, spec, spec.Where)
@@ -1587,6 +1598,9 @@ func modelInsertSpec[T any](ctx context.Context, query *ModelQuery[T]) (QuerySpe
 		return QuerySpec{}, nil, err
 	}
 	if err := applyConnectionExtensions(ctx, query.db, &spec); err != nil {
+		return QuerySpec{}, nil, err
+	}
+	if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageSpec, schema, &spec, nil, nil, nil); err != nil {
 		return QuerySpec{}, nil, err
 	}
 	return spec, schema, nil
@@ -2096,6 +2110,15 @@ func isQualifiedIdentifier(name string) bool {
 }
 
 func applyModelSelectVisibility(db *DB, schema *ModelSchema, spec *QuerySpec, hiddenFields []string) error {
+	if len(hiddenFields) > 0 && len(spec.Select) == 0 {
+		if len(schema.DefaultExprs) > 0 {
+			if db == nil || db.runtime == nil || db.runtime.Config.TablePrefix == "" {
+				spec.Select = schema.DefaultExprs
+			} else {
+				spec.Select = append([]SelectExpr(nil), schema.DefaultExprs...)
+			}
+		}
+	}
 	for _, fieldName := range hiddenFields {
 		field, ok := schema.FieldByGo[fieldName]
 		if !ok {

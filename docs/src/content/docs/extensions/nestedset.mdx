@@ -220,24 +220,26 @@ tree := nestedset.Use[Category](db, nestedset.Scope(oro.Map{
 
 The scope is applied to every read and structural write. Scope values are also written into newly created models.
 
-## Query wrapper
+## Unified Apply queries
 
-For advanced reads, use `tree.Query()`:
+For advanced reads, use the core model query with `Apply`:
 
 ```go
-nodes, err := tree.Query().
-    WhereDepthGte(1).
-    DefaultOrder().
+nodes, err := db.Use[Category]().
+    Apply(nestedset.DepthGte(1), nestedset.DefaultOrder()).
     Get(ctx)
 
-query, err := tree.Query().DescendantsOf(ctx, root.ID)
-if err != nil {
-    return err
-}
-items, err := query.Where("Status", "active").DefaultOrder().Get(ctx)
+items, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "active").
+    Get(ctx)
 ```
 
-Supported query helpers include `Roots`, `AncestorsOf`, `AncestorsAndSelfOf`, `DescendantsOf`, `DescendantsAndSelfOf`, `SiblingsOf`, `WhereDepth`, `WhereDepthGte`, `WhereDepthLte`, `DefaultOrder`, `Reversed`, `ToTree`, `Get`, `First`, `Count`, and `Exists`.
+`DescendantsOf(root)` can receive the current model; the extension reloads the latest bounds by model `ID`, so stale `_lft/_rgt` values on an old struct are not used.
+
+Supported apply helpers include `Roots`, `AncestorsOf`, `AncestorsAndSelfOf`, `DescendantsOf`, `DescendantsAndSelfOf`, `DescendantsWithinDepthOf`, `DescendantsAtDepthOf`, `SiblingsOf`, `Depth`, `DepthGte`, `DepthLte`, `DefaultOrder`, and `Reversed`.
+
+`tree.Query()` remains as a compatibility wrapper, but new code should prefer `db.Use[Category]().Apply(...)` so extension packages do not maintain their own `Where/Get/Limit` API.
 
 ## Check and rebuild
 

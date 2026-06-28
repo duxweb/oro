@@ -220,24 +220,26 @@ tree := nestedset.Use[Category](db, nestedset.Scope(oro.Map{
 
 scope 会应用到所有读取和结构性写入。新建节点时，scope 值也会写入模型。
 
-## Query 包装
+## 统一 Apply 查询
 
-复杂读取可以使用 `tree.Query()`：
+复杂读取推荐直接使用核心查询链的 `Apply`：
 
 ```go
-nodes, err := tree.Query().
-    WhereDepthGte(1).
-    DefaultOrder().
+nodes, err := db.Use[Category]().
+    Apply(nestedset.DepthGte(1), nestedset.DefaultOrder()).
     Get(ctx)
 
-query, err := tree.Query().DescendantsOf(ctx, root.ID)
-if err != nil {
-    return err
-}
-items, err := query.Where("Status", "active").DefaultOrder().Get(ctx)
+items, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "active").
+    Get(ctx)
 ```
 
-支持 `Roots`、`AncestorsOf`、`AncestorsAndSelfOf`、`DescendantsOf`、`DescendantsAndSelfOf`、`SiblingsOf`、`WhereDepth`、`WhereDepthGte`、`WhereDepthLte`、`DefaultOrder`、`Reversed`、`ToTree`、`Get`、`First`、`Count` 和 `Exists`。
+`DescendantsOf(root)` 可以传当前模型；扩展会按模型 `ID` 重新读取最新左右值，避免使用过期对象上的 `_lft/_rgt`。
+
+支持 `Roots`、`AncestorsOf`、`AncestorsAndSelfOf`、`DescendantsOf`、`DescendantsAndSelfOf`、`DescendantsWithinDepthOf`、`DescendantsAtDepthOf`、`SiblingsOf`、`Depth`、`DepthGte`、`DepthLte`、`DefaultOrder` 和 `Reversed`。
+
+`tree.Query()` 仍作为兼容薄封装保留，但新代码推荐统一使用 `db.Use[Category]().Apply(...)`，这样不会让扩展包再维护一套 `Where/Get/Limit` API。
 
 ## 检查和重建
 

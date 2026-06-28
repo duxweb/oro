@@ -66,6 +66,14 @@ func resolveConfig(options []Option) Config {
 	return config
 }
 
+func configOptions(config Config) []Option {
+	options := []Option{FieldNames(config.ParentField, config.LeftField, config.RightField, config.DepthField)}
+	if len(config.Scope) > 0 {
+		options = append(options, Scope(config.Scope))
+	}
+	return options
+}
+
 func defaultLeftColumn(field string) string {
 	if field == "Lft" {
 		return "_lft"

@@ -58,12 +58,18 @@ func (Product) Define(s *oro.SchemaBuilder) {
 
 `translation.Fields` 会自动定义隐藏 JSON 字段 `Translations -> translations`。翻译字段不要定义成 `Virtual()`，因为原始值兜底需要真实列保存基础内容。
 
+
+## 统一 Apply 入口
+
+`translation` 的查询、读取转换和写入翻译值都通过核心查询链的 `Apply` 完成，因此可以和普通 `Where`、`With`、`OrderBy`、分页等方法自然组合，不需要扩展包维护另一套查询 API。
+
+旧的 `translation.Use[Product](db)` 仍作为兼容薄封装存在；新代码推荐直接使用 `db.Use[Product]().Apply(...)`。
+
 ## 一次创建多语言
 
 ```go
-created, err := translation.Use[Product](db).Create(ctx,
-    &Product{Code: "P001"},
-    translation.Values{
+created, err := db.Use[Product]().
+    Apply(translation.Write(translation.Values{
         "zh-CN": oro.Map{
             "Name":        "苹果",
             "Description": "红色苹果",
@@ -72,8 +78,8 @@ created, err := translation.Use[Product](db).Create(ctx,
             "Name":        "Apple",
             "Description": "Red apple",
         },
-    },
-)
+    })).
+    Create(ctx, &Product{Code: "P001"})
 ```
 
 传入 `translation.Values` 时，扩展会保存完整翻译 JSON，并把默认语言的值写入原始字段；如果模型原始字段已有非零值，则保留原始字段值。
@@ -81,8 +87,8 @@ created, err := translation.Use[Product](db).Create(ctx,
 ## 创建当前语言
 
 ```go
-created, err := translation.Use[Product](db).
-    Locale("zh-CN").
+created, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
     Create(ctx, &Product{
         Code:        "P002",
         Name:        "梨子",
@@ -95,9 +101,8 @@ created, err := translation.Use[Product](db).
 ## 读取与回退
 
 ```go
-product, err := translation.Use[Product](db).
-    Locale("ja-JP").
-    Fallback("en-US").
+product, err := db.Use[Product]().
+    Apply(translation.Locale("ja-JP"), translation.Fallback("en-US")).
     Find(ctx, id)
 ```
 
@@ -109,7 +114,7 @@ product, err := translation.Use[Product](db).
 ctx = translation.WithLocale(ctx, "ja-JP")
 ctx = translation.WithFallback(ctx, "en-US")
 
-product, err := translation.Use[Product](db).Find(ctx, id)
+product, err := db.Use[Product]().Apply(translation.Configured()).Find(ctx, id)
 ```
 
 ## 更新翻译
@@ -117,8 +122,8 @@ product, err := translation.Use[Product](db).Find(ctx, id)
 更新当前语言：
 
 ```go
-_, err := translation.Use[Product](db).
-    Locale("zh-CN").
+_, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
     Where("ID", id).
     Update(ctx, oro.Map{"Name": "新梨子"})
 ```
@@ -126,11 +131,12 @@ _, err := translation.Use[Product](db).
 一次更新多个语言：
 
 ```go
-_, err := translation.Use[Product](db).
-    Where("ID", id).
-    Update(ctx, nil, translation.Values{
+_, err := db.Use[Product]().
+    Apply(translation.Write(translation.Values{
         "en-US": oro.Map{"Name": "Pear"},
-    })
+    })).
+    Where("ID", id).
+    Update(ctx, nil)
 ```
 
 翻译更新会先读取当前记录，再合并到已有 `translations` JSON，不会删除其他语言。为了避免把同一份 JSON 合并到多条记录，带翻译值的 `Update` 只允许命中一条记录。
@@ -138,9 +144,8 @@ _, err := translation.Use[Product](db).
 ## 查询翻译值
 
 ```go
-product, err := translation.Use[Product](db).
-    Locale("en-US").
-    WhereTrans("Name", "Apple").
+product, err := db.Use[Product]().
+    Apply(translation.Locale("en-US"), translation.WhereTrans("Name", "Apple")).
     First(ctx)
 ```
 
@@ -149,9 +154,8 @@ product, err := translation.Use[Product](db).
 使用 `WhereTransLike` 可以对当前语言的翻译字段做 `LIKE` 模糊匹配：
 
 ```go
-products, err := translation.Use[Product](db).
-    Locale("en-US").
-    WhereTransLike("Name", "%App%").
+products, err := db.Use[Product]().
+    Apply(translation.Locale("en-US"), translation.WhereTransLike("Name", "%App%")).
     Get(ctx)
 ```
 

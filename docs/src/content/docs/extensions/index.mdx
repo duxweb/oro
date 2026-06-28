@@ -30,7 +30,24 @@ An extension can hook into specific lifecycle points:
 | `ShardValues` | provide shard routing values |
 | `CacheKeyValues` | add extension state to automatic cache keys |
 
-Business-facing APIs stay in the extension package. For example, tenant usage is `tenant.Use(db, values)`, while tree usage is `nestedset.Use[Category](db)`.
+## Query-chain Apply
+
+Query-chain extensions compose through `db.Use[T]().Apply(...)`. Extension packages provide behavior objects, while `Where`, `With`, `OrderBy`, pagination, aggregation, and other query methods still come from the core `ModelQuery`.
+
+```go
+products, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
+    Where("Status", "online").
+    OrderByDesc("ID").
+    Get(ctx)
+
+children, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "enabled").
+    Get(ctx)
+```
+
+Structural business services remain in extension packages. For example, tree-aware create, move, and delete operations use `nestedset.Use[Category](db)` because they are not simple query filters.
 
 ## Embedded extension fields
 

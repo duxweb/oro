@@ -58,12 +58,18 @@ func (Product) Define(s *oro.SchemaBuilder) {
 
 `translation.Fields` automatically defines the hidden JSON column `Translations -> translations`. Do not define translated fields as `Virtual()` if you need original-value fallback, because the fallback value must be stored in a real column.
 
+
+## Unified Apply entrypoint
+
+Translation query behavior, result transformation, and translated write values are applied through the core query chain with `Apply`, so they compose with normal `Where`, `With`, `OrderBy`, pagination, and other model-query methods without a second query API.
+
+`translation.Use[Product](db)` remains as a compatibility wrapper. New code should prefer `db.Use[Product]().Apply(...)`.
+
 ## Create multiple locales
 
 ```go
-created, err := translation.Use[Product](db).Create(ctx,
-    &Product{Code: "P001"},
-    translation.Values{
+created, err := db.Use[Product]().
+    Apply(translation.Write(translation.Values{
         "zh-CN": oro.Map{
             "Name":        "苹果",
             "Description": "红色苹果",
@@ -72,8 +78,8 @@ created, err := translation.Use[Product](db).Create(ctx,
             "Name":        "Apple",
             "Description": "Red apple",
         },
-    },
-)
+    })).
+    Create(ctx, &Product{Code: "P001"})
 ```
 
 When `translation.Values` is passed, Oro stores the full translation JSON and writes the default-locale values into the original fields. If the model already has non-zero original field values, those values are preserved.
@@ -81,8 +87,8 @@ When `translation.Values` is passed, Oro stores the full translation JSON and wr
 ## Create current locale
 
 ```go
-created, err := translation.Use[Product](db).
-    Locale("zh-CN").
+created, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
     Create(ctx, &Product{
         Code:        "P002",
         Name:        "梨子",
@@ -95,9 +101,8 @@ If `translation.Values` is not passed, `Create` stores non-zero translated field
 ## Read with fallback
 
 ```go
-product, err := translation.Use[Product](db).
-    Locale("ja-JP").
-    Fallback("en-US").
+product, err := db.Use[Product]().
+    Apply(translation.Locale("ja-JP"), translation.Fallback("en-US")).
     Find(ctx, id)
 ```
 
@@ -109,7 +114,7 @@ You can also pass locale state through `context.Context`:
 ctx = translation.WithLocale(ctx, "ja-JP")
 ctx = translation.WithFallback(ctx, "en-US")
 
-product, err := translation.Use[Product](db).Find(ctx, id)
+product, err := db.Use[Product]().Apply(translation.Configured()).Find(ctx, id)
 ```
 
 ## Update translations
@@ -117,8 +122,8 @@ product, err := translation.Use[Product](db).Find(ctx, id)
 Update the current locale:
 
 ```go
-_, err := translation.Use[Product](db).
-    Locale("zh-CN").
+_, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
     Where("ID", id).
     Update(ctx, oro.Map{"Name": "新梨子"})
 ```
@@ -126,11 +131,12 @@ _, err := translation.Use[Product](db).
 Update multiple locales at once:
 
 ```go
-_, err := translation.Use[Product](db).
-    Where("ID", id).
-    Update(ctx, nil, translation.Values{
+_, err := db.Use[Product]().
+    Apply(translation.Write(translation.Values{
         "en-US": oro.Map{"Name": "Pear"},
-    })
+    })).
+    Where("ID", id).
+    Update(ctx, nil)
 ```
 
 Translation updates read the current row first and merge into the existing `translations` JSON without removing other locales. To avoid merging one JSON payload into multiple records, `Update` with translation values must match exactly one row.
@@ -138,9 +144,8 @@ Translation updates read the current row first and merge into the existing `tran
 ## Query translated values
 
 ```go
-product, err := translation.Use[Product](db).
-    Locale("en-US").
-    WhereTrans("Name", "Apple").
+product, err := db.Use[Product]().
+    Apply(translation.Locale("en-US"), translation.WhereTrans("Name", "Apple")).
     First(ctx)
 ```
 
@@ -149,9 +154,8 @@ product, err := translation.Use[Product](db).
 Use `WhereTransLike` for a `LIKE` match on the translated field for the active locale:
 
 ```go
-products, err := translation.Use[Product](db).
-    Locale("en-US").
-    WhereTransLike("Name", "%App%").
+products, err := db.Use[Product]().
+    Apply(translation.Locale("en-US"), translation.WhereTransLike("Name", "%App%")).
     Get(ctx)
 ```
 

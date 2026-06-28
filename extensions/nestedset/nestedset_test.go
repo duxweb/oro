@@ -520,3 +520,33 @@ func TestNestedSetCheckDetectsBrokenTree(t *testing.T) {
 		t.Fatalf("expected invalid tree: %#v", result)
 	}
 }
+
+func TestApplyNestedSetOnModelQuery(t *testing.T) {
+	db, ctx := openNestedSetDB(t)
+	tree := nestedset.Use[category](db)
+
+	root, err := tree.CreateRoot(ctx, &category{Name: "root"})
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	if _, err := tree.CreateChild(ctx, root.ID, &category{Name: "a"}); err != nil {
+		t.Fatalf("create a: %v", err)
+	}
+	if _, err := tree.CreateChild(ctx, root.ID, &category{Name: "b"}); err != nil {
+		t.Fatalf("create b: %v", err)
+	}
+
+	items, err := db.Use[category]().
+		Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+		Get(ctx)
+	if err != nil {
+		t.Fatalf("apply descendants: %v", err)
+	}
+	assertNames(t, items, []string{"a", "b"})
+
+	roots, err := db.Use[category]().Apply(nestedset.Roots()).Get(ctx)
+	if err != nil {
+		t.Fatalf("apply roots: %v", err)
+	}
+	assertNames(t, roots, []string{"root"})
+}

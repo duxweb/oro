@@ -30,7 +30,24 @@ db, err := oro.Open(oro.Config{
 | `ShardValues` | 提供分片路由值 |
 | `CacheKeyValues` | 把扩展状态加入自动缓存键 |
 
-面向业务的 API 保留在扩展包里。例如租户使用 `tenant.Use(db, values)`，树结构使用 `nestedset.Use[Category](db)`。
+## 查询链 Apply
+
+查询链扩展统一通过 `db.Use[T]().Apply(...)` 组合，扩展包只提供行为对象，`Where`、`With`、`OrderBy`、分页、聚合等查询能力仍然复用核心 `ModelQuery`。
+
+```go
+products, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
+    Where("Status", "online").
+    OrderByDesc("ID").
+    Get(ctx)
+
+children, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "enabled").
+    Get(ctx)
+```
+
+结构性业务服务仍保留在扩展包里，例如树形创建、移动、删除使用 `nestedset.Use[Category](db)`，因为这些不是普通查询条件。
 
 ## 扩展字段嵌入
 

@@ -212,3 +212,99 @@ func TestTranslateHelperFallsBackToOriginal(t *testing.T) {
 		t.Fatalf("expected translated value, got %q", got)
 	}
 }
+
+func TestApplyTranslationOnModelQuery(t *testing.T) {
+	db, ctx := openDB(t)
+
+	created, err := db.Use[product]().Apply(translation.Write(translation.Values{
+		"zh-CN": oro.Map{"Name": "香蕉"},
+		"en-US": oro.Map{"Name": "Banana"},
+	})).Create(ctx, &product{Code: "P005"})
+	if err != nil {
+		t.Fatalf("apply create: %v", err)
+	}
+
+	found, err := db.Use[product]().
+		Apply(translation.Locale("en-US"), translation.WhereTrans("Name", "Banana")).
+		First(ctx)
+	if err != nil {
+		t.Fatalf("apply where: %v", err)
+	}
+	if found == nil || found.ID != created.ID || found.Name != "Banana" {
+		t.Fatalf("unexpected apply result %#v", found)
+	}
+
+	if _, err := db.Use[product]().
+		Apply(translation.Locale("zh-CN"), translation.Write(translation.Values{"en-US": oro.Map{"Description": "Yellow banana"}})).
+		Where("ID", created.ID).
+		Update(ctx, oro.Map{"Name": "大香蕉"}); err != nil {
+		t.Fatalf("apply update: %v", err)
+	}
+
+	updated, err := db.Use[product]().Apply(translation.Locale("zh-CN")).Find(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("apply find: %v", err)
+	}
+	if updated == nil || updated.Name != "大香蕉" {
+		t.Fatalf("unexpected updated zh result %#v", updated)
+	}
+}
+
+func TestApplyTranslationUpdateCanUseOnlyWriteValues(t *testing.T) {
+	db, ctx := openDB(t)
+
+	created, err := db.Use[product]().
+		Apply(translation.Write(translation.Values{
+			"zh-CN": oro.Map{"Name": "梨子"},
+		})).
+		Create(ctx, &product{Code: "P006"})
+	if err != nil {
+		t.Fatalf("apply create: %v", err)
+	}
+
+	affected, err := db.Use[product]().
+		Apply(translation.Write(translation.Values{
+			"en-US": oro.Map{"Name": "Pear"},
+		})).
+		Where("ID", created.ID).
+		Update(ctx, nil)
+	if err != nil {
+		t.Fatalf("apply update only translations: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 affected row, got %d", affected)
+	}
+
+	found, err := db.Use[product]().Apply(translation.Locale("en-US")).Find(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("find translated: %v", err)
+	}
+	if found == nil || found.Name != "Pear" {
+		t.Fatalf("unexpected translated result %#v", found)
+	}
+}
+
+func TestApplyTranslationUpsert(t *testing.T) {
+	db, ctx := openDB(t)
+
+	upserted, err := db.Use[product]().
+		Apply(translation.Write(translation.Values{
+			"zh-CN": oro.Map{"Name": "葡萄"},
+			"en-US": oro.Map{"Name": "Grape"},
+		})).
+		Upsert(ctx, &product{Code: "P007"}, oro.ConflictBy("Code").Update("Name", "Translations"))
+	if err != nil {
+		t.Fatalf("apply upsert: %v", err)
+	}
+	if upserted == nil || upserted.Name != "葡萄" {
+		t.Fatalf("unexpected upserted result %#v", upserted)
+	}
+
+	found, err := db.Use[product]().Apply(translation.Locale("en-US")).Find(ctx, upserted.ID)
+	if err != nil {
+		t.Fatalf("find translated upsert: %v", err)
+	}
+	if found == nil || found.Name != "Grape" {
+		t.Fatalf("unexpected translated upsert result %#v", found)
+	}
+}

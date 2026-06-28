@@ -37,7 +37,7 @@ func (query *Query[T]) Offset(offset int) *Query[T] {
 
 func (query *Query[T]) Roots() *Query[T] {
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.ParentField, nil)
+	clone.query = clone.query.Apply(Roots(configOptions(query.tree.config)...))
 	return &clone
 }
 
@@ -47,7 +47,7 @@ func (query *Query[T]) AncestorsOf(ctx context.Context, nodeID any) (*Query[T], 
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.LeftField, "<", node.Lft).Where(query.tree.config.RightField, ">", node.Rgt)
+	clone.query = clone.query.Apply(AncestorsOf(node, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -57,7 +57,7 @@ func (query *Query[T]) AncestorsAndSelfOf(ctx context.Context, nodeID any) (*Que
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.LeftField, "<=", node.Lft).Where(query.tree.config.RightField, ">=", node.Rgt)
+	clone.query = clone.query.Apply(AncestorsAndSelfOf(node, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -67,7 +67,7 @@ func (query *Query[T]) DescendantsOf(ctx context.Context, nodeID any) (*Query[T]
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.LeftField, ">", node.Lft).Where(query.tree.config.RightField, "<", node.Rgt)
+	clone.query = clone.query.Apply(DescendantsOf(node, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -80,10 +80,7 @@ func (query *Query[T]) DescendantsWithinDepthOf(ctx context.Context, nodeID any,
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.
-		Where(query.tree.config.LeftField, ">", node.Lft).
-		Where(query.tree.config.RightField, "<", node.Rgt).
-		Where(query.tree.config.DepthField, "<=", node.Depth+maxDepth)
+	clone.query = clone.query.Apply(DescendantsWithinDepthOf(node, maxDepth, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -96,10 +93,7 @@ func (query *Query[T]) DescendantsAtDepthOf(ctx context.Context, nodeID any, dep
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.
-		Where(query.tree.config.LeftField, ">", node.Lft).
-		Where(query.tree.config.RightField, "<", node.Rgt).
-		Where(query.tree.config.DepthField, node.Depth+depth)
+	clone.query = clone.query.Apply(DescendantsAtDepthOf(node, depth, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -109,7 +103,7 @@ func (query *Query[T]) DescendantsAndSelfOf(ctx context.Context, nodeID any) (*Q
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.LeftField, ">=", node.Lft).Where(query.tree.config.RightField, "<=", node.Rgt)
+	clone.query = clone.query.Apply(DescendantsAndSelfOf(node, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
@@ -119,42 +113,37 @@ func (query *Query[T]) SiblingsOf(ctx context.Context, nodeID any) (*Query[T], e
 		return query.empty(), err
 	}
 	clone := *query
-	clone.query = clone.query.Where(primaryField(query.tree.db), "!=", node.ID)
-	if node.ParentID.Valid {
-		clone.query = clone.query.Where(query.tree.config.ParentField, node.ParentID.Value)
-	} else {
-		clone.query = clone.query.Where(query.tree.config.ParentField, nil)
-	}
+	clone.query = clone.query.Apply(SiblingsOf(node, configOptions(query.tree.config)...))
 	return &clone, nil
 }
 
 func (query *Query[T]) WhereDepth(depth int) *Query[T] {
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.DepthField, depth)
+	clone.query = clone.query.Apply(Depth(depth, configOptions(query.tree.config)...))
 	return &clone
 }
 
 func (query *Query[T]) WhereDepthGte(depth int) *Query[T] {
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.DepthField, ">=", depth)
+	clone.query = clone.query.Apply(DepthGte(depth, configOptions(query.tree.config)...))
 	return &clone
 }
 
 func (query *Query[T]) WhereDepthLte(depth int) *Query[T] {
 	clone := *query
-	clone.query = clone.query.Where(query.tree.config.DepthField, "<=", depth)
+	clone.query = clone.query.Apply(DepthLte(depth, configOptions(query.tree.config)...))
 	return &clone
 }
 
 func (query *Query[T]) DefaultOrder() *Query[T] {
 	clone := *query
-	clone.query = clone.query.OrderBy(query.tree.config.LeftField)
+	clone.query = clone.query.Apply(DefaultOrder(configOptions(query.tree.config)...))
 	return &clone
 }
 
 func (query *Query[T]) Reversed() *Query[T] {
 	clone := *query
-	clone.query = clone.query.OrderByDesc(query.tree.config.LeftField)
+	clone.query = clone.query.Apply(Reversed(configOptions(query.tree.config)...))
 	return &clone
 }
 
