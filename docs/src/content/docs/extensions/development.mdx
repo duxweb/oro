@@ -1,0 +1,327 @@
+---
+title: Extension Development
+description: Build Oro extensions with Config.Extensions, Apply, embedded fields, and events.
+---
+
+Oro has two extension layers:
+
+- `Config.Extensions` installs global behavior on the database runtime.
+- `db.Use[T]().Apply(...)` composes query-local behavior on a model query.
+
+Use both when needed, but keep the boundary clear. Global extensions enforce cross-cutting rules; apply objects modify one query chain.
+
+## Choose the right integration point
+
+| Need | Use |
+| --- | --- |
+| Tenant isolation, audit, metrics, automatic connection routing | `Config.Extensions` |
+| Query-local filters, locale selection, tree bounds, write-local options | `Apply` |
+| Reusable model fields | embedded fields with `OroEmbeddedFields` |
+| Structural operations that are not normal queries | a typed service such as `nestedset.Use[T](db)` |
+
+The preferred user-facing API is:
+
+```go
+items, err := db.Use[Model]().
+    Apply(myext.Option(...)).
+    Where("Status", "active").
+    Get(ctx)
+```
+
+Avoid making every extension maintain its own `Where/Get/Limit` wrapper. If the operation is a normal query modifier, make it an `Apply`.
+
+## Recommended package layout
+
+```text
+extensions/example/
+  example.go      // Extension(), Config, Option
+  apply.go        // query-chain Apply objects
+  fields.go       // optional embedded fields
+  service.go      // optional structural service
+  example_test.go
+```
+
+Keep the public surface small:
+
+```go
+func Extension(options ...Option) oro.Extension
+func Configured(options ...Option) Apply
+func Something(...) Apply
+```
+
+Use typed options instead of unstructured maps unless the extension genuinely needs dynamic key-value input.
+
+## Global extension interface
+
+Every global extension starts with `oro.Extension`.
+
+```go
+type Extension interface {
+    Name() string
+    Install(db *oro.DB) error
+}
+```
+
+Return a stable, unique name. Oro rejects duplicate extension names during install.
+
+```go
+const extensionName = "example"
+
+type extension struct {
+    config Config
+}
+
+func Extension(options ...Option) oro.Extension {
+    config := Config{}
+    for _, option := range options {
+        if option != nil {
+            option.applyExampleOption(&config)
+        }
+    }
+    return extension{config: config}
+}
+
+func (extension) Name() string {
+    return extensionName
+}
+
+func (extension) Install(db *oro.DB) error {
+    return nil
+}
+```
+
+Register it with `Config.Extensions`:
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        example.Extension(),
+    },
+})
+```
+
+## Optional global hooks
+
+An extension can implement any of these interfaces in addition to `oro.Extension`.
+
+| Interface | Method | Purpose |
+| --- | --- | --- |
+| `QueryExtension` | `ApplyQuery(ctx, db, spec)` | append global query conditions |
+| `WriteExtension` | `ApplyWrite(ctx, db, spec)` | inject or validate write values |
+| `ConnectionExtension` | `ApplyConnection(ctx, db, spec)` | route a query to a connection |
+| `ShardValueExtension` | `ShardValues(ctx, db)` | provide values used by sharding |
+| `CacheKeyExtension` | `CacheKeyValues(ctx, db)` | add extension state to automatic cache keys |
+| `EventExtension` | `Events()` | register event handlers during install |
+| `StatefulExtension` | `State()` | store extension state on the DB session |
+
+Global hooks run through Oro's finalized query/write path with the caller `context.Context`. Do not use package globals for request-specific data; use context values or DB session state.
+
+## Query extension example
+
+This global extension appends a status condition to every model or registered table that has the configured field.
+
+```go
+type StatusExtension struct {
+    field string
+    value string
+}
+
+func (extension StatusExtension) Name() string {
+    return "status_filter"
+}
+
+func (extension StatusExtension) Install(db *oro.DB) error {
+    return nil
+}
+
+func (extension StatusExtension) ApplyQuery(ctx context.Context, db *oro.DB, spec *oro.QuerySpec) error {
+    if spec == nil || spec.Model == nil {
+        return nil
+    }
+    field, ok := spec.Model.FieldByGo[extension.field]
+    if !ok {
+        return nil
+    }
+    spec.Where = append(spec.Where, oro.Condition{
+        Field: field.Column,
+        Op:    "=",
+        Value: extension.value,
+    })
+    return nil
+}
+```
+
+Use this only when the rule is intentionally global. For query-local filtering, prefer `Apply`.
+
+## Write extension example
+
+Write extensions receive database column values in `WriteSpec.Values`.
+
+```go
+func (extension StatusExtension) ApplyWrite(ctx context.Context, db *oro.DB, spec *oro.WriteSpec) error {
+    if spec == nil || spec.Model == nil {
+        return nil
+    }
+    field, ok := spec.Model.FieldByGo[extension.field]
+    if !ok {
+        return nil
+    }
+    for index := range spec.Values {
+        if _, exists := spec.Values[index][field.Column]; !exists {
+            spec.Values[index][field.Column] = extension.value
+        }
+    }
+    return nil
+}
+```
+
+Use schema metadata to resolve Go field names to database columns. Do not assume the column is the snake_case form of the field.
+
+## Connection routing
+
+Use `ConnectionExtension` when the extension should choose a connection before SQL is built.
+
+```go
+func (extension TenantExtension) ApplyConnection(ctx context.Context, db *oro.DB, spec *oro.QuerySpec) error {
+    tenant, ok := tenantFromContext(ctx)
+    if !ok {
+        return &oro.Error{Op: "tenant.connection", Kind: oro.ErrTenantRequired}
+    }
+    spec.Connection = "tenant_" + tenant.Region
+    return nil
+}
+```
+
+Connection routing runs before query and write SQL execution. It should be deterministic for the current request.
+
+## Events
+
+Use `EventExtension` for observation or side effects that should listen to Oro events.
+
+```go
+func (extension MetricsExtension) Events() map[oro.EventName]oro.EventHandler {
+    return map[oro.EventName]oro.EventHandler{
+        oro.AfterSQL: extension.afterSQL,
+    }
+}
+
+func (extension MetricsExtension) afterSQL(ctx context.Context, event *oro.Event) error {
+    extension.recorder.Record(ctx, event.Duration, event.Err)
+    return nil
+}
+```
+
+Available events include model writes, SQL execution, cache hits/misses, and transaction commit/rollback. Event handlers should be fast and should return errors only when the caller should fail.
+
+## Embedded extension fields
+
+Reusable model fields are defined with `OroEmbeddedFields`.
+
+```go
+type StatusFields struct {
+    Status string
+}
+
+func (StatusFields) OroEmbeddedFields() {}
+
+func (StatusFields) DefineOroFields(s *oro.SchemaBuilder) {
+    s.Field("Status").String().Size(32).Index()
+}
+```
+
+Usage:
+
+```go
+type Product struct {
+    oro.Model
+    example.StatusFields
+
+    Name string
+}
+```
+
+The schema parser treats exported fields from marked embedded structs as model fields. This keeps extension fields reusable without struct tags or code generation.
+
+## Apply objects
+
+Use `Apply` for query-local behavior.
+
+```go
+type Apply struct {
+    status string
+}
+
+func Status(status string) Apply {
+    return Apply{status: status}
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("Status", apply.status)
+}
+```
+
+Usage:
+
+```go
+products, err := db.Use[Product]().
+    Apply(example.Status("online")).
+    Where("Price", ">=", 100).
+    Get(ctx)
+```
+
+If several apply objects from the same package must merge options, implement `ApplyFinalizer` and store merged state in `ctx.State`.
+
+## Structural services
+
+Some extension features are not normal query modifiers. Keep them as typed services.
+
+```go
+tree := nestedset.Use[Category](db)
+root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
+err = tree.MoveToChildOf(ctx, nodeID, parentID)
+```
+
+This is appropriate when the operation needs transactions, multiple SQL statements, locks, or structural invariants. Normal reads from the same extension should still expose `Apply` helpers when possible.
+
+## Errors
+
+Return Oro errors for predictable user mistakes.
+
+```go
+return &oro.Error{
+    Op:    "example.apply",
+    Kind:  oro.ErrInvalidArgument,
+    Field: "Status",
+}
+```
+
+Wrap lower-level errors as `Cause` when useful. Do not panic from extension code.
+
+## Testing extensions
+
+Recommended coverage:
+
+- SQLite unit tests for public API behavior.
+- MySQL and PostgreSQL matrix tests when SQL or type behavior differs by driver.
+- Query tests that verify the extension composes with `Where`, `OrderBy`, `Limit`, `Count`, and `Paginate`.
+- Write tests for `Create`, `CreateMany`, `CreateManyResult`, `Upsert`, and `Update` when the extension touches writes.
+- Context tests when the extension reads values from `context.Context`.
+- Table-prefix and connection-routing tests if the extension builds SQL internally.
+
+If the extension deletes or updates data in batches, test empty sets, scoped sets, and large-enough data to verify batching.
+
+## Design rules
+
+- Prefer `db.Use[T]().Apply(...)` for query-local extension behavior.
+- Do not duplicate Oro's query builder in extension packages.
+- Prefer typed options over `any` or untyped maps.
+- Use model Go field names in apply helpers; use schema metadata when writing lower-level specs.
+- Keep request state in `context.Context` or cloned DB session state.
+- Keep after-write work bounded and explicit.
+- Do not hide global data-safety rules behind query-local apply objects.

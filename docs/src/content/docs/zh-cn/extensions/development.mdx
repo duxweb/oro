@@ -1,0 +1,327 @@
+---
+title: 扩展开发
+description: 使用 Config.Extensions、Apply、嵌入字段和事件构建 Oro 扩展。
+---
+
+Oro 有两层扩展机制：
+
+- `Config.Extensions` 把全局行为安装到数据库运行时。
+- `db.Use[T]().Apply(...)` 把查询局部行为组合到模型查询链上。
+
+两者可以同时使用，但边界要清晰：全局扩展负责横切规则；apply 对象只修改当前查询链。
+
+## 选择扩展点
+
+| 需求 | 使用 |
+| --- | --- |
+| 租户隔离、审计、指标、自动连接路由 | `Config.Extensions` |
+| 查询局部过滤、语言选择、树形边界、写入局部选项 | `Apply` |
+| 可复用模型字段 | 带 `OroEmbeddedFields` 的嵌入字段 |
+| 不是普通查询的结构性操作 | 类似 `nestedset.Use[T](db)` 的类型化服务 |
+
+推荐的用户侧 API 是：
+
+```go
+items, err := db.Use[Model]().
+    Apply(myext.Option(...)).
+    Where("Status", "active").
+    Get(ctx)
+```
+
+不要让每个扩展都维护自己的 `Where/Get/Limit` 包装器。如果它本质上只是普通查询修饰，就做成 `Apply`。
+
+## 推荐包结构
+
+```text
+extensions/example/
+  example.go      // Extension(), Config, Option
+  apply.go        // 查询链 Apply 对象
+  fields.go       // 可选嵌入字段
+  service.go      // 可选结构性服务
+  example_test.go
+```
+
+公开 API 保持小而清晰：
+
+```go
+func Extension(options ...Option) oro.Extension
+func Configured(options ...Option) Apply
+func Something(...) Apply
+```
+
+优先使用类型化 option。除非扩展确实需要动态键值输入，否则不要使用无结构 map 作为主要配置。
+
+## 全局扩展接口
+
+所有全局扩展都从 `oro.Extension` 开始。
+
+```go
+type Extension interface {
+    Name() string
+    Install(db *oro.DB) error
+}
+```
+
+返回稳定且唯一的名称。Oro 会在安装时拒绝重复扩展名。
+
+```go
+const extensionName = "example"
+
+type extension struct {
+    config Config
+}
+
+func Extension(options ...Option) oro.Extension {
+    config := Config{}
+    for _, option := range options {
+        if option != nil {
+            option.applyExampleOption(&config)
+        }
+    }
+    return extension{config: config}
+}
+
+func (extension) Name() string {
+    return extensionName
+}
+
+func (extension) Install(db *oro.DB) error {
+    return nil
+}
+```
+
+通过 `Config.Extensions` 注册：
+
+```go
+db, err := oro.Open(oro.Config{
+    Connections: map[string]oro.ConnectionConfig{
+        "default": {Driver: sqlite.Open("app.db")},
+    },
+    Extensions: []oro.Extension{
+        example.Extension(),
+    },
+})
+```
+
+## 可选全局 Hook
+
+全局扩展可以额外实现下面任意接口。
+
+| 接口 | 方法 | 用途 |
+| --- | --- | --- |
+| `QueryExtension` | `ApplyQuery(ctx, db, spec)` | 追加全局查询条件 |
+| `WriteExtension` | `ApplyWrite(ctx, db, spec)` | 注入或校验写入值 |
+| `ConnectionExtension` | `ApplyConnection(ctx, db, spec)` | 把查询路由到连接 |
+| `ShardValueExtension` | `ShardValues(ctx, db)` | 提供分片路由值 |
+| `CacheKeyExtension` | `CacheKeyValues(ctx, db)` | 把扩展状态加入自动缓存键 |
+| `EventExtension` | `Events()` | 安装时注册事件处理器 |
+| `StatefulExtension` | `State()` | 在 DB 会话中保存扩展状态 |
+
+全局 hook 会走 Oro 统一的查询/写入最终路径，并使用调用方传入的 `context.Context`。不要用包级全局变量保存请求级数据；用 context 或 DB 会话状态。
+
+## 查询扩展示例
+
+下面的全局扩展会给所有带指定字段的模型或已注册表追加状态条件。
+
+```go
+type StatusExtension struct {
+    field string
+    value string
+}
+
+func (extension StatusExtension) Name() string {
+    return "status_filter"
+}
+
+func (extension StatusExtension) Install(db *oro.DB) error {
+    return nil
+}
+
+func (extension StatusExtension) ApplyQuery(ctx context.Context, db *oro.DB, spec *oro.QuerySpec) error {
+    if spec == nil || spec.Model == nil {
+        return nil
+    }
+    field, ok := spec.Model.FieldByGo[extension.field]
+    if !ok {
+        return nil
+    }
+    spec.Where = append(spec.Where, oro.Condition{
+        Field: field.Column,
+        Op:    "=",
+        Value: extension.value,
+    })
+    return nil
+}
+```
+
+只有规则确实需要全局生效时才这样做。查询局部过滤优先用 `Apply`。
+
+## 写入扩展示例
+
+写入扩展收到的是数据库列值：`WriteSpec.Values`。
+
+```go
+func (extension StatusExtension) ApplyWrite(ctx context.Context, db *oro.DB, spec *oro.WriteSpec) error {
+    if spec == nil || spec.Model == nil {
+        return nil
+    }
+    field, ok := spec.Model.FieldByGo[extension.field]
+    if !ok {
+        return nil
+    }
+    for index := range spec.Values {
+        if _, exists := spec.Values[index][field.Column]; !exists {
+            spec.Values[index][field.Column] = extension.value
+        }
+    }
+    return nil
+}
+```
+
+使用 schema 元数据把 Go 字段名解析成数据库列名。不要假设列名一定是字段名的 snake_case。
+
+## 连接路由
+
+扩展需要在 SQL 构建前选择连接时，实现 `ConnectionExtension`。
+
+```go
+func (extension TenantExtension) ApplyConnection(ctx context.Context, db *oro.DB, spec *oro.QuerySpec) error {
+    tenant, ok := tenantFromContext(ctx)
+    if !ok {
+        return &oro.Error{Op: "tenant.connection", Kind: oro.ErrTenantRequired}
+    }
+    spec.Connection = "tenant_" + tenant.Region
+    return nil
+}
+```
+
+连接路由会在查询和写入 SQL 执行前运行，并且应该对当前请求保持确定性。
+
+## 事件
+
+观察型能力或轻量副作用使用 `EventExtension`。
+
+```go
+func (extension MetricsExtension) Events() map[oro.EventName]oro.EventHandler {
+    return map[oro.EventName]oro.EventHandler{
+        oro.AfterSQL: extension.afterSQL,
+    }
+}
+
+func (extension MetricsExtension) afterSQL(ctx context.Context, event *oro.Event) error {
+    extension.recorder.Record(ctx, event.Duration, event.Err)
+    return nil
+}
+```
+
+可用事件包括模型写入、SQL 执行、缓存命中/未命中、事务提交/回滚。事件处理器应保持快速；只有当调用方应该失败时才返回错误。
+
+## 嵌入扩展字段
+
+可复用模型字段用 `OroEmbeddedFields` 定义。
+
+```go
+type StatusFields struct {
+    Status string
+}
+
+func (StatusFields) OroEmbeddedFields() {}
+
+func (StatusFields) DefineOroFields(s *oro.SchemaBuilder) {
+    s.Field("Status").String().Size(32).Index()
+}
+```
+
+使用：
+
+```go
+type Product struct {
+    oro.Model
+    example.StatusFields
+
+    Name string
+}
+```
+
+schema parser 会把带标记的嵌入结构体中的导出字段当成模型字段处理。这样扩展字段可以复用，也不需要 tag 或代码生成。
+
+## Apply 对象
+
+查询局部行为使用 `Apply`。
+
+```go
+type Apply struct {
+    status string
+}
+
+func Status(status string) Apply {
+    return Apply{status: status}
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("Status", apply.status)
+}
+```
+
+使用：
+
+```go
+products, err := db.Use[Product]().
+    Apply(example.Status("online")).
+    Where("Price", ">=", 100).
+    Get(ctx)
+```
+
+如果同一个扩展包的多个 apply 对象需要合并配置，实现 `ApplyFinalizer`，并把合并状态放在 `ctx.State`。
+
+## 结构性服务
+
+有些扩展能力不是普通查询修饰，保留为类型化服务。
+
+```go
+tree := nestedset.Use[Category](db)
+root, err := tree.CreateRoot(ctx, &Category{Name: "Catalog"})
+err = tree.MoveToChildOf(ctx, nodeID, parentID)
+```
+
+当操作需要事务、多条 SQL、锁或结构不变量时，这种服务是合理的。同一个扩展里的普通读取仍应尽量提供 `Apply` helper。
+
+## 错误处理
+
+可预期的用户错误返回 Oro 错误。
+
+```go
+return &oro.Error{
+    Op:    "example.apply",
+    Kind:  oro.ErrInvalidArgument,
+    Field: "Status",
+}
+```
+
+底层错误需要保留时放到 `Cause`。扩展代码不要 panic。
+
+## 测试建议
+
+推荐覆盖：
+
+- SQLite 单元测试，验证公开 API 行为。
+- 如果 SQL 或类型行为有驱动差异，补 MySQL 和 PostgreSQL 矩阵测试。
+- 查询测试验证扩展能和 `Where`、`OrderBy`、`Limit`、`Count`、`Paginate` 组合。
+- 扩展影响写入时，覆盖 `Create`、`CreateMany`、`CreateManyResult`、`Upsert`、`Update`。
+- 扩展从 `context.Context` 读取值时，覆盖 context 测试。
+- 扩展内部构建 SQL 时，覆盖表前缀和连接路由。
+
+如果扩展会批量删除或更新数据，测试空集合、有作用域的数据和足够触发分批的数据。
+
+## 设计规则
+
+- 查询局部扩展行为优先使用 `db.Use[T]().Apply(...)`。
+- 不要在扩展包里重复实现 Oro 查询构建器。
+- 优先使用类型化 option，不要滥用 `any` 或无结构 map。
+- apply helper 使用模型 Go 字段名；更底层 spec 写入使用 schema 元数据。
+- 请求状态放在 `context.Context` 或克隆后的 DB 会话状态中。
+- 写入后工作要有明确边界和节流。
+- 不要把全局数据安全规则藏在查询局部 apply 对象里。

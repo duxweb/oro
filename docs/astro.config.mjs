@@ -125,6 +125,7 @@ export default defineConfig({
             { label: 'Field Builder', translations: { 'zh-CN': '字段构建器' }, slug: 'reference/field-builder' },
             { label: 'Query Builder', translations: { 'zh-CN': '查询构建器' }, slug: 'reference/query-builder' },
             { label: 'Conditions', translations: { 'zh-CN': '条件表达式' }, slug: 'reference/conditions' },
+            { label: 'Apply', translations: { 'zh-CN': 'Apply 扩展链' }, slug: 'reference/apply' },
             { label: 'Write Options', translations: { 'zh-CN': '写入选项' }, slug: 'reference/write-options' },
             { label: 'Driver Interface', translations: { 'zh-CN': '驱动接口' }, slug: 'reference/driver-interface' },
             { label: 'Error Types', translations: { 'zh-CN': '错误类型' }, slug: 'reference/error-types' }
@@ -140,10 +141,12 @@ export default defineConfig({
               translations: { 'zh-CN': '扩展包' },
               items: [
                 { label: 'Overview', translations: { 'zh-CN': '概览' }, slug: 'extensions' },
+                { label: 'Development', translations: { 'zh-CN': '扩展开发' }, slug: 'extensions/development' },
                 { label: 'Tenant', translations: { 'zh-CN': 'Tenant 租户扩展' }, slug: 'extensions/tenant' },
                 { label: 'Soft Delete', translations: { 'zh-CN': 'Soft Delete 软删除' }, slug: 'extensions/softdelete' },
                 { label: 'Audit', translations: { 'zh-CN': 'Audit 审计' }, slug: 'extensions/audit' },
                 { label: 'Metrics', translations: { 'zh-CN': 'Metrics 指标' }, slug: 'extensions/metrics' },
+                { label: 'Log Roll', translations: { 'zh-CN': 'Log Roll 滚动日志' }, slug: 'extensions/logroll' },
                 { label: 'Translation', translations: { 'zh-CN': 'Translation 多语言模型' }, slug: 'extensions/translation' },
                 { label: 'Nested Set', translations: { 'zh-CN': 'Nested Set 树形结构' }, slug: 'extensions/nestedset' }
               ]

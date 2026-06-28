@@ -1,0 +1,186 @@
+---
+title: Log Roll
+description: Keep append-heavy log tables bounded with count-based and time-based rolling retention.
+---
+
+`extensions/logroll` provides rolling retention for single-table log data. It is designed for login logs, operation logs, request logs, webhook logs, device events, and other append-heavy records.
+
+It does **not** implement table partitioning or physical sharding. Use Oro sharding when data must be split across databases or tables. Log Roll focuses on one table: insert normally, then prune old rows by policy.
+
+```go
+import "github.com/duxweb/oro/extensions/logroll"
+```
+
+## When to Use
+
+Use Log Roll when a table is mostly append-only and old data can be discarded by a clear rule:
+
+- keep the latest 100,000 login logs;
+- keep request logs for 30 days;
+- keep each tenant's latest 10,000 operation logs;
+- run the same cleanup from a scheduled job.
+
+For archival, analytics, or very large cold storage, prefer database-native partitioning, Oro sharding, or an external data pipeline.
+
+## Model
+
+No special field is required for count-based rolling:
+
+```go
+type LoginLog struct {
+    oro.Model
+
+    UserID uint64
+    Action string
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    s.Field("UserID").UnsignedBigInt().Index()
+    s.Field("Action").String().Index()
+}
+```
+
+Time-based rolling uses `CreatedAt` by default because it is part of `oro.Model`. If you want business event time instead of insert time, define your own field:
+
+```go
+type LoginLog struct {
+    oro.Model
+    OccurredAt time.Time
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    s.Field("OccurredAt").Column("occurred_at").Timestamp().Index()
+}
+```
+
+You can also embed the helper:
+
+```go
+type LoginLog struct {
+    oro.Model
+    logroll.TimeModel
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    logroll.DefineTime(s)
+}
+```
+
+## Cleanup Manually
+
+Manual cleanup is the safest default for production. Run it from your scheduler or background worker:
+
+```go
+result, err := logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(100000),
+    logroll.KeepFor(30*24*time.Hour),
+).Run(ctx)
+```
+
+`KeepLast` keeps the newest rows by primary key. `KeepFor` keeps rows newer than `now - duration`.
+
+```go
+type Result struct {
+    Deleted int64
+    Batches int
+    Cutoff  time.Time
+}
+```
+
+Cleanup deletes in batches. It selects a batch of IDs first and then deletes by primary key, so it stays portable across SQLite, MySQL, and PostgreSQL.
+
+## Cleanup After Writes
+
+Use `Apply(logroll.Roll(...))` when cleanup should run as part of a write path:
+
+```go
+roll := logroll.Roll(logroll.KeepLast(100000), logroll.Every(100))
+
+created, err := db.Use[LoginLog]().
+    Apply(roll).
+    Create(ctx, &LoginLog{UserID: 1, Action: "login"})
+```
+
+`Every(100)` means cleanup runs every 100 successful writes for that `Roll` apply instance. Without `Every`, cleanup runs after each successful write.
+
+For high-write log tables, prefer `Every(...)` or manual scheduled cleanup to avoid adding cleanup cost to every insert.
+
+## Policies
+
+### KeepLast
+
+```go
+logroll.KeepLast(100000)
+```
+
+Keeps only the newest N rows. Rows older than the Nth newest primary key are removed.
+
+### KeepFor
+
+```go
+logroll.KeepFor(30 * 24 * time.Hour)
+```
+
+Keeps only rows whose time field is newer than `now - duration`.
+
+The default time field is `CreatedAt`. Override it when your model uses event time:
+
+```go
+logroll.TimeField("OccurredAt")
+```
+
+### Combined Policies
+
+Policies use OR-style pruning: a row is deleted if it violates any configured retention policy.
+
+```go
+logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(100000),
+    logroll.KeepFor(30*24*time.Hour),
+).Run(ctx)
+```
+
+This means the table keeps at most 100,000 rows and at most 30 days of data.
+
+## Scoped Cleanup
+
+Use `Scope` for fixed model-level scope values:
+
+```go
+result, err := logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(10000),
+    logroll.Scope(oro.Map{"TenantID": tenantID}),
+).Run(ctx)
+```
+
+Or add ad-hoc filters:
+
+```go
+result, err := logroll.Cleanup[LoginLog](db, logroll.KeepLast(10000)).
+    Where("TenantID", tenantID).
+    Where("Action", "login").
+    Run(ctx)
+```
+
+## Options
+
+```go
+logroll.BatchSize(5000)
+logroll.Every(100)
+logroll.TimeField("OccurredAt")
+logroll.Scope(oro.Map{"TenantID": tenantID})
+logroll.Connection("logs")
+logroll.Now(func() time.Time { return fixedNow })
+```
+
+`Now` is mainly for tests and deterministic cleanup jobs.
+
+## Notes
+
+- Log Roll physically deletes rows. Use it only for data that can be discarded.
+- It does not bypass Oro table prefixes.
+- It does not manage database partitions.
+- It works with sharding when you run cleanup against the intended `db` or shard-scoped query path.

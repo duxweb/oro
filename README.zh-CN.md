@@ -363,6 +363,16 @@ orders, err := db.Use[Order]().
     Get(ctx)
 ```
 
+官方扩展保持同一套查询入口。例如日志表可以用滚动保留策略，不需要单独一套查询 API：
+
+```go
+roll := logroll.Roll(logroll.KeepLast(100000), logroll.Every(100))
+
+_, err := db.Use[LoginLog]().
+    Apply(roll).
+    Create(ctx, &LoginLog{UserID: 1, Action: "login"})
+```
+
 ## 性能基准
 
 Benchmark 在 SQLite、MySQL、PostgreSQL 下执行，并且每个 ORM 使用相同数据库驱动。文档中展示的是连续 10 轮的中位数。

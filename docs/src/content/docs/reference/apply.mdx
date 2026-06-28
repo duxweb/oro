@@ -1,0 +1,289 @@
+---
+title: Apply
+description: Compose model-query extensions without creating a separate query API per extension.
+---
+
+`Apply` is Oro's model-query extension point. It lets an extension add query filters, select hidden columns, inject write values, transform loaded models, or run post-write work while the query still uses the normal `ModelQuery` chain.
+
+```go
+products, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
+    Where("Status", "online").
+    OrderByDesc("ID").
+    Get(ctx)
+
+children, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "enabled").
+    Get(ctx)
+```
+
+The important rule is simple: extension packages provide behavior objects, but `Where`, `With`, `OrderBy`, `Paginate`, `Count`, `Create`, `Update`, and other query methods still come from Oro.
+
+## When to use Apply
+
+Use `Apply` for behavior that belongs to one query chain:
+
+| Use case | Example |
+| --- | --- |
+| Add model conditions | `nestedset.DescendantsOf(root)` |
+| Add ordering | `nestedset.DefaultOrder()` |
+| Select internal hidden columns | `translation.Locale("zh-CN")` |
+| Add translated-field conditions | `translation.WhereTrans("Name", "Apple")` |
+| Add write-side data | `translation.Write(...)` |
+| Run cleanup after a write | `logroll.Roll(logroll.KeepLast(100000))` |
+
+Use `Config.Extensions` instead when the behavior must apply globally to all matching queries and writes, such as tenant isolation, audit logging, metrics, or connection routing.
+
+## Public interface
+
+Any value implementing `oro.Apply` can be passed to `ModelQuery.Apply`.
+
+```go
+type Apply interface {
+    ApplyOro(*ApplyContext) error
+}
+
+type ApplyFinalizer interface {
+    AfterApplyOro(*ApplyContext) error
+}
+```
+
+`ApplyOro` is called for each apply object in the order passed to `Apply(...)`. After that, objects that implement `ApplyFinalizer` receive `AfterApplyOro(...)` in the same order.
+
+Use `ApplyFinalizer` when multiple small apply objects should merge state first and perform one final action. The translation extension uses this pattern so `Locale(...)`, `Fallback(...)`, `Write(...)`, and `WhereTrans(...)` can be combined without each object doing duplicate work.
+
+## Apply context
+
+```go
+type ApplyContext struct {
+    Context context.Context
+    DB      *oro.DB
+    Schema  *oro.ModelSchema
+    Spec    *oro.QuerySpec
+    Values  oro.Map
+    Model   any
+    Mode    oro.ApplyMode
+    Stage   oro.ApplyStage
+    State   oro.Map
+    Rows    int64
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `Context` | caller context, including deadline and extension context values |
+| `DB` | current database session, including resolved connection for after-write apply |
+| `Schema` | current model schema |
+| `Spec` | mutable query specification when the stage works on a query |
+| `Values` | write values for update/delete/restore, or insert row values where available |
+| `Model` | current model or model slice, depending on the operation |
+| `Mode` | operation being processed |
+| `Stage` | lifecycle stage |
+| `State` | shared map for all apply objects on the same query execution |
+| `Rows` | affected row count for `ApplyAfterWrite` |
+
+`State` is per query execution. It is the right place to merge options from several apply objects.
+
+## Modes and stages
+
+| Mode | Stage | Trigger |
+| --- | --- | --- |
+| `ApplyRead` | `ApplyStageSpec` | before model read SQL is built |
+| `ApplyInsert` | `ApplyStageSpec` | before model insert routing/spec setup finishes |
+| `ApplyInsert` | `ApplyStageValues` | before insert values are built |
+| `ApplyUpdate` | `ApplyStageSpec` | before update SQL is built |
+| `ApplyUpdate` | `ApplyStageValues` | before update values are written |
+| `ApplyDelete` | `ApplyStageSpec` | before delete or soft-delete SQL is built |
+| `ApplyDelete` | `ApplyStageValues` | before delete or soft-delete values are written |
+| `ApplyRestore` | `ApplyStageSpec` | before restore SQL is built |
+| `ApplyRestore` | `ApplyStageValues` | before restore values are written |
+| `ApplyAfterFind` | `ApplyStageResult` | after a model is loaded |
+| `ApplyAfterWrite` | `ApplyStageResult` | after a create, upsert, or batch create succeeds |
+
+Use `ctx.IsQueryMode()` when an apply only wants to modify read/update/delete/restore query conditions.
+
+```go
+func (apply ActiveOnly) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("Status", "active")
+}
+```
+
+## Context helpers
+
+`ApplyContext` provides helpers that preserve Oro's model-field rules.
+
+| Method | Purpose |
+| --- | --- |
+| `Where(field, args...)` | append an AND condition |
+| `OrWhere(field, args...)` | append an OR condition |
+| `Select(items...)` | append select expressions |
+| `SelectHidden(fields...)` | expose hidden model fields for internal processing |
+| `OrderBy(fields...)` | append ascending order |
+| `OrderByDesc(fields...)` | append descending order |
+| `FirstRowColumns(columns...)` | read the first row using model field names |
+| `FirstWhereColumns(field, value, columns...)` | read one row by a field condition |
+| `RowsColumns(limit, columns...)` | read a small supporting row set |
+| `CountRows()` | count rows for the current query spec |
+
+Prefer these helpers over editing `ctx.Spec` directly. They keep model field names, table prefixes, SQL conversion, and condition validation consistent with the normal query builder.
+
+## Query apply example
+
+This apply filters a model query by owner and keeps the normal chain available.
+
+```go
+package owner
+
+import "github.com/duxweb/oro"
+
+type Apply struct {
+    ownerID uint64
+}
+
+func Of(ownerID uint64) Apply {
+    return Apply{ownerID: ownerID}
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("OwnerID", apply.ownerID)
+}
+```
+
+Usage:
+
+```go
+items, err := db.Use[Document]().
+    Apply(owner.Of(currentUserID)).
+    Where("Status", "published").
+    Get(ctx)
+```
+
+## Write apply example
+
+This apply injects an actor id into create and update models before values are built.
+
+```go
+type ActorApply struct {
+    id uint64
+}
+
+func Actor(id uint64) ActorApply {
+    return ActorApply{id: id}
+}
+
+func (apply ActorApply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || ctx.Stage != oro.ApplyStageValues || ctx.Model == nil {
+        return nil
+    }
+
+    switch ctx.Mode {
+    case oro.ApplyInsert:
+        if model, ok := ctx.Model.(*Post); ok {
+            model.CreatedBy = oro.NullOf(apply.id)
+            model.UpdatedBy = oro.NullOf(apply.id)
+        }
+    case oro.ApplyUpdate:
+        if ctx.Values != nil {
+            ctx.Values["UpdatedBy"] = apply.id
+        }
+    }
+    return nil
+}
+```
+
+For generic extension packages, avoid hard-coding one model type. Prefer `ctx.Values` for update-style writes, or define reusable embedded fields and inspect `ctx.Schema`.
+
+## After-write apply example
+
+Use `ApplyAfterWrite` for work that should happen only after a write succeeds. `logroll.Roll(...)` uses this mode to clean old log rows after successful inserts.
+
+```go
+type RollApply struct{}
+
+func (RollApply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || ctx.Mode != oro.ApplyAfterWrite || ctx.Stage != oro.ApplyStageResult {
+        return nil
+    }
+    if ctx.Rows == 0 {
+        return nil
+    }
+    // Run cleanup using ctx.DB, ctx.Schema, and ctx.Context.
+    return nil
+}
+```
+
+Keep after-write work bounded. For high-frequency write paths, add throttling in the apply object or run cleanup through a scheduled job.
+
+## State merging pattern
+
+Use `ApplyFinalizer` when the user should be able to compose several option objects.
+
+```go
+const stateKey = "example"
+
+type Apply struct {
+    locale string
+    fields []string
+}
+
+func Locale(locale string) Apply {
+    return Apply{locale: locale}
+}
+
+func Fields(fields ...string) Apply {
+    return Apply{fields: fields}
+}
+
+type state struct {
+    locale string
+    fields []string
+    done   map[oro.ApplyStage]bool
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    s, _ := ctx.State[stateKey].(*state)
+    if s == nil {
+        s = &state{done: map[oro.ApplyStage]bool{}}
+        ctx.State[stateKey] = s
+    }
+    if apply.locale != "" {
+        s.locale = apply.locale
+    }
+    s.fields = append(s.fields, apply.fields...)
+    return nil
+}
+
+func (apply Apply) AfterApplyOro(ctx *oro.ApplyContext) error {
+    s, _ := ctx.State[stateKey].(*state)
+    if s == nil || s.done[ctx.Stage] {
+        return nil
+    }
+    s.done[ctx.Stage] = true
+
+    if ctx.Mode == oro.ApplyRead && ctx.Stage == oro.ApplyStageSpec {
+        for _, field := range s.fields {
+            if err := ctx.Select(field); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+```
+
+This avoids repeated mutations when several apply objects from the same extension are combined.
+
+## Boundaries
+
+- `Apply` currently belongs to `db.Use[T]()` model queries. `Table` and `Raw` queries do not accept apply objects.
+- `Apply` is query-local. It does not install global behavior.
+- `Apply` should return Oro errors or wrapped errors instead of panicking.
+- `Apply` should not store request-specific values in package globals.
+- `Apply` should use Go field names on model queries. Oro converts them to database columns during finalization.

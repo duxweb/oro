@@ -6,12 +6,13 @@ type ApplyMode string
 type ApplyStage string
 
 const (
-	ApplyRead      ApplyMode = "read"
-	ApplyInsert    ApplyMode = "insert"
-	ApplyUpdate    ApplyMode = "update"
-	ApplyDelete    ApplyMode = "delete"
-	ApplyRestore   ApplyMode = "restore"
-	ApplyAfterFind ApplyMode = "after_find"
+	ApplyRead       ApplyMode = "read"
+	ApplyInsert     ApplyMode = "insert"
+	ApplyUpdate     ApplyMode = "update"
+	ApplyDelete     ApplyMode = "delete"
+	ApplyRestore    ApplyMode = "restore"
+	ApplyAfterFind  ApplyMode = "after_find"
+	ApplyAfterWrite ApplyMode = "after_write"
 )
 
 const (
@@ -47,6 +48,7 @@ type ApplyContext struct {
 	Mode    ApplyMode
 	Stage   ApplyStage
 	State   Map
+	Rows    int64
 
 	selectHidden *[]string
 }
@@ -240,6 +242,53 @@ func applyModelApplies[T any](ctx context.Context, query *ModelQuery[T], mode Ap
 		Stage:        stage,
 		State:        Map{},
 		selectHidden: selectHidden,
+	}
+	for _, apply := range query.applies {
+		if apply == nil {
+			continue
+		}
+		if err := apply.ApplyOro(applyCtx); err != nil {
+			return err
+		}
+	}
+	for _, apply := range query.applies {
+		finalizer, ok := apply.(ApplyFinalizer)
+		if !ok || apply == nil {
+			continue
+		}
+		if err := finalizer.AfterApplyOro(applyCtx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyModelAfterWrite[T any](ctx context.Context, query *ModelQuery[T], schema *ModelSchema, spec *QuerySpec, values Map, model any, rows int64) error {
+	return applyModelAfterWriteWithState(ctx, query, schema, spec, values, model, rows, nil)
+}
+
+func applyModelAfterWriteWithState[T any](ctx context.Context, query *ModelQuery[T], schema *ModelSchema, spec *QuerySpec, values Map, model any, rows int64, state Map) error {
+	if query == nil || len(query.applies) == 0 {
+		return nil
+	}
+	if state == nil {
+		state = Map{}
+	}
+	applyDB := query.db
+	if spec != nil {
+		applyDB = withSpecConnection(query.db, *spec)
+	}
+	applyCtx := &ApplyContext{
+		Context: ctx,
+		DB:      applyDB,
+		Schema:  schema,
+		Spec:    spec,
+		Values:  values,
+		Model:   model,
+		Mode:    ApplyAfterWrite,
+		Stage:   ApplyStageResult,
+		State:   state,
+		Rows:    rows,
 	}
 	for _, apply := range query.applies {
 		if apply == nil {

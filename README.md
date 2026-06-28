@@ -375,6 +375,16 @@ orders, err := db.Use[Order]().
     Get(ctx)
 ```
 
+First-party extensions stay on the same query surface. For example, log tables can use rolling retention without a separate query API:
+
+```go
+roll := logroll.Roll(logroll.KeepLast(100000), logroll.Every(100))
+
+_, err := db.Use[LoginLog]().
+    Apply(roll).
+    Create(ctx, &LoginLog{UserID: 1, Action: "login"})
+```
+
 ## Benchmarks
 
 Benchmarks run against SQLite, MySQL, and PostgreSQL using the same database drivers for each ORM. The documentation reports the median of 10 runs.

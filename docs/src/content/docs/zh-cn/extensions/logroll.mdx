@@ -1,0 +1,186 @@
+---
+title: Log Roll 滚动日志
+description: 对单表日志数据做按数量、按时间的滚动保留，避免日志表无限增长。
+---
+
+`extensions/logroll` 用于处理单表日志数据的滚动保留。适合登录日志、操作日志、请求日志、Webhook 日志、设备事件、业务审计类日志等持续追加的数据。
+
+它**不是**分表扩展，也不负责物理分片。如果数据需要拆到多个库或多张表，使用 Oro 的 sharding 能力。Log Roll 只解决一个问题：普通写入单表，然后按策略删除旧数据。
+
+```go
+import "github.com/duxweb/oro/extensions/logroll"
+```
+
+## 适用场景
+
+当一张表基本只追加，并且旧数据可以按明确规则丢弃时使用：
+
+- 只保留最近 100,000 条登录日志；
+- 请求日志只保留 30 天；
+- 每个租户只保留最近 10,000 条操作日志；
+- 通过定时任务统一清理历史日志。
+
+如果需要归档、分析、冷热分层或超大规模历史存储，应该使用数据库分区、Oro 分片或外部数据管道。
+
+## 模型
+
+按数量滚动不要求特殊字段：
+
+```go
+type LoginLog struct {
+    oro.Model
+
+    UserID uint64
+    Action string
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    s.Field("UserID").UnsignedBigInt().Index()
+    s.Field("Action").String().Index()
+}
+```
+
+按时间滚动默认使用 `oro.Model` 里的 `CreatedAt`。如果要按业务事件时间清理，可以定义自己的时间字段：
+
+```go
+type LoginLog struct {
+    oro.Model
+    OccurredAt time.Time
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    s.Field("OccurredAt").Column("occurred_at").Timestamp().Index()
+}
+```
+
+也可以使用辅助字段：
+
+```go
+type LoginLog struct {
+    oro.Model
+    logroll.TimeModel
+}
+
+func (LoginLog) Define(s *oro.SchemaBuilder) {
+    s.Table("login_logs")
+    logroll.DefineTime(s)
+}
+```
+
+## 手动清理
+
+生产环境推荐优先使用手动清理，由调度器或后台任务触发：
+
+```go
+result, err := logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(100000),
+    logroll.KeepFor(30*24*time.Hour),
+).Run(ctx)
+```
+
+`KeepLast` 按主键保留最新数据。`KeepFor` 保留 `now - duration` 之后的数据。
+
+```go
+type Result struct {
+    Deleted int64
+    Batches int
+    Cutoff  time.Time
+}
+```
+
+清理时先查一批 ID，再按主键删除。这样兼容 SQLite、MySQL、PostgreSQL，也避免一次性删除过多数据。
+
+## 写入后清理
+
+如果希望写入成功后触发清理，可以使用 `Apply(logroll.Roll(...))`：
+
+```go
+roll := logroll.Roll(logroll.KeepLast(100000), logroll.Every(100))
+
+created, err := db.Use[LoginLog]().
+    Apply(roll).
+    Create(ctx, &LoginLog{UserID: 1, Action: "login"})
+```
+
+`Every(100)` 表示这个 `Roll` apply 实例每成功写入 100 次触发一次清理。不设置 `Every` 时，每次成功写入都会清理。
+
+高频日志表建议使用 `Every(...)` 或定时任务清理，避免每次插入都承担清理成本。
+
+## 策略
+
+### KeepLast
+
+```go
+logroll.KeepLast(100000)
+```
+
+只保留最新 N 条。比第 N 条最新主键更旧的数据会被删除。
+
+### KeepFor
+
+```go
+logroll.KeepFor(30 * 24 * time.Hour)
+```
+
+只保留时间字段晚于 `now - duration` 的数据。
+
+默认时间字段是 `CreatedAt`。如果模型使用业务事件时间，可以指定字段：
+
+```go
+logroll.TimeField("OccurredAt")
+```
+
+### 组合策略
+
+多个策略使用 OR 语义淘汰：只要一条数据违反任意保留策略，就会被删除。
+
+```go
+logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(100000),
+    logroll.KeepFor(30*24*time.Hour),
+).Run(ctx)
+```
+
+这表示最多保留 100,000 条，同时最多保留 30 天数据。
+
+## 作用域清理
+
+固定作用域使用 `Scope`：
+
+```go
+result, err := logroll.Cleanup[LoginLog](db,
+    logroll.KeepLast(10000),
+    logroll.Scope(oro.Map{"TenantID": tenantID}),
+).Run(ctx)
+```
+
+临时条件可以继续链式添加：
+
+```go
+result, err := logroll.Cleanup[LoginLog](db, logroll.KeepLast(10000)).
+    Where("TenantID", tenantID).
+    Where("Action", "login").
+    Run(ctx)
+```
+
+## 选项
+
+```go
+logroll.BatchSize(5000)
+logroll.Every(100)
+logroll.TimeField("OccurredAt")
+logroll.Scope(oro.Map{"TenantID": tenantID})
+logroll.Connection("logs")
+logroll.Now(func() time.Time { return fixedNow })
+```
+
+`Now` 主要用于测试和确定性清理任务。
+
+## 注意事项
+
+- Log Roll 是物理删除，确认数据可以丢弃后再使用。
+- 它不会绕过 Oro 表前缀。
+- 它不管理数据库分区。
+- 如果项目使用 sharding，应对目标分片对应的 `db` 或查询路径执行清理。

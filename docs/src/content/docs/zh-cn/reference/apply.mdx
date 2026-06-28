@@ -1,0 +1,289 @@
+---
+title: Apply
+description: 组合模型查询扩展，而不是让每个扩展包都维护一套查询 API。
+---
+
+`Apply` 是 Oro 的模型查询扩展点。扩展可以通过它追加查询条件、选择隐藏字段、注入写入值、转换已加载模型，或者在写入成功后执行后置工作，同时查询链仍然使用标准的 `ModelQuery`。
+
+```go
+products, err := db.Use[Product]().
+    Apply(translation.Locale("zh-CN")).
+    Where("Status", "online").
+    OrderByDesc("ID").
+    Get(ctx)
+
+children, err := db.Use[Category]().
+    Apply(nestedset.DescendantsOf(root), nestedset.DefaultOrder()).
+    Where("Status", "enabled").
+    Get(ctx)
+```
+
+核心规则很简单：扩展包只提供行为对象，`Where`、`With`、`OrderBy`、`Paginate`、`Count`、`Create`、`Update` 等查询方法仍然来自 Oro。
+
+## 什么时候使用 Apply
+
+单次查询链上的行为使用 `Apply`：
+
+| 场景 | 示例 |
+| --- | --- |
+| 增加模型条件 | `nestedset.DescendantsOf(root)` |
+| 增加排序 | `nestedset.DefaultOrder()` |
+| 选择内部隐藏字段 | `translation.Locale("zh-CN")` |
+| 增加翻译字段条件 | `translation.WhereTrans("Name", "Apple")` |
+| 增加写入侧数据 | `translation.Write(...)` |
+| 写入后触发清理 | `logroll.Roll(logroll.KeepLast(100000))` |
+
+如果行为必须全局作用于所有匹配查询和写入，例如租户隔离、审计日志、指标采集或连接路由，使用 `Config.Extensions`。
+
+## 公开接口
+
+任何实现 `oro.Apply` 的值都可以传给 `ModelQuery.Apply`。
+
+```go
+type Apply interface {
+    ApplyOro(*ApplyContext) error
+}
+
+type ApplyFinalizer interface {
+    AfterApplyOro(*ApplyContext) error
+}
+```
+
+`ApplyOro` 会按照 `Apply(...)` 参数顺序依次执行。之后，实现了 `ApplyFinalizer` 的对象会按同样顺序执行 `AfterApplyOro(...)`。
+
+当多个小 apply 对象需要先合并状态、最后只执行一次实际动作时，用 `ApplyFinalizer`。多语言扩展就是这种模式，所以 `Locale(...)`、`Fallback(...)`、`Write(...)`、`WhereTrans(...)` 可以组合使用，且不会重复处理。
+
+## ApplyContext
+
+```go
+type ApplyContext struct {
+    Context context.Context
+    DB      *oro.DB
+    Schema  *oro.ModelSchema
+    Spec    *oro.QuerySpec
+    Values  oro.Map
+    Model   any
+    Mode    oro.ApplyMode
+    Stage   oro.ApplyStage
+    State   oro.Map
+    Rows    int64
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `Context` | 调用方上下文，包含超时、取消和扩展上下文值 |
+| `DB` | 当前数据库会话；after-write 阶段会带上已解析连接 |
+| `Schema` | 当前模型 schema |
+| `Spec` | 当前阶段可修改的查询规格 |
+| `Values` | update/delete/restore 的写入值，或可用的 insert 行值 |
+| `Model` | 当前模型或模型切片，取决于操作 |
+| `Mode` | 当前处理的操作 |
+| `Stage` | 当前生命周期阶段 |
+| `State` | 同一次查询执行里所有 apply 对象共享的状态 |
+| `Rows` | `ApplyAfterWrite` 下的受影响行数 |
+
+`State` 只存在于单次查询执行中，适合存放多个 apply 对象合并后的临时状态。
+
+## 模式与阶段
+
+| Mode | Stage | 触发时机 |
+| --- | --- | --- |
+| `ApplyRead` | `ApplyStageSpec` | 模型读取 SQL 构建前 |
+| `ApplyInsert` | `ApplyStageSpec` | 模型插入路由和 spec 准备阶段 |
+| `ApplyInsert` | `ApplyStageValues` | 插入值构建前 |
+| `ApplyUpdate` | `ApplyStageSpec` | 更新 SQL 构建前 |
+| `ApplyUpdate` | `ApplyStageValues` | 更新值写入前 |
+| `ApplyDelete` | `ApplyStageSpec` | 删除或软删除 SQL 构建前 |
+| `ApplyDelete` | `ApplyStageValues` | 删除或软删除值写入前 |
+| `ApplyRestore` | `ApplyStageSpec` | 恢复 SQL 构建前 |
+| `ApplyRestore` | `ApplyStageValues` | 恢复值写入前 |
+| `ApplyAfterFind` | `ApplyStageResult` | 模型加载完成后 |
+| `ApplyAfterWrite` | `ApplyStageResult` | create、upsert 或批量 create 成功后 |
+
+只想修改读/更新/删除/恢复查询条件时，用 `ctx.IsQueryMode()`。
+
+```go
+func (apply ActiveOnly) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("Status", "active")
+}
+```
+
+## Context 辅助方法
+
+`ApplyContext` 提供的辅助方法会遵循 Oro 的模型字段规则。
+
+| 方法 | 用途 |
+| --- | --- |
+| `Where(field, args...)` | 追加 AND 条件 |
+| `OrWhere(field, args...)` | 追加 OR 条件 |
+| `Select(items...)` | 追加 select 表达式 |
+| `SelectHidden(fields...)` | 为内部处理选出隐藏字段 |
+| `OrderBy(fields...)` | 追加升序排序 |
+| `OrderByDesc(fields...)` | 追加降序排序 |
+| `FirstRowColumns(columns...)` | 使用模型字段名读取第一行 |
+| `FirstWhereColumns(field, value, columns...)` | 按字段条件读取一行 |
+| `RowsColumns(limit, columns...)` | 读取少量辅助行 |
+| `CountRows()` | 对当前查询规格计数 |
+
+优先使用这些方法，而不是直接修改 `ctx.Spec`。这样模型字段名、表前缀、SQL 转换和条件校验都会与正常查询构建器保持一致。
+
+## 查询 Apply 示例
+
+下面的 apply 按拥有者过滤模型查询，同时保留标准查询链。
+
+```go
+package owner
+
+import "github.com/duxweb/oro"
+
+type Apply struct {
+    ownerID uint64
+}
+
+func Of(ownerID uint64) Apply {
+    return Apply{ownerID: ownerID}
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || !ctx.IsQueryMode() {
+        return nil
+    }
+    return ctx.Where("OwnerID", apply.ownerID)
+}
+```
+
+使用：
+
+```go
+items, err := db.Use[Document]().
+    Apply(owner.Of(currentUserID)).
+    Where("Status", "published").
+    Get(ctx)
+```
+
+## 写入 Apply 示例
+
+下面的 apply 在 create 和 update 构建值之前注入 actor id。
+
+```go
+type ActorApply struct {
+    id uint64
+}
+
+func Actor(id uint64) ActorApply {
+    return ActorApply{id: id}
+}
+
+func (apply ActorApply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || ctx.Stage != oro.ApplyStageValues || ctx.Model == nil {
+        return nil
+    }
+
+    switch ctx.Mode {
+    case oro.ApplyInsert:
+        if model, ok := ctx.Model.(*Post); ok {
+            model.CreatedBy = oro.NullOf(apply.id)
+            model.UpdatedBy = oro.NullOf(apply.id)
+        }
+    case oro.ApplyUpdate:
+        if ctx.Values != nil {
+            ctx.Values["UpdatedBy"] = apply.id
+        }
+    }
+    return nil
+}
+```
+
+通用扩展包不要硬编码单个模型类型。更推荐对 update 类写入使用 `ctx.Values`，或者定义可复用的嵌入字段并检查 `ctx.Schema`。
+
+## 写入后 Apply 示例
+
+`ApplyAfterWrite` 用于只在写入成功后执行的工作。`logroll.Roll(...)` 就用这个模式在成功插入后清理旧日志。
+
+```go
+type RollApply struct{}
+
+func (RollApply) ApplyOro(ctx *oro.ApplyContext) error {
+    if ctx == nil || ctx.Mode != oro.ApplyAfterWrite || ctx.Stage != oro.ApplyStageResult {
+        return nil
+    }
+    if ctx.Rows == 0 {
+        return nil
+    }
+    // 使用 ctx.DB、ctx.Schema、ctx.Context 执行清理。
+    return nil
+}
+```
+
+写入后工作要保持有界。高频写入路径应在 apply 对象内做节流，或者改用定时任务清理。
+
+## 状态合并模式
+
+当用户需要组合多个选项对象时，实现 `ApplyFinalizer`。
+
+```go
+const stateKey = "example"
+
+type Apply struct {
+    locale string
+    fields []string
+}
+
+func Locale(locale string) Apply {
+    return Apply{locale: locale}
+}
+
+func Fields(fields ...string) Apply {
+    return Apply{fields: fields}
+}
+
+type state struct {
+    locale string
+    fields []string
+    done   map[oro.ApplyStage]bool
+}
+
+func (apply Apply) ApplyOro(ctx *oro.ApplyContext) error {
+    s, _ := ctx.State[stateKey].(*state)
+    if s == nil {
+        s = &state{done: map[oro.ApplyStage]bool{}}
+        ctx.State[stateKey] = s
+    }
+    if apply.locale != "" {
+        s.locale = apply.locale
+    }
+    s.fields = append(s.fields, apply.fields...)
+    return nil
+}
+
+func (apply Apply) AfterApplyOro(ctx *oro.ApplyContext) error {
+    s, _ := ctx.State[stateKey].(*state)
+    if s == nil || s.done[ctx.Stage] {
+        return nil
+    }
+    s.done[ctx.Stage] = true
+
+    if ctx.Mode == oro.ApplyRead && ctx.Stage == oro.ApplyStageSpec {
+        for _, field := range s.fields {
+            if err := ctx.Select(field); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+```
+
+这样多个同扩展 apply 对象组合时，不会重复修改 spec 或重复执行结果处理。
+
+## 边界
+
+- `Apply` 当前属于 `db.Use[T]()` 模型查询，`Table` 和 `Raw` 查询不接收 apply 对象。
+- `Apply` 是查询局部能力，不会安装全局行为。
+- `Apply` 应返回 Oro 错误或包装错误，不应该 panic。
+- `Apply` 不应该把请求级状态存进包级全局变量。
+- `Apply` 在模型查询中使用 Go 字段名，Oro 会在最终阶段转换为数据库列名。

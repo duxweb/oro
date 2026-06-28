@@ -641,6 +641,9 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
 		return nil, err
 	}
+	if err := applyModelAfterWrite(ctx, query, schema, &spec, row, model, 1); err != nil {
+		return nil, err
+	}
 	if err := query.afterApply(ctx, schema, model); err != nil {
 		return nil, err
 	}
@@ -734,9 +737,13 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 	if err != nil {
 		return nil, err
 	}
+	applyState := Map{}
 	if !query.canBatchCreate(models) {
-		created, err := query.createManyOneByOne(ctx, spec, models, options...)
+		created, err := query.createManyOneByOne(ctx, spec, schema, models, options...)
 		if err != nil {
+			return nil, err
+		}
+		if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, nil, created, int64(len(created)), applyState); err != nil {
 			return nil, err
 		}
 		ids, err := primaryValuesFromModels(schema, created)
@@ -759,6 +766,9 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 		return nil, err
 	}
 	if result != nil {
+		if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, nil, models, result.RowsAffected, applyState); err != nil {
+			return nil, err
+		}
 		return result, nil
 	}
 	created, err := query.createManyBatch(ctx, spec, schema, models, options...)
@@ -767,6 +777,9 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 	}
 	ids, err := primaryValuesFromModels(schema, created)
 	if err != nil {
+		return nil, err
+	}
+	if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, nil, created, int64(len(created)), applyState); err != nil {
 		return nil, err
 	}
 	return createResultFromIDs(primaryResultKey(schema), ids, int64(len(created))), nil
@@ -783,20 +796,35 @@ func (query *ModelQuery[T]) CreateManyResult(ctx context.Context, models []*T, o
 	if err != nil {
 		return nil, err
 	}
+	applyState := Map{}
 	if !query.canBatchCreate(models) {
-		return query.createManyOneByOne(ctx, spec, models, options...)
+		created, err := query.createManyOneByOne(ctx, spec, schema, models, options...)
+		if err != nil {
+			return nil, err
+		}
+		if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, nil, created, int64(len(created)), applyState); err != nil {
+			return nil, err
+		}
+		return created, nil
 	}
-	return query.createManyBatch(ctx, spec, schema, models, options...)
+	created, err := query.createManyBatch(ctx, spec, schema, models, options...)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, nil, created, int64(len(created)), applyState); err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
-func (query *ModelQuery[T]) createManyOneByOne(ctx context.Context, spec QuerySpec, models []*T, options ...WriteOption) ([]*T, error) {
+func (query *ModelQuery[T]) createManyOneByOne(ctx context.Context, spec QuerySpec, schema *ModelSchema, models []*T, options ...WriteOption) ([]*T, error) {
 	createdModels := make([]*T, 0, len(models))
 	err := query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
 		for _, model := range models {
 			if model == nil {
 				return &Error{Op: "create", Kind: ErrInvalidArgument}
 			}
-			created, err := txQuery.create(ctx, model, options...)
+			created, err := txQuery.createWithSpecAndState(ctx, spec, schema, model, Map{"__oro_batch_item": true}, options...)
 			if err != nil {
 				return err
 			}
@@ -1193,8 +1221,19 @@ func (query *ModelQuery[T]) create(ctx context.Context, model *T, options ...Wri
 }
 
 func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, schema *ModelSchema, model *T, options ...WriteOption) (*T, error) {
+	return query.createWithSpecAndState(ctx, spec, schema, model, nil, options...)
+}
+
+func (query *ModelQuery[T]) createWithSpecAndState(ctx context.Context, spec QuerySpec, schema *ModelSchema, model *T, applyState Map, options ...WriteOption) (*T, error) {
 	if model == nil {
 		return nil, &Error{Op: "create", Kind: ErrInvalidArgument}
+	}
+	if schema == nil {
+		var err error
+		schema, err = schemaForModel[T](query.db)
+		if err != nil {
+			return nil, err
+		}
 	}
 	emitEvents := shouldEmitEvent(query.db, query.skipEvents, BeforeCreate, AfterCreate)
 	useHooks := !query.skipHooks && hasCreateHooks(model)
@@ -1242,6 +1281,11 @@ func (query *ModelQuery[T]) createWithSpec(ctx context.Context, spec QuerySpec, 
 	}
 	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
 		return nil, err
+	}
+	if applyState == nil || applyState["__oro_batch_item"] != true {
+		if err := applyModelAfterWriteWithState(ctx, query, schema, &spec, row, model, 1, applyState); err != nil {
+			return nil, err
+		}
 	}
 	if err := query.afterApply(ctx, schema, model); err != nil {
 		return nil, err
