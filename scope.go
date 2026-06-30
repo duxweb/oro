@@ -2,18 +2,23 @@ package oro
 
 import "time"
 
+// Scope customizes a model query through a reusable function.
 type Scope[T any] func(q *ScopeQuery[T])
 
+// TableScope customizes a table query through a reusable function.
 type TableScope func(q *TableScopeQuery)
 
+// ScopeQuery exposes chainable model query methods inside a Scope.
 type ScopeQuery[T any] struct {
 	query *ModelQuery[T]
 }
 
+// TableScopeQuery exposes chainable table query methods inside a TableScope.
 type TableScopeQuery struct {
 	query *TableQuery
 }
 
+// Scope applies reusable model query scopes.
 func (query *ModelQuery[T]) Scope(scopes ...Scope[T]) *ModelQuery[T] {
 	next := query
 	for _, scope := range scopes {
@@ -29,6 +34,7 @@ func (query *ModelQuery[T]) Scope(scopes ...Scope[T]) *ModelQuery[T] {
 	return next
 }
 
+// ScopeWhen applies model scopes only when condition is true.
 func (query *ModelQuery[T]) ScopeWhen(condition bool, scopes ...Scope[T]) *ModelQuery[T] {
 	if !condition {
 		return query
@@ -36,6 +42,7 @@ func (query *ModelQuery[T]) ScopeWhen(condition bool, scopes ...Scope[T]) *Model
 	return query.Scope(scopes...)
 }
 
+// Scope applies reusable table query scopes.
 func (query *TableQuery) Scope(scopes ...TableScope) *TableQuery {
 	next := query
 	for _, scope := range scopes {
@@ -51,6 +58,7 @@ func (query *TableQuery) Scope(scopes ...TableScope) *TableQuery {
 	return next
 }
 
+// ScopeWhen applies table scopes only when condition is true.
 func (query *TableQuery) ScopeWhen(condition bool, scopes ...TableScope) *TableQuery {
 	if !condition {
 		return query

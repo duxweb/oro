@@ -5,12 +5,14 @@ import (
 	"reflect"
 )
 
+// CreateResult contains batch insert metadata and generated primary IDs.
 type CreateResult struct {
 	RowsAffected int64
 	PrimaryKey   string
 	primaryIDs   any
 }
 
+// IDs returns generated primary IDs converted to T.
 func (result CreateResult) IDs[T any]() ([]T, error) {
 	count := result.IDCount()
 	ids := make([]T, 0, count)
@@ -25,6 +27,7 @@ func (result CreateResult) IDs[T any]() ([]T, error) {
 	return ids, nil
 }
 
+// FirstID returns the first generated primary ID converted to T.
 func (result CreateResult) FirstID[T any]() (T, error) {
 	var zero T
 	if result.IDCount() == 0 {
@@ -33,6 +36,7 @@ func (result CreateResult) FirstID[T any]() (T, error) {
 	return scalarValue[T](primaryIDAt(result.primaryIDs, 0))
 }
 
+// IDCount returns the number of generated primary IDs captured in the result.
 func (result CreateResult) IDCount() int {
 	return primaryIDCount(result.primaryIDs)
 }

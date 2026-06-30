@@ -412,6 +412,7 @@ See the full benchmark tables, environment, versions, and commands in the [Perfo
 
 - English docs: <https://duxweb.github.io/oro/>
 - 中文文档: <https://duxweb.github.io/oro/zh-cn/>
+- AI/LLM index: <https://duxweb.github.io/oro/llms.txt>
 - Examples: [`examples/`](examples/)
 - Benchmarks: [`benchmarks/ormbench/`](benchmarks/ormbench/)
 

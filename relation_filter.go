@@ -16,18 +16,22 @@ type relationFilterPayload struct {
 	options  relationFilterOptions
 }
 
+// WhereHas filters models to those having relation rows that match callbacks.
 func (query *ModelQuery[T]) WhereHas(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "and"}, callbacks...)
 }
 
+// OrWhereHas adds an OR relation-exists filter.
 func (query *ModelQuery[T]) OrWhereHas(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "or"}, callbacks...)
 }
 
+// WhereDoesntHave filters models to those without matching relation rows.
 func (query *ModelQuery[T]) WhereDoesntHave(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "and", not: true}, callbacks...)
 }
 
+// OrWhereDoesntHave adds an OR relation-not-exists filter.
 func (query *ModelQuery[T]) OrWhereDoesntHave(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "or", not: true}, callbacks...)
 }
@@ -46,18 +50,22 @@ func (query *ModelQuery[T]) whereHas(relation any, options relationFilterOptions
 	return &clone
 }
 
+// WhereHas filters relation rows to those having nested relation rows.
 func (query *RelationQuery) WhereHas(relation any, callbacks ...func(*RelationQuery)) *RelationQuery {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "and"}, callbacks...)
 }
 
+// OrWhereHas adds an OR nested relation-exists filter.
 func (query *RelationQuery) OrWhereHas(relation any, callbacks ...func(*RelationQuery)) *RelationQuery {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "or"}, callbacks...)
 }
 
+// WhereDoesntHave filters relation rows to those without nested relation rows.
 func (query *RelationQuery) WhereDoesntHave(relation any, callbacks ...func(*RelationQuery)) *RelationQuery {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "and", not: true}, callbacks...)
 }
 
+// OrWhereDoesntHave adds an OR nested relation-not-exists filter.
 func (query *RelationQuery) OrWhereDoesntHave(relation any, callbacks ...func(*RelationQuery)) *RelationQuery {
 	return query.whereHas(relation, relationFilterOptions{boolOp: "or", not: true}, callbacks...)
 }

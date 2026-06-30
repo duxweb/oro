@@ -400,6 +400,7 @@ Benchmark 在 SQLite、MySQL、PostgreSQL 下执行，并且每个 ORM 使用相
 
 - English docs: <https://duxweb.github.io/oro/>
 - 中文文档: <https://duxweb.github.io/oro/zh-cn/>
+- AI/LLM 索引：<https://duxweb.github.io/oro/llms.txt>
 - 示例：[`examples/`](examples/)
 - 性能基准：[`benchmarks/ormbench/`](benchmarks/ormbench/)
 

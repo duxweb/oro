@@ -16,12 +16,14 @@ const defaultResultCapacity = 8
 const defaultCreateBatchSize = 1000
 const defaultMaxBatchParams = 30000
 
+// AggregateExpr describes a SELECT aggregate expression.
 type AggregateExpr struct {
 	Func  string
 	Field string
 	Alias string
 }
 
+// WriteOption customizes create, upsert, and update operations.
 type WriteOption interface {
 	applyWriteOption(*writeOptions)
 }
@@ -40,18 +42,21 @@ func (fn writeOptionFunc) applyWriteOption(options *writeOptions) {
 	fn(options)
 }
 
+// Only restricts a write to the listed model fields.
 func Only(fields ...string) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.only = append(options.only, fields...)
 	})
 }
 
+// Omit excludes the listed model fields from a write.
 func Omit(fields ...string) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.omit = append(options.omit, fields...)
 	})
 }
 
+// BatchSize sets the batch size for a batched write.
 func BatchSize(size int) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.batchSize = size
@@ -128,6 +133,7 @@ func mapsHaveSameKeys(values []Map) bool {
 	return true
 }
 
+// CheckVersion enables optimistic-lock checking with the expected version value.
 func CheckVersion(value any) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.version = &versionCheck{Value: value}
@@ -138,14 +144,17 @@ type versionCheck struct {
 	Value any
 }
 
+// ConflictBuilder builds an upsert conflict action.
 type ConflictBuilder struct {
 	fields []string
 }
 
+// ConflictBy starts an upsert conflict clause for fields.
 func ConflictBy(fields ...string) ConflictBuilder {
 	return ConflictBuilder{fields: append([]string(nil), fields...)}
 }
 
+// DoNothing ignores conflicting rows.
 func (builder ConflictBuilder) DoNothing() WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.conflict = &ConflictSpec{
@@ -155,6 +164,7 @@ func (builder ConflictBuilder) DoNothing() WriteOption {
 	})
 }
 
+// Update updates the listed fields when a conflict occurs.
 func (builder ConflictBuilder) Update(fields ...string) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.conflict = &ConflictSpec{
@@ -164,6 +174,7 @@ func (builder ConflictBuilder) Update(fields ...string) WriteOption {
 	})
 }
 
+// UpdateAll updates all writeable fields when a conflict occurs.
 func (builder ConflictBuilder) UpdateAll() WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		options.conflict = &ConflictSpec{
@@ -173,6 +184,7 @@ func (builder ConflictBuilder) UpdateAll() WriteOption {
 	})
 }
 
+// UpdateMap updates explicit field values when a conflict occurs.
 func (builder ConflictBuilder) UpdateMap(values Map) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
 		copied := Map{}
@@ -186,26 +198,32 @@ func (builder ConflictBuilder) UpdateMap(values Map) WriteOption {
 	})
 }
 
+// Count creates a count aggregate expression.
 func Count(field string) AggregateExpr {
 	return AggregateExpr{Func: "count", Field: field}
 }
 
+// Sum creates a sum aggregate expression.
 func Sum(field string) AggregateExpr {
 	return AggregateExpr{Func: "sum", Field: field}
 }
 
+// Avg creates an average aggregate expression.
 func Avg(field string) AggregateExpr {
 	return AggregateExpr{Func: "avg", Field: field}
 }
 
+// Min creates a minimum aggregate expression.
 func Min(field string) AggregateExpr {
 	return AggregateExpr{Func: "min", Field: field}
 }
 
+// Max creates a maximum aggregate expression.
 func Max(field string) AggregateExpr {
 	return AggregateExpr{Func: "max", Field: field}
 }
 
+// As aliases an aggregate expression.
 func (expr AggregateExpr) As(alias string) AggregateExpr {
 	expr.Alias = alias
 	return expr
@@ -274,6 +292,7 @@ type Page[T any] struct {
 	Pages int   `json:"pages"`
 }
 
+// Paginator executes a query page and its total count.
 type Paginator[T any] struct {
 	size  int
 	count func(context.Context) (int64, error)
@@ -281,6 +300,7 @@ type Paginator[T any] struct {
 	err   error
 }
 
+// Page returns one page of items plus total metadata.
 func (p *Paginator[T]) Page(ctx context.Context, page int) (*Page[T], error) {
 	if err := p.validate(page); err != nil {
 		return nil, err
@@ -302,6 +322,7 @@ func (p *Paginator[T]) Page(ctx context.Context, page int) (*Page[T], error) {
 	}, nil
 }
 
+// Items returns the items for page.
 func (p *Paginator[T]) Items(ctx context.Context, page int) ([]T, error) {
 	if err := p.validate(page); err != nil {
 		return nil, err
@@ -310,6 +331,7 @@ func (p *Paginator[T]) Items(ctx context.Context, page int) ([]T, error) {
 	return p.items(ctx, p.size, offset)
 }
 
+// Total returns the total number of matching rows or groups.
 func (p *Paginator[T]) Total(ctx context.Context) (int64, error) {
 	if err := p.validate(1); err != nil {
 		return 0, err
@@ -317,6 +339,7 @@ func (p *Paginator[T]) Total(ctx context.Context) (int64, error) {
 	return p.count(ctx)
 }
 
+// Pages returns the total number of pages.
 func (p *Paginator[T]) Pages(ctx context.Context) (int, error) {
 	total, err := p.Total(ctx)
 	if err != nil {
@@ -325,6 +348,7 @@ func (p *Paginator[T]) Pages(ctx context.Context) (int, error) {
 	return pagesForTotal(total, p.size), nil
 }
 
+// Size returns the configured page size.
 func (p *Paginator[T]) Size() int {
 	return p.size
 }

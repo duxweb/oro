@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// ModelQuery is a clone-on-write query builder for model type T.
 type ModelQuery[T any] struct {
 	db             *DB
 	spec           QuerySpec
@@ -26,6 +27,7 @@ const (
 	softDeleteOnly
 )
 
+// Where adds AND conditions to the model query.
 func (query *ModelQuery[T]) Where(field any, args ...any) *ModelQuery[T] {
 	clone := *query
 	conditions, err := appendWhereCondition(clone.spec.Where, "and", field, args...)
@@ -37,6 +39,7 @@ func (query *ModelQuery[T]) Where(field any, args ...any) *ModelQuery[T] {
 	return &clone
 }
 
+// OrWhere adds OR conditions to the model query.
 func (query *ModelQuery[T]) OrWhere(field any, args ...any) *ModelQuery[T] {
 	clone := *query
 	conditions, err := appendWhereCondition(clone.spec.Where, "or", field, args...)
@@ -48,6 +51,7 @@ func (query *ModelQuery[T]) OrWhere(field any, args ...any) *ModelQuery[T] {
 	return &clone
 }
 
+// WhereGroup adds a grouped AND condition built by fn.
 func (query *ModelQuery[T]) WhereGroup(fn func(w *WhereBuilder)) *ModelQuery[T] {
 	clone := *query
 	condition := buildWhereGroup("and", fn)
@@ -58,6 +62,7 @@ func (query *ModelQuery[T]) WhereGroup(fn func(w *WhereBuilder)) *ModelQuery[T] 
 	return &clone
 }
 
+// OrWhereGroup adds a grouped OR condition built by fn.
 func (query *ModelQuery[T]) OrWhereGroup(fn func(w *WhereBuilder)) *ModelQuery[T] {
 	clone := *query
 	condition := buildWhereGroup("or", fn)
@@ -68,6 +73,7 @@ func (query *ModelQuery[T]) OrWhereGroup(fn func(w *WhereBuilder)) *ModelQuery[T
 	return &clone
 }
 
+// WhereWhen applies fn only when condition is true.
 func (query *ModelQuery[T]) WhereWhen(condition bool, fn func(w *WhereBuilder)) *ModelQuery[T] {
 	if !condition {
 		return query
@@ -75,30 +81,35 @@ func (query *ModelQuery[T]) WhereWhen(condition bool, fn func(w *WhereBuilder)) 
 	return query.WhereGroup(fn)
 }
 
+// WhereRaw adds a raw SQL WHERE fragment with bound arguments.
 func (query *ModelQuery[T]) WhereRaw(sql string, args ...any) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Where = append(clone.spec.Where, withBool("and", RawCondition(sql, args...)))
 	return &clone
 }
 
+// WhereColumn compares two fields or columns in the WHERE clause.
 func (query *ModelQuery[T]) WhereColumn(left string, args ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Where = append(clone.spec.Where, withBool("and", buildColumnCondition(left, args...)))
 	return &clone
 }
 
+// WhereIn adds an IN subquery condition.
 func (query *ModelQuery[T]) WhereIn(field string, source QuerySource) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Where = append(clone.spec.Where, withBool("and", buildInCondition(field, source)))
 	return &clone
 }
 
+// WhereExists adds an EXISTS subquery condition.
 func (query *ModelQuery[T]) WhereExists(source QuerySource) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Where = append(clone.spec.Where, withBool("and", buildExistsCondition(source)))
 	return &clone
 }
 
+// Select sets explicit model fields, expressions, or aggregates to read.
 func (query *ModelQuery[T]) Select(items ...any) *ModelQuery[T] {
 	clone := *query
 	exprs, err := selectExprs(items)
@@ -110,6 +121,7 @@ func (query *ModelQuery[T]) Select(items ...any) *ModelQuery[T] {
 	return &clone
 }
 
+// With eager-loads a relation, optionally customizing the relation query.
 func (query *ModelQuery[T]) With(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	clone := *query
 	with, err := buildWithSpec(relation, callbacks)
@@ -121,6 +133,7 @@ func (query *ModelQuery[T]) With(relation any, callbacks ...func(*RelationQuery)
 	return &clone
 }
 
+// For constrains the query to records related to relation.
 func (query *ModelQuery[T]) For(relation Relation) *ModelQuery[T] {
 	clone := *query
 	schema, err := schemaForModel[T](query.db)
@@ -137,24 +150,28 @@ func (query *ModelQuery[T]) For(relation Relation) *ModelQuery[T] {
 	return &clone
 }
 
+// As sets a table alias for the query.
 func (query *ModelQuery[T]) As(alias string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Alias = alias
 	return &clone
 }
 
+// SelectHidden includes hidden model fields in the select list.
 func (query *ModelQuery[T]) SelectHidden(fields ...string) *ModelQuery[T] {
 	clone := *query
 	clone.selectHidden = append(clone.selectHidden, fields...)
 	return &clone
 }
 
+// SkipHooks disables model hooks for write operations.
 func (query *ModelQuery[T]) SkipHooks() *ModelQuery[T] {
 	clone := *query
 	clone.skipHooks = true
 	return &clone
 }
 
+// SkipEvents disables event emission for the query.
 func (query *ModelQuery[T]) SkipEvents() *ModelQuery[T] {
 	clone := *query
 	clone.skipEvents = true
@@ -162,12 +179,14 @@ func (query *ModelQuery[T]) SkipEvents() *ModelQuery[T] {
 	return &clone
 }
 
+// UsePrimary forces reads to use the primary connection.
 func (query *ModelQuery[T]) UsePrimary() *ModelQuery[T] {
 	clone := *query
 	clone.spec.UsePrimary = true
 	return &clone
 }
 
+// Cache enables query result caching for ttl.
 func (query *ModelQuery[T]) Cache(ttl time.Duration) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Cache.Enabled = true
@@ -178,54 +197,63 @@ func (query *ModelQuery[T]) Cache(ttl time.Duration) *ModelQuery[T] {
 	return &clone
 }
 
+// CacheKey sets an explicit cache key.
 func (query *ModelQuery[T]) CacheKey(key string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Cache.Key = key
 	return &clone
 }
 
+// CacheTags adds cache invalidation tags.
 func (query *ModelQuery[T]) CacheTags(tags ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Cache.Tags = append(clone.spec.Cache.Tags, tags...)
 	return &clone
 }
 
+// Timeout sets a per-query timeout.
 func (query *ModelQuery[T]) Timeout(timeout time.Duration) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Timeout = int64(timeout)
 	return &clone
 }
 
+// Join adds an inner join.
 func (query *ModelQuery[T]) Join(source any, fn func(j *Join)) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, buildJoin(JoinInner, source, fn))
 	return &clone
 }
 
+// LeftJoin adds a left join.
 func (query *ModelQuery[T]) LeftJoin(source any, fn func(j *Join)) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, buildJoin(JoinLeft, source, fn))
 	return &clone
 }
 
+// RightJoin adds a right join.
 func (query *ModelQuery[T]) RightJoin(source any, fn func(j *Join)) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, buildJoin(JoinRight, source, fn))
 	return &clone
 }
 
+// FullJoin adds a full join.
 func (query *ModelQuery[T]) FullJoin(source any, fn func(j *Join)) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, buildJoin(JoinFull, source, fn))
 	return &clone
 }
 
+// CrossJoin adds a cross join.
 func (query *ModelQuery[T]) CrossJoin(table string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, buildJoin(JoinCross, table, nil))
 	return &clone
 }
 
+// JoinRaw adds a raw join fragment.
 func (query *ModelQuery[T]) JoinRaw(sql string, args ...any) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Joins = append(clone.spec.Joins, JoinAST{
@@ -234,30 +262,35 @@ func (query *ModelQuery[T]) JoinRaw(sql string, args ...any) *ModelQuery[T] {
 	return &clone
 }
 
+// OrderBy orders by fields ascending.
 func (query *ModelQuery[T]) OrderBy(fields ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Order = append(clone.spec.Order, orderExprs(false, fields)...)
 	return &clone
 }
 
+// OrderByDesc orders by fields descending.
 func (query *ModelQuery[T]) OrderByDesc(fields ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Order = append(clone.spec.Order, orderExprs(true, fields)...)
 	return &clone
 }
 
+// OrderByRaw adds a raw ORDER BY expression.
 func (query *ModelQuery[T]) OrderByRaw(sql string, args ...any) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Order = append(clone.spec.Order, OrderExpr{Expr: sql, Raw: true, Args: args})
 	return &clone
 }
 
+// GroupBy groups results by fields.
 func (query *ModelQuery[T]) GroupBy(fields ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Group = append(clone.spec.Group, fields...)
 	return &clone
 }
 
+// Having adds AND conditions to the HAVING clause.
 func (query *ModelQuery[T]) Having(field string, args ...any) *ModelQuery[T] {
 	clone := *query
 	conditions, err := buildConditions(field, args...)
@@ -269,66 +302,77 @@ func (query *ModelQuery[T]) Having(field string, args ...any) *ModelQuery[T] {
 	return &clone
 }
 
+// HavingColumn compares two columns in the HAVING clause.
 func (query *ModelQuery[T]) HavingColumn(left string, args ...string) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Having = append(clone.spec.Having, withBool("and", buildColumnCondition(left, args...)))
 	return &clone
 }
 
+// HavingIn adds an IN subquery to the HAVING clause.
 func (query *ModelQuery[T]) HavingIn(field string, source QuerySource) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Having = append(clone.spec.Having, withBool("and", buildInCondition(field, source)))
 	return &clone
 }
 
+// HavingExists adds an EXISTS subquery to the HAVING clause.
 func (query *ModelQuery[T]) HavingExists(source QuerySource) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Having = append(clone.spec.Having, withBool("and", buildExistsCondition(source)))
 	return &clone
 }
 
+// HavingRaw adds a raw HAVING fragment with bound arguments.
 func (query *ModelQuery[T]) HavingRaw(sql string, args ...any) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Having = append(clone.spec.Having, withBool("and", RawCondition(sql, args...)))
 	return &clone
 }
 
+// Limit sets the maximum number of rows.
 func (query *ModelQuery[T]) Limit(limit int) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Limit = &limit
 	return &clone
 }
 
+// Offset sets the number of rows to skip.
 func (query *ModelQuery[T]) Offset(offset int) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Offset = &offset
 	return &clone
 }
 
+// LockForUpdate adds a FOR UPDATE lock.
 func (query *ModelQuery[T]) LockForUpdate(options ...LockOption) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Lock = applyLockOptions(LockUpdate, options)
 	return &clone
 }
 
+// LockForShare adds a FOR SHARE lock.
 func (query *ModelQuery[T]) LockForShare(options ...LockOption) *ModelQuery[T] {
 	clone := *query
 	clone.spec.Lock = applyLockOptions(LockShare, options)
 	return &clone
 }
 
+// WithDeleted includes soft-deleted rows.
 func (query *ModelQuery[T]) WithDeleted() *ModelQuery[T] {
 	clone := *query
 	clone.softDeleteMode = softDeleteWith
 	return &clone
 }
 
+// OnlyDeleted restricts the query to soft-deleted rows.
 func (query *ModelQuery[T]) OnlyDeleted() *ModelQuery[T] {
 	clone := *query
 	clone.softDeleteMode = softDeleteOnly
 	return &clone
 }
 
+// Shard pins the query to the shard resolved from values.
 func (query *ModelQuery[T]) Shard(values Map) *ModelQuery[T] {
 	clone := *query
 	clone.shard = copyMap(values)
@@ -336,6 +380,7 @@ func (query *ModelQuery[T]) Shard(values Map) *ModelQuery[T] {
 	return &clone
 }
 
+// AllShards runs the read across all shards in the model shard group.
 func (query *ModelQuery[T]) AllShards() *ModelQuery[T] {
 	clone := *query
 	clone.shard = nil
@@ -343,6 +388,7 @@ func (query *ModelQuery[T]) AllShards() *ModelQuery[T] {
 	return &clone
 }
 
+// First returns the first matching model or nil when no row is found.
 func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 	if query.allShards && len(query.spec.Order) == 0 {
 		return nil, &Error{Op: "first", Kind: ErrOrderRequired}
@@ -394,6 +440,7 @@ func (query *ModelQuery[T]) First(ctx context.Context) (*T, error) {
 	return model, nil
 }
 
+// Get returns all matching models.
 func (query *ModelQuery[T]) Get(ctx context.Context) ([]*T, error) {
 	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
@@ -485,6 +532,7 @@ func queryModelAllShardRows(ctx context.Context, db *DB, spec QuerySpec) ([]Map,
 	return fanOutShardRows(ctx, db, spec, config.Connections)
 }
 
+// Stream opens a streaming iterator for matching models.
 func (query *ModelQuery[T]) Stream(ctx context.Context) (Stream[*T], error) {
 	if query.allShards {
 		return nil, &Error{Op: "stream", Kind: ErrUnsupported}
@@ -515,6 +563,7 @@ func (query *ModelQuery[T]) Stream(ctx context.Context) (Stream[*T], error) {
 	}, nil
 }
 
+// Chunk iterates matching models in batches.
 func (query *ModelQuery[T]) Chunk(ctx context.Context, size int, fn func([]*T) error) error {
 	if query.allShards {
 		return &Error{Op: "chunk", Kind: ErrUnsupported}
@@ -557,6 +606,7 @@ func (query *ModelQuery[T]) Chunk(ctx context.Context, size int, fn func([]*T) e
 	})
 }
 
+// Each calls fn for every matching model.
 func (query *ModelQuery[T]) Each(ctx context.Context, fn func(*T) error) error {
 	if fn == nil {
 		return &Error{Op: "each", Kind: ErrInvalidArgument}
@@ -571,6 +621,7 @@ func (query *ModelQuery[T]) Each(ctx context.Context, fn func(*T) error) error {
 	})
 }
 
+// Paginate creates a paginator for the query.
 func (query *ModelQuery[T]) Paginate(size int) *Paginator[*T] {
 	specErr := paginateSpecError(query.spec)
 	return &Paginator[*T]{
@@ -585,6 +636,7 @@ func (query *ModelQuery[T]) Paginate(size int) *Paginator[*T] {
 	}
 }
 
+// Create inserts one model and maps generated values back to it.
 func (query *ModelQuery[T]) Create(ctx context.Context, model *T, options ...WriteOption) (*T, error) {
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
@@ -596,6 +648,7 @@ func (query *ModelQuery[T]) Create(ctx context.Context, model *T, options ...Wri
 	return query.createInTransaction(ctx, spec, schema, model, options...)
 }
 
+// Upsert inserts or updates one model using a conflict option.
 func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...WriteOption) (*T, error) {
 	if query.allShards {
 		return nil, &Error{Op: "upsert", Kind: ErrShardRequired}
@@ -650,6 +703,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	return model, nil
 }
 
+// Update updates matching rows with explicit Map values.
 func (query *ModelQuery[T]) Update(ctx context.Context, values Map, options ...WriteOption) (int64, error) {
 	if query.allShards {
 		return 0, &Error{Op: "update", Kind: ErrShardRequired}
@@ -672,6 +726,7 @@ func (query *ModelQuery[T]) Update(ctx context.Context, values Map, options ...W
 	return query.updateInTransaction(ctx, spec, schema, hookValues, writeOptions)
 }
 
+// Delete deletes matching rows or soft-deletes when a soft-delete field exists.
 func (query *ModelQuery[T]) Delete(ctx context.Context) (int64, error) {
 	if query.allShards {
 		return 0, &Error{Op: "delete", Kind: ErrShardRequired}
@@ -690,6 +745,7 @@ func (query *ModelQuery[T]) Delete(ctx context.Context) (int64, error) {
 	return query.deleteInTransaction(ctx, spec, schema, nil, false)
 }
 
+// ForceDelete permanently deletes matching rows.
 func (query *ModelQuery[T]) ForceDelete(ctx context.Context) (int64, error) {
 	if query.allShards {
 		return 0, &Error{Op: "delete", Kind: ErrShardRequired}
@@ -704,6 +760,7 @@ func (query *ModelQuery[T]) ForceDelete(ctx context.Context) (int64, error) {
 	return query.deleteInTransaction(ctx, spec, schema, nil, false)
 }
 
+// Restore clears the soft-delete field on matching rows.
 func (query *ModelQuery[T]) Restore(ctx context.Context) (int64, error) {
 	if query.allShards {
 		return 0, &Error{Op: "restore", Kind: ErrShardRequired}
@@ -726,6 +783,7 @@ func (query *ModelQuery[T]) Restore(ctx context.Context) (int64, error) {
 	return query.restoreInTransaction(ctx, spec, schema, values)
 }
 
+// CreateMany inserts models in batches and returns generated primary IDs.
 func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options ...WriteOption) (*CreateResult, error) {
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
@@ -785,6 +843,7 @@ func (query *ModelQuery[T]) CreateMany(ctx context.Context, models []*T, options
 	return createResultFromIDs(primaryResultKey(schema), ids, int64(len(created))), nil
 }
 
+// CreateManyResult inserts models in batches and returns hydrated models.
 func (query *ModelQuery[T]) CreateManyResult(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {
 	if query.allShards {
 		return nil, &Error{Op: "create", Kind: ErrShardRequired}
@@ -1057,6 +1116,7 @@ func (query *ModelQuery[T]) canBatchCreate(models []*T) bool {
 	return true
 }
 
+// UpsertMany upserts models one by one with the configured conflict option.
 func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {
 	if len(models) == 0 {
 		return []*T{}, nil
@@ -1076,6 +1136,7 @@ func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options
 	return upsertedModels, nil
 }
 
+// Find returns a model by primary key.
 func (query *ModelQuery[T]) Find(ctx context.Context, id any) (*T, error) {
 	spec, schema, err := modelQuerySpec(ctx, query)
 	if err != nil {
@@ -1104,6 +1165,7 @@ func (query *ModelQuery[T]) Find(ctx context.Context, id any) (*T, error) {
 	return model, nil
 }
 
+// Count returns the number of matching rows or groups.
 func (query *ModelQuery[T]) Count(ctx context.Context) (int64, error) {
 	spec, _, err := modelQuerySpec(ctx, query)
 	if err != nil {
@@ -1140,6 +1202,7 @@ func (query *ModelQuery[T]) Count(ctx context.Context) (int64, error) {
 	return rowInt64(row, "total")
 }
 
+// Exists reports whether the query has at least one matching row.
 func (query *ModelQuery[T]) Exists(ctx context.Context) (bool, error) {
 	spec, _, err := modelQuerySpec(ctx, query)
 	if err != nil {
@@ -1170,6 +1233,7 @@ func (query *ModelQuery[T]) Exists(ctx context.Context) (bool, error) {
 	return row != nil, nil
 }
 
+// Sum returns the decimal sum of field.
 func (query *ModelQuery[T]) Sum(ctx context.Context, field string) (Decimal, error) {
 	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
@@ -1178,6 +1242,7 @@ func (query *ModelQuery[T]) Sum(ctx context.Context, field string) (Decimal, err
 	return aggregateDecimal(ctx, query.db, spec, "sum", schema.FieldByGo[field].Column)
 }
 
+// Avg returns the decimal average of field.
 func (query *ModelQuery[T]) Avg(ctx context.Context, field string) (Decimal, error) {
 	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
@@ -1186,6 +1251,7 @@ func (query *ModelQuery[T]) Avg(ctx context.Context, field string) (Decimal, err
 	return aggregateDecimal(ctx, query.db, spec, "avg", schema.FieldByGo[field].Column)
 }
 
+// Min returns the nullable minimum value of field.
 func (query *ModelQuery[T]) Min[V any](ctx context.Context, field string) (Null[V], error) {
 	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {
@@ -1194,6 +1260,7 @@ func (query *ModelQuery[T]) Min[V any](ctx context.Context, field string) (Null[
 	return aggregateNull[V](ctx, query.db, spec, "min", schema.FieldByGo[field].Column)
 }
 
+// Max returns the nullable maximum value of field.
 func (query *ModelQuery[T]) Max[V any](ctx context.Context, field string) (Null[V], error) {
 	spec, schema, err := aggregateModelSpec(ctx, query, field)
 	if err != nil {

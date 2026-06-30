@@ -27,6 +27,9 @@ schema/缓存/分片各子系统的行为，移除死代码与重复实现，并
 
 ### 新增
 
+- AI/LLM 开发支持：包级 godoc、导出 API 注释、pkg.go.dev 示例、仓库
+  `AGENTS.md` / `CLAUDE.md`，以及自动生成的 `/llms.txt` 与
+  `/llms-full.txt` 文档索引。
 - `oro.Time(field)` 时间范围条件，以及 `DayBounds`、`MonthBounds`、
   `YearBounds` 和 `FieldExpr.NotBetween`。日期桶会编译为可走索引的半开
   区间，而不是数据库日期函数。

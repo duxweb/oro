@@ -27,40 +27,55 @@ func (fn txOptionFunc) applyTxOption(options *txOptions) {
 type IsolationLevel = sql.IsolationLevel
 
 const (
-	LevelDefault         = sql.LevelDefault
+	// LevelDefault uses the database driver's default isolation level.
+	LevelDefault = sql.LevelDefault
+	// LevelReadUncommitted maps to sql.LevelReadUncommitted.
 	LevelReadUncommitted = sql.LevelReadUncommitted
-	LevelReadCommitted   = sql.LevelReadCommitted
-	LevelWriteCommitted  = sql.LevelWriteCommitted
-	LevelRepeatableRead  = sql.LevelRepeatableRead
-	LevelSnapshot        = sql.LevelSnapshot
-	LevelSerializable    = sql.LevelSerializable
-	LevelLinearizable    = sql.LevelLinearizable
+	// LevelReadCommitted maps to sql.LevelReadCommitted.
+	LevelReadCommitted = sql.LevelReadCommitted
+	// LevelWriteCommitted maps to sql.LevelWriteCommitted.
+	LevelWriteCommitted = sql.LevelWriteCommitted
+	// LevelRepeatableRead maps to sql.LevelRepeatableRead.
+	LevelRepeatableRead = sql.LevelRepeatableRead
+	// LevelSnapshot maps to sql.LevelSnapshot.
+	LevelSnapshot = sql.LevelSnapshot
+	// LevelSerializable maps to sql.LevelSerializable.
+	LevelSerializable = sql.LevelSerializable
+	// LevelLinearizable maps to sql.LevelLinearizable.
+	LevelLinearizable = sql.LevelLinearizable
 )
 
+// TxIsolation sets the transaction isolation level.
 func TxIsolation(level IsolationLevel) TxOption {
 	return txOptionFunc(func(options *txOptions) {
 		options.sqlOptions.Isolation = level
 	})
 }
 
+// TxReadOnly marks a transaction as read-only.
 func TxReadOnly() TxOption {
 	return txOptionFunc(func(options *txOptions) {
 		options.sqlOptions.ReadOnly = true
 	})
 }
 
+// TxAttempts sets the number of retry attempts for retryable transaction errors.
 func TxAttempts(attempts int) TxOption {
 	return txOptionFunc(func(options *txOptions) {
 		options.attempts = attempts
 	})
 }
 
+// TxTimeout sets a timeout for the whole transaction.
 func TxTimeout(timeout time.Duration) TxOption {
 	return txOptionFunc(func(options *txOptions) {
 		options.timeout = timeout
 	})
 }
 
+// Transaction runs fn inside a transaction and commits when fn returns nil.
+//
+// If fn returns an error or panics, the transaction is rolled back.
 func (db *DB) Transaction(ctx context.Context, fn func(tx *DB) error, opts ...TxOption) error {
 	if fn == nil {
 		return &Error{Op: "transaction", Kind: ErrInvalidArgument}
@@ -124,6 +139,7 @@ func (db *DB) transactionOnce(ctx context.Context, fn func(tx *DB) error, sqlOpt
 	return err
 }
 
+// Begin starts a transaction and returns a DB clone bound to it.
 func (db *DB) Begin(ctx context.Context, opts ...TxOption) (*DB, error) {
 	options := applyTxOptions(opts)
 	if db == nil || db.runtime == nil {
@@ -170,6 +186,7 @@ func (db *DB) beginNested(ctx context.Context) (*DB, error) {
 	return &clone, nil
 }
 
+// Commit commits the current transaction or releases a nested savepoint.
 func (db *DB) Commit(ctx context.Context) error {
 	state := db.txState()
 	if state == nil {
@@ -196,6 +213,7 @@ func (db *DB) Commit(ctx context.Context) error {
 	return emitEvent(ctx, db, &Event{Name: AfterCommit, Operation: "commit"})
 }
 
+// Rollback rolls back the current transaction or nested savepoint.
 func (db *DB) Rollback(ctx context.Context) error {
 	state := db.txState()
 	if state == nil {
@@ -219,12 +237,14 @@ func (db *DB) Rollback(ctx context.Context) error {
 	return emitEvent(ctx, db, &Event{Name: AfterRollback, Operation: "rollback"})
 }
 
+// Savepoint represents a manually controlled transaction savepoint.
 type Savepoint struct {
 	db     *DB
 	name   string
 	closed bool
 }
 
+// Savepoint creates a savepoint on the current transaction.
 func (db *DB) Savepoint(ctx context.Context) (*Savepoint, error) {
 	state := db.txState()
 	if state == nil || state.tx == nil || state.closed {
@@ -237,6 +257,7 @@ func (db *DB) Savepoint(ctx context.Context) (*Savepoint, error) {
 	return &Savepoint{db: db, name: name}, nil
 }
 
+// Rollback rolls back to the savepoint.
 func (savepoint *Savepoint) Rollback(ctx context.Context) error {
 	if savepoint == nil || savepoint.db == nil || savepoint.closed {
 		return nil
@@ -253,6 +274,7 @@ func (savepoint *Savepoint) Rollback(ctx context.Context) error {
 	return nil
 }
 
+// Release releases the savepoint.
 func (savepoint *Savepoint) Release(ctx context.Context) error {
 	if savepoint == nil || savepoint.db == nil || savepoint.closed {
 		return nil

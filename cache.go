@@ -8,10 +8,12 @@ import (
 	"github.com/duxweb/oro/internal/memcache"
 )
 
+// CacheManager exposes manual invalidation for the configured query cache.
 type CacheManager struct {
 	store CacheStore
 }
 
+// MemoryCacheStore is Oro's built-in in-memory cache implementation.
 type MemoryCacheStore = memcache.Store
 
 type cachePayload struct {
@@ -25,6 +27,7 @@ func NewMemoryCacheStore() *MemoryCacheStore {
 	})
 }
 
+// Cache returns the manual cache manager for db.
 func (db *DB) Cache() *CacheManager {
 	if db == nil || db.runtime == nil {
 		return &CacheManager{}
@@ -32,6 +35,7 @@ func (db *DB) Cache() *CacheManager {
 	return &CacheManager{store: db.runtime.Cache}
 }
 
+// Forget removes one cache entry by key.
 func (manager *CacheManager) Forget(ctx context.Context, key string) error {
 	if key == "" {
 		return &Error{Op: "cache", Kind: ErrCacheKeyRequired}
@@ -42,6 +46,7 @@ func (manager *CacheManager) Forget(ctx context.Context, key string) error {
 	return manager.store.Forget(ctx, key)
 }
 
+// ForgetTag removes all cache entries associated with tag.
 func (manager *CacheManager) ForgetTag(ctx context.Context, tag string) error {
 	if tag == "" {
 		return &Error{Op: "cache", Kind: ErrCacheKeyRequired}

@@ -2,35 +2,52 @@ package oro
 
 import "context"
 
+// ApplyMode identifies the operation currently being extended.
 type ApplyMode string
+
+// ApplyStage identifies the extension stage for an operation.
 type ApplyStage string
 
 const (
-	ApplyRead       ApplyMode = "read"
-	ApplyInsert     ApplyMode = "insert"
-	ApplyUpdate     ApplyMode = "update"
-	ApplyDelete     ApplyMode = "delete"
-	ApplyRestore    ApplyMode = "restore"
-	ApplyAfterFind  ApplyMode = "after_find"
+	// ApplyRead is used while building a read query.
+	ApplyRead ApplyMode = "read"
+	// ApplyInsert is used while inserting rows.
+	ApplyInsert ApplyMode = "insert"
+	// ApplyUpdate is used while updating rows.
+	ApplyUpdate ApplyMode = "update"
+	// ApplyDelete is used while deleting rows.
+	ApplyDelete ApplyMode = "delete"
+	// ApplyRestore is used while restoring soft-deleted rows.
+	ApplyRestore ApplyMode = "restore"
+	// ApplyAfterFind is used after a model is found.
+	ApplyAfterFind ApplyMode = "after_find"
+	// ApplyAfterWrite is used after a write completes.
 	ApplyAfterWrite ApplyMode = "after_write"
 )
 
 const (
-	ApplyStageSpec   ApplyStage = "spec"
+	// ApplyStageSpec lets extensions alter the query spec.
+	ApplyStageSpec ApplyStage = "spec"
+	// ApplyStageValues lets extensions alter write values.
 	ApplyStageValues ApplyStage = "values"
+	// ApplyStageResult lets extensions observe write results.
 	ApplyStageResult ApplyStage = "result"
 )
 
+// Apply is implemented by query extensions applied with ModelQuery.Apply.
 type Apply interface {
 	ApplyOro(*ApplyContext) error
 }
 
+// ApplyFinalizer can run after all Apply hooks on the same query.
 type ApplyFinalizer interface {
 	AfterApplyOro(*ApplyContext) error
 }
 
+// ApplyFunc adapts a function to Apply.
 type ApplyFunc func(*ApplyContext) error
 
+// ApplyOro calls fn.
 func (fn ApplyFunc) ApplyOro(ctx *ApplyContext) error {
 	if fn == nil {
 		return nil
@@ -38,6 +55,7 @@ func (fn ApplyFunc) ApplyOro(ctx *ApplyContext) error {
 	return fn(ctx)
 }
 
+// ApplyContext exposes query/write state to Apply extensions.
 type ApplyContext struct {
 	Context context.Context
 	DB      *DB
@@ -53,6 +71,7 @@ type ApplyContext struct {
 	selectHidden *[]string
 }
 
+// IsQueryMode reports whether the context is at the query-spec stage.
 func (ctx *ApplyContext) IsQueryMode() bool {
 	switch ctx.Mode {
 	case ApplyRead, ApplyUpdate, ApplyDelete, ApplyRestore:
@@ -62,6 +81,7 @@ func (ctx *ApplyContext) IsQueryMode() bool {
 	}
 }
 
+// Where adds an AND condition to the current query spec.
 func (ctx *ApplyContext) Where(field any, args ...any) error {
 	if ctx == nil || ctx.Spec == nil {
 		return &Error{Op: "apply.where", Kind: ErrInvalidArgument}
@@ -74,6 +94,7 @@ func (ctx *ApplyContext) Where(field any, args ...any) error {
 	return nil
 }
 
+// OrWhere adds an OR condition to the current query spec.
 func (ctx *ApplyContext) OrWhere(field any, args ...any) error {
 	if ctx == nil || ctx.Spec == nil {
 		return &Error{Op: "apply.where", Kind: ErrInvalidArgument}
@@ -86,6 +107,7 @@ func (ctx *ApplyContext) OrWhere(field any, args ...any) error {
 	return nil
 }
 
+// Select appends select expressions to the current query spec.
 func (ctx *ApplyContext) Select(items ...any) error {
 	if ctx == nil || ctx.Spec == nil {
 		return &Error{Op: "apply.select", Kind: ErrInvalidArgument}
@@ -98,6 +120,7 @@ func (ctx *ApplyContext) Select(items ...any) error {
 	return nil
 }
 
+// SelectHidden includes hidden fields in model query selection.
 func (ctx *ApplyContext) SelectHidden(fields ...string) {
 	if ctx == nil || ctx.selectHidden == nil {
 		return
@@ -105,6 +128,7 @@ func (ctx *ApplyContext) SelectHidden(fields ...string) {
 	*ctx.selectHidden = append(*ctx.selectHidden, fields...)
 }
 
+// OrderBy appends ascending order expressions.
 func (ctx *ApplyContext) OrderBy(fields ...string) {
 	if ctx == nil || ctx.Spec == nil {
 		return
@@ -112,6 +136,7 @@ func (ctx *ApplyContext) OrderBy(fields ...string) {
 	ctx.Spec.Order = append(ctx.Spec.Order, orderExprs(false, fields)...)
 }
 
+// OrderByDesc appends descending order expressions.
 func (ctx *ApplyContext) OrderByDesc(fields ...string) {
 	if ctx == nil || ctx.Spec == nil {
 		return
@@ -119,6 +144,7 @@ func (ctx *ApplyContext) OrderByDesc(fields ...string) {
 	ctx.Spec.Order = append(ctx.Spec.Order, orderExprs(true, fields)...)
 }
 
+// FirstRowColumns reads the first matching row with selected columns.
 func (ctx *ApplyContext) FirstRowColumns(columns ...string) (Map, error) {
 	rows, err := ctx.RowsColumns(1, columns...)
 	if err != nil || len(rows) == 0 {
@@ -144,6 +170,7 @@ func (ctx *ApplyContext) FirstRowColumns(columns ...string) (Map, error) {
 	return normalized, nil
 }
 
+// FirstWhereColumns reads selected columns for the first row matching field=value.
 func (ctx *ApplyContext) FirstWhereColumns(field string, value any, columns ...string) (Map, error) {
 	if ctx == nil || ctx.Spec == nil {
 		return nil, &Error{Op: "apply.rows", Kind: ErrInvalidArgument}
@@ -172,6 +199,7 @@ func (ctx *ApplyContext) FirstWhereColumns(field string, value any, columns ...s
 	return ctxClone.FirstRowColumns(columns...)
 }
 
+// CountRows counts rows for the current query spec.
 func (ctx *ApplyContext) CountRows() (int64, error) {
 	if ctx == nil || ctx.Spec == nil || ctx.DB == nil {
 		return 0, &Error{Op: "apply.count", Kind: ErrInvalidArgument}
@@ -190,6 +218,7 @@ func (ctx *ApplyContext) CountRows() (int64, error) {
 	return rowInt64(row, "total")
 }
 
+// RowsColumns reads rows from the current query spec with selected columns.
 func (ctx *ApplyContext) RowsColumns(limit int, columns ...string) ([]Map, error) {
 	if ctx == nil || ctx.Spec == nil || ctx.DB == nil {
 		return nil, &Error{Op: "apply.rows", Kind: ErrInvalidArgument}
@@ -214,6 +243,7 @@ func (ctx *ApplyContext) RowsColumns(limit int, columns ...string) ([]Map, error
 	return queryRowsPrepared(ctx.Context, ctx.DB, spec)
 }
 
+// Apply attaches extension logic to a model query.
 func (query *ModelQuery[T]) Apply(applies ...Apply) *ModelQuery[T] {
 	if len(applies) == 0 {
 		return query

@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// RelationAggregateExpr describes an aggregate subquery over a relation.
 type RelationAggregateExpr struct {
 	Func     string
 	Relation any
@@ -13,60 +14,74 @@ type RelationAggregateExpr struct {
 	Callback func(*RelationQuery)
 }
 
+// CountOf selects the count of a relation.
 func CountOf(relation any) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "count", Relation: relation}
 }
 
+// ExistsOf selects whether a relation has at least one row.
 func ExistsOf(relation any) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "exists", Relation: relation}
 }
 
+// SumOf selects the sum of field over a relation.
 func SumOf(relation any, field string) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "sum", Relation: relation, Field: field}
 }
 
+// AvgOf selects the average of field over a relation.
 func AvgOf(relation any, field string) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "avg", Relation: relation, Field: field}
 }
 
+// MinOf selects the minimum of field over a relation.
 func MinOf(relation any, field string) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "min", Relation: relation, Field: field}
 }
 
+// MaxOf selects the maximum of field over a relation.
 func MaxOf(relation any, field string) RelationAggregateExpr {
 	return RelationAggregateExpr{Func: "max", Relation: relation, Field: field}
 }
 
+// As aliases the relation aggregate result.
 func (expr RelationAggregateExpr) As(alias string) RelationAggregateExpr {
 	expr.Alias = alias
 	return expr
 }
 
+// Filter customizes the relation query used by the aggregate.
 func (expr RelationAggregateExpr) Filter(fn func(*RelationQuery)) RelationAggregateExpr {
 	expr.Callback = fn
 	return expr
 }
 
+// WithCount appends a relation count select expression.
 func (query *ModelQuery[T]) WithCount(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(CountOf(relation), callbacks...)
 }
 
+// WithExists appends a relation exists select expression.
 func (query *ModelQuery[T]) WithExists(relation any, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(ExistsOf(relation), callbacks...)
 }
 
+// WithSum appends a relation sum select expression.
 func (query *ModelQuery[T]) WithSum(relation any, field string, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(SumOf(relation, field), callbacks...)
 }
 
+// WithAvg appends a relation average select expression.
 func (query *ModelQuery[T]) WithAvg(relation any, field string, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(AvgOf(relation, field), callbacks...)
 }
 
+// WithMin appends a relation minimum select expression.
 func (query *ModelQuery[T]) WithMin(relation any, field string, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(MinOf(relation, field), callbacks...)
 }
 
+// WithMax appends a relation maximum select expression.
 func (query *ModelQuery[T]) WithMax(relation any, field string, callbacks ...func(*RelationQuery)) *ModelQuery[T] {
 	return query.withRelationAggregate(MaxOf(relation, field), callbacks...)
 }

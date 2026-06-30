@@ -2,6 +2,10 @@ package oro
 
 import "time"
 
+// Model provides the default unsigned primary key and automatic timestamps.
+//
+// Embed Model in application structs when the conventional ID, CreatedAt, and
+// UpdatedAt fields are desired.
 type Model struct {
 	ID        uint64
 	CreatedAt time.Time
@@ -40,13 +44,16 @@ func (model *Model) ensureRelationMap() *modelState {
 }
 
 type Definer interface {
+	// Define declares the model schema.
 	Define(s *SchemaBuilder)
 }
 
+// EmbeddedFields marks a struct as an embedded field bundle for Oro schema parsing.
 type EmbeddedFields interface {
 	OroEmbeddedFields()
 }
 
+// EmbeddedFieldDefiner declares schema fields for an embedded field bundle.
 type EmbeddedFieldDefiner interface {
 	EmbeddedFields
 	DefineOroFields(s *SchemaBuilder)

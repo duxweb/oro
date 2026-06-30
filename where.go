@@ -112,22 +112,27 @@ func withBool(boolOp string, condition Condition) Condition {
 	return condition
 }
 
+// And groups conditions with AND.
 func And(conditions ...Condition) Condition {
 	return Condition{Op: "group", Conditions: conditionsWithBool("and", conditions)}
 }
 
+// Or groups conditions with OR.
 func Or(conditions ...Condition) Condition {
 	return Condition{Op: "group", Conditions: conditionsWithBool("or", conditions)}
 }
 
+// Not negates a condition.
 func Not(condition Condition) Condition {
 	return Condition{Op: "not", Conditions: []Condition{condition}}
 }
 
+// Exists creates an EXISTS condition from a query source.
 func Exists(query QuerySource) Condition {
 	return buildExistsCondition(query)
 }
 
+// RawCondition creates a raw SQL condition with bound arguments.
 func RawCondition(sql string, args ...any) Condition {
 	return Condition{Field: sql, Op: "raw", Value: args}
 }
@@ -170,6 +175,7 @@ func buildColumnCondition(left string, args ...string) Condition {
 	return condition
 }
 
+// IsSafeConditionOperator reports whether op is allowed in value comparisons.
 func IsSafeConditionOperator(op string) bool {
 	switch NormalizeConditionOperator(op) {
 	case "=", "!=", "<>", "<", "<=", ">", ">=", "like", "not like", "ilike", "not ilike", "is", "is not":
@@ -179,6 +185,7 @@ func IsSafeConditionOperator(op string) bool {
 	}
 }
 
+// IsSafeColumnOperator reports whether op is allowed in column comparisons.
 func IsSafeColumnOperator(op string) bool {
 	switch NormalizeConditionOperator(op) {
 	case "=", "!=", "<>", "<", "<=", ">", ">=":
@@ -188,6 +195,7 @@ func IsSafeColumnOperator(op string) bool {
 	}
 }
 
+// NormalizeConditionOperator normalizes whitespace and case for an operator.
 func NormalizeConditionOperator(op string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(op))), " ")
 }
@@ -215,6 +223,7 @@ type WhereBuilder struct {
 	err        error
 }
 
+// Where adds AND conditions to the group.
 func (builder *WhereBuilder) Where(field any, args ...any) *WhereBuilder {
 	conditions, err := appendWhereCondition(builder.conditions, "and", field, args...)
 	if err != nil {
@@ -225,6 +234,7 @@ func (builder *WhereBuilder) Where(field any, args ...any) *WhereBuilder {
 	return builder
 }
 
+// OrWhere adds OR conditions to the group.
 func (builder *WhereBuilder) OrWhere(field any, args ...any) *WhereBuilder {
 	conditions, err := appendWhereCondition(builder.conditions, "or", field, args...)
 	if err != nil {
@@ -235,14 +245,17 @@ func (builder *WhereBuilder) OrWhere(field any, args ...any) *WhereBuilder {
 	return builder
 }
 
+// WhereGroup adds a nested AND group.
 func (builder *WhereBuilder) WhereGroup(fn func(w *WhereBuilder)) *WhereBuilder {
 	return builder.whereGroup("and", fn)
 }
 
+// OrWhereGroup adds a nested OR group.
 func (builder *WhereBuilder) OrWhereGroup(fn func(w *WhereBuilder)) *WhereBuilder {
 	return builder.whereGroup("or", fn)
 }
 
+// WhereWhen applies fn only when condition is true.
 func (builder *WhereBuilder) WhereWhen(condition bool, fn func(w *WhereBuilder)) *WhereBuilder {
 	if !condition {
 		return builder
@@ -250,41 +263,49 @@ func (builder *WhereBuilder) WhereWhen(condition bool, fn func(w *WhereBuilder))
 	return builder.WhereGroup(fn)
 }
 
+// WhereColumn adds an AND column comparison.
 func (builder *WhereBuilder) WhereColumn(left string, args ...string) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("and", buildColumnCondition(left, args...)))
 	return builder
 }
 
+// OrWhereColumn adds an OR column comparison.
 func (builder *WhereBuilder) OrWhereColumn(left string, args ...string) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("or", buildColumnCondition(left, args...)))
 	return builder
 }
 
+// WhereExists adds an AND EXISTS subquery.
 func (builder *WhereBuilder) WhereExists(source QuerySource) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("and", buildExistsCondition(source)))
 	return builder
 }
 
+// OrWhereExists adds an OR EXISTS subquery.
 func (builder *WhereBuilder) OrWhereExists(source QuerySource) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("or", buildExistsCondition(source)))
 	return builder
 }
 
+// WhereIn adds an AND IN subquery.
 func (builder *WhereBuilder) WhereIn(field string, source QuerySource) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("and", buildInCondition(field, source)))
 	return builder
 }
 
+// OrWhereIn adds an OR IN subquery.
 func (builder *WhereBuilder) OrWhereIn(field string, source QuerySource) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("or", buildInCondition(field, source)))
 	return builder
 }
 
+// WhereRaw adds an AND raw SQL condition.
 func (builder *WhereBuilder) WhereRaw(sql string, args ...any) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("and", RawCondition(sql, args...)))
 	return builder
 }
 
+// OrWhereRaw adds an OR raw SQL condition.
 func (builder *WhereBuilder) OrWhereRaw(sql string, args ...any) *WhereBuilder {
 	builder.conditions = append(builder.conditions, withBool("or", RawCondition(sql, args...)))
 	return builder

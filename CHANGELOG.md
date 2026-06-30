@@ -31,6 +31,9 @@ consistently, removes dead and duplicated code, and adds the missing tests.
 
 ### Added
 
+- AI/LLM development support: package-level godoc, exported API comments,
+  pkg.go.dev examples, repository `AGENTS.md` / `CLAUDE.md`, and generated
+  documentation indexes at `/llms.txt` and `/llms-full.txt`.
 - `oro.Time(field)` time range conditions plus `DayBounds`, `MonthBounds`,
   `YearBounds`, and `FieldExpr.NotBetween`. Calendar buckets compile to indexed
   half-open ranges instead of database date functions.
