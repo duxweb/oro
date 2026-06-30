@@ -5,9 +5,9 @@ description: Select、Raw 表达式、GroupBy、Having、Count、Sum、Avg、Min
 
 `Select` 只保留一个入口：字段名、聚合表达式和 `oro.Raw(...)` 都放在同一个方法里。
 
-字段名规则保持统一：
+字段名规则按查询入口区分，`Select`、`Where`、`GroupBy`、`Having`、`OrderBy` 都遵循同一套规则：
 
-| 入口 | `Select` / `Where` / `GroupBy` / `Having` / `OrderBy` 字段名 |
+| 入口 | 字段名写法 |
 | --- | --- |
 | `db.Use[T]()` | Go 字段名，如 `CreatedAt`、`Price` |
 | `db.Table(name)` | 数据库列名，如 `created_at`、`price` |

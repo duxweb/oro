@@ -5,6 +5,14 @@ description: Select fields, raw expressions, aliases, aggregate expressions, Gro
 
 `Select` accepts plain fields, field aliases, aggregate expressions, raw expressions, and relation aggregate expressions.
 
+Field naming follows the query entry. `Select`, `Where`, `GroupBy`, `Having`, and `OrderBy` all use the same rule:
+
+| Entry | Field name |
+| --- | --- |
+| `db.Use[T]()` | Go field names, such as `CreatedAt` and `Price` |
+| `db.Table(name)` | database column names, such as `created_at` and `price` |
+| `db.Raw(sql)` / `oro.Raw(sql)` | raw SQL, controlled by you |
+
 ## Select fields
 
 ```go
