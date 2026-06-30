@@ -301,6 +301,20 @@ func (JSONProduct) Define(s *oro.SchemaBuilder) {
 	s.Field("Meta").JSON()
 }
 
+type TimeItem struct {
+	oro.Model
+	Code     string
+	Occurred time.Time
+	Optional oro.Null[time.Time]
+}
+
+func (TimeItem) Define(s *oro.SchemaBuilder) {
+	s.Table("oro_integration_time_items")
+	s.Field("Code").String().Unique()
+	s.Field("Occurred").Timestamp().Index()
+	s.Field("Optional").Timestamp().Nullable()
+}
+
 type SyncBase struct {
 	oro.Model
 	Code string
@@ -362,6 +376,11 @@ func RunMatrix(t *testing.T, testCase DriverCase) {
 		db := open(t, ctx, testCase)
 		runJSON(t, ctx, db)
 	})
+	t.Run("time_handling", func(t *testing.T) {
+		displayLocation := time.FixedZone("UTC+08", 8*60*60)
+		db := openWithLocation(t, ctx, testCase, displayLocation)
+		runTimeHandling(t, ctx, db, displayLocation)
+	})
 }
 
 func RunSmoke(t *testing.T, testCase DriverCase) {
@@ -376,6 +395,16 @@ func open(t *testing.T, ctx context.Context, testCase DriverCase) *oro.DB {
 
 func openWithModels(t *testing.T, ctx context.Context, testCase DriverCase, models ...oro.Definer) *oro.DB {
 	t.Helper()
+	return openWithLocationAndModels(t, ctx, testCase, nil, models...)
+}
+
+func openWithLocation(t *testing.T, ctx context.Context, testCase DriverCase, loc *time.Location) *oro.DB {
+	t.Helper()
+	return openWithLocationAndModels(t, ctx, testCase, loc, matrixModels()...)
+}
+
+func openWithLocationAndModels(t *testing.T, ctx context.Context, testCase DriverCase, loc *time.Location, models ...oro.Definer) *oro.DB {
+	t.Helper()
 
 	timeout := testCase.ConnectionTimeout
 	if timeout <= 0 {
@@ -383,6 +412,7 @@ func openWithModels(t *testing.T, ctx context.Context, testCase DriverCase, mode
 	}
 
 	db, err := oro.Open(oro.Config{
+		Location: loc,
 		Connections: map[string]oro.ConnectionConfig{
 			"default": {Driver: testCase.Driver},
 		},
@@ -420,7 +450,7 @@ func openWithModels(t *testing.T, ctx context.Context, testCase DriverCase, mode
 func matrixModels() []oro.Definer {
 	return []oro.Definer{
 		Product{}, ProductDefault{}, User{}, Order{}, Article{}, Image{}, Comment{}, Tag{}, ArticleTag{}, ArticleAggregate{},
-		DynamicArticle{}, DynamicProduct{}, DynamicImage{}, DynamicTag{}, DynamicTagLink{}, JSONProduct{},
+		DynamicArticle{}, DynamicProduct{}, DynamicImage{}, DynamicTag{}, DynamicTagLink{}, JSONProduct{}, TimeItem{},
 	}
 }
 
@@ -434,6 +464,7 @@ func reset(t *testing.T, ctx context.Context, db *oro.DB) {
 		"oro_integration_dynamic_products",
 		"oro_integration_dynamic_articles",
 		"oro_integration_json_products",
+		"oro_integration_time_items",
 		"oro_integration_comments",
 		"oro_integration_images",
 		"oro_integration_tags",
@@ -1131,6 +1162,142 @@ func runJSON(t *testing.T, ctx context.Context, db *oro.DB) {
 	}
 	if exists != 2 {
 		t.Fatalf("unexpected json exists count %d", exists)
+	}
+}
+
+type TimeItemDTO struct {
+	Code     string
+	Occurred time.Time
+	Optional oro.Null[time.Time]
+}
+
+func runTimeHandling(t *testing.T, ctx context.Context, db *oro.DB, displayLocation *time.Location) {
+	t.Helper()
+	if err := db.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	inputLocation := time.FixedZone("UTC-07", -7*60*60)
+	inputTime := time.Date(2026, 6, 30, 9, 15, 30, 0, inputLocation)
+	optionalTime := inputTime.Add(2 * time.Hour)
+
+	created, err := db.Use[TimeItem]().Create(ctx, &TimeItem{
+		Code:     "TIME001",
+		Occurred: inputTime,
+		Optional: oro.NullOf(optionalTime),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CreatedAt.Location() != displayLocation || created.UpdatedAt.Location() != displayLocation {
+		t.Fatalf("expected created timestamps in configured location, got %s %s", created.CreatedAt.Location(), created.UpdatedAt.Location())
+	}
+	if !created.Occurred.Equal(inputTime) || created.Occurred.Location() != displayLocation {
+		t.Fatalf("expected created Occurred in configured location, got %s (%s)", created.Occurred, created.Occurred.Location())
+	}
+	if !created.Optional.Valid || !created.Optional.Value.Equal(optionalTime) || created.Optional.Value.Location() != displayLocation {
+		t.Fatalf("expected optional time in configured location, got %#v", created.Optional)
+	}
+
+	found, err := db.Use[TimeItem]().
+		Where("Occurred", inputTime.In(time.FixedZone("UTC+02", 2*60*60))).
+		First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.ID != created.ID {
+		t.Fatalf("expected WHERE time argument to match UTC instant, got %#v", found)
+	}
+	if found.Occurred.Location() != displayLocation || !found.Occurred.Equal(inputTime) {
+		t.Fatalf("expected model read in configured location, got %s (%s)", found.Occurred, found.Occurred.Location())
+	}
+
+	row, err := db.Table("oro_integration_time_items").Where("id", created.ID).First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rowTime, ok := row["occurred"].(time.Time)
+	if !ok || rowTime.Location() != displayLocation || !rowTime.Equal(inputTime) {
+		t.Fatalf("expected table row time in configured location, got %T %#v", row["occurred"], row["occurred"])
+	}
+
+	dto, err := db.Table("oro_integration_time_items").
+		Where("id", created.ID).
+		MapTo[TimeItemDTO]().
+		First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto == nil || dto.Occurred.Location() != displayLocation || !dto.Occurred.Equal(inputTime) {
+		t.Fatalf("expected MapTo time in configured location, got %#v", dto)
+	}
+
+	minTime, err := db.Use[TimeItem]().Min[time.Time](ctx, "Occurred")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !minTime.Valid || minTime.Value.Location() != displayLocation || !minTime.Value.Equal(inputTime) {
+		t.Fatalf("expected model Min time in configured location, got %#v", minTime)
+	}
+	maxTime, err := db.Table("oro_integration_time_items").Max[time.Time](ctx, "occurred")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maxTime.Valid || maxTime.Value.Location() != displayLocation || !maxTime.Value.Equal(inputTime) {
+		t.Fatalf("expected table Max time in configured location, got %#v", maxTime)
+	}
+
+	dateRows, err := db.Use[TimeItem]().
+		Where(oro.Time("Occurred").OnDate(inputTime.In(displayLocation))).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dateRows) != 1 || dateRows[0].ID != created.ID {
+		t.Fatalf("expected OnDate to match created row, got %#v", dateRows)
+	}
+
+	stream, err := db.Table("oro_integration_time_items").
+		Select("occurred").
+		Where("id", created.ID).
+		Stream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if !stream.Next() {
+		t.Fatalf("expected stream row, err=%v", stream.Err())
+	}
+	streamTime, ok := stream.Value()["occurred"].(time.Time)
+	if !ok || streamTime.Location() != displayLocation || !streamTime.Equal(inputTime) {
+		t.Fatalf("expected stream time in configured location, got %T %#v", stream.Value()["occurred"], stream.Value()["occurred"])
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	batchModels := []*TimeItem{
+		{Code: "TIME002", Occurred: inputTime},
+		{Code: "TIME003", Occurred: inputTime.Add(time.Minute)},
+	}
+	if _, err := db.Use[TimeItem]().CreateMany(ctx, batchModels); err != nil {
+		t.Fatal(err)
+	}
+	if batchModels[0].CreatedAt.Location() != displayLocation || batchModels[1].UpdatedAt.Location() != displayLocation {
+		t.Fatalf("expected batch timestamps in configured location, got %#v", batchModels)
+	}
+
+	resultModels := []*TimeItem{
+		{Code: "TIME004", Occurred: inputTime},
+		{Code: "TIME005", Occurred: inputTime.Add(2 * time.Minute)},
+	}
+	createdModels, err := db.Use[TimeItem]().CreateManyResult(ctx, resultModels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(createdModels) != 2 || createdModels[0].CreatedAt.Location() != displayLocation || createdModels[1].UpdatedAt.Location() != displayLocation {
+		t.Fatalf("expected CreateManyResult timestamps in configured location, got %#v", createdModels)
 	}
 }
 

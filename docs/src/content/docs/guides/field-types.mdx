@@ -37,6 +37,9 @@ s.Field("SendAt").Time()
 
 `oro.Model` already includes conventional primary key and timestamps. Custom models can still declare additional time fields.
 
+Oro stores `time.Time` in UTC and converts scanned values to
+`Config.Location` on read. The default location is `time.UTC`.
+
 ## JSON and arrays
 
 ```go

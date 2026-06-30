@@ -429,7 +429,7 @@ func scanStructRow(rows *modelRows, dest any, schema *ModelSchema, mappers []mod
 		if !fieldValue.IsValid() || !fieldValue.CanSet() {
 			continue
 		}
-		if err := assignScannedModelValue(fieldValue, values[index], mapper); err != nil {
+		if err := assignScannedModelValue(fieldValue, values[index], mapper, rows.db.runtime.Config.location()); err != nil {
 			return &Error{Op: "map", Kind: ErrScan, Field: mapper.fieldName, Cause: err}
 		}
 	}
@@ -461,7 +461,7 @@ func fieldTypeByIndex(schema *ModelSchema, index []int) reflect.Type {
 	return fieldType
 }
 
-func assignScannedModelValue(dest reflect.Value, value any, mapper modelColumnMapper) error {
+func assignScannedModelValue(dest reflect.Value, value any, mapper modelColumnMapper, loc *time.Location) error {
 	if value == nil {
 		if dest.Kind() == reflect.Pointer || dest.Kind() == reflect.Interface || dest.Kind() == reflect.Slice || dest.Kind() == reflect.Map {
 			dest.Set(reflect.Zero(dest.Type()))
@@ -471,11 +471,11 @@ func assignScannedModelValue(dest reflect.Value, value any, mapper modelColumnMa
 	if mapper.fieldType == timeType {
 		switch typedValue := value.(type) {
 		case time.Time:
-			setTimeValue(dest, typedValue)
+			setTimeValue(dest, timeInLocation(typedValue, loc))
 			return nil
 		case string:
 			if parsed, ok := parseTimeString(typedValue); ok {
-				setTimeValue(dest, parsed)
+				setTimeValue(dest, timeInLocation(parsed, loc))
 				return nil
 			}
 		}
@@ -526,5 +526,5 @@ func assignScannedModelValue(dest reflect.Value, value any, mapper modelColumnMa
 			return nil
 		}
 	}
-	return assignValue(dest, normalizeScannedValue(value, mapper.dbType))
+	return assignValueInLocation(dest, normalizeScannedValue(value, mapper.dbType), loc)
 }

@@ -43,6 +43,23 @@ db.Use[Product]().Where(oro.Field("Code").StartsWith("VIP"))
 
 `Like` keeps wildcard semantics; wrap user input with `oro.EscapeLike` when building a pattern by hand.
 
+
+## Time ranges
+
+Use `oro.Time(field)` for time columns. Calendar methods compile to half-open ranges, so they keep indexes usable instead of wrapping the column in a database date function.
+
+```go
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(dayInUserLocation)).
+    Get(ctx)
+
+orders, err = db.Use[Order]().
+    Where(oro.Time("CreatedAt").InRange(start, end)).
+    Get(ctx)
+```
+
+`Between` is closed; `InRange`, `OnDate`, `InMonth`, `InYear`, `Today`, and `LastDays` use half-open ranges.
+
 ## Groups
 
 ```go

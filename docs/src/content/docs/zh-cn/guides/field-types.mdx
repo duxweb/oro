@@ -37,6 +37,9 @@ s.Field("SendAt").Time()
 
 `oro.Model` 已内置常用主键和时间字段。自定义模型仍然可以显式定义自己的时间字段。
 
+Oro 写入 `time.Time` 时统一存储为 UTC，读取时转换到 `Config.Location`。
+如果未设置 `Location`，默认使用 `time.UTC`。
+
 ## JSON 和数组
 
 ```go

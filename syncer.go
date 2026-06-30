@@ -203,7 +203,7 @@ func saveSchemaSnapshot(ctx context.Context, exec ExecContext, executor Executor
 		return err
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	for _, column := range table.Columns {
 		if _, err := executor.Exec(ctx, exec, schemasnapshot.InsertSQL(dialect, snapshotTable, model, table, column, now)); err != nil {
 			return err

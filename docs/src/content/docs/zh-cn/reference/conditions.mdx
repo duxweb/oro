@@ -85,6 +85,7 @@ products, err := db.Use[Product]().
 | `In(values...)` | `IN` |
 | `NotIn(values...)` | `NOT IN` |
 | `Between(start, end)` | `BETWEEN` |
+| `NotBetween(start, end)` | `NOT (BETWEEN)` |
 | `IsNull()` | `IS NULL` |
 | `IsNotNull()` | `IS NOT NULL` |
 
@@ -161,11 +162,67 @@ rows, err := db.Table("orders").As("o").
 | 值比较 | `Eq`、`NotEq`、`Gt`、`Gte`、`Lt`、`Lte` |
 | 模糊匹配 | `Like`、`NotLike`、`Contains`、`StartsWith`、`EndsWith` |
 | 集合 | `In`、`NotIn` |
-| 范围 | `Between` |
+| 范围 | `Between`、`NotBetween` |
 | NULL | `IsNull`、`IsNotNull` |
 | 列比较 | `EqCol`、`NotEqCol`、`GtCol`、`GteCol`、`LtCol`、`LteCol` |
 
 统一使用 Go 代码中常见的短方法：`Gte`、`Lte`、`NotEq`。
+
+
+## 时间与日期范围
+
+时间字段建议使用 `oro.Time(field)`。显式边界方法保留原始 SQL 语义；日期桶会编译为半开区间：`field >= start AND field < end`。这样不会破坏索引，并且在 SQLite、MySQL、PostgreSQL 上行为一致。
+
+```go
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").InRange(start, end)).
+    Get(ctx)
+
+orders, err = db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(userDay)).
+    Get(ctx)
+```
+
+边界方法：
+
+| 方法 | SQL 语义 |
+| --- | --- |
+| `Between(start, end)` | 闭区间 `BETWEEN` |
+| `NotBetween(start, end)` | `NOT (BETWEEN)` |
+| `After(value)` | `>` |
+| `Before(value)` | `<` |
+| `From(value)` | `>=` |
+| `Until(value)` | `<` |
+| `InRange(start, end)` | 半开区间 `[start, end)` |
+
+日期桶方法：
+
+| 方法 | 范围 |
+| --- | --- |
+| `OnDate(day)` | 输入时区当天 `[00:00, 次日 00:00)` |
+| `InMonth(value)` | 输入时区当月 `[1 日 00:00, 次月 1 日 00:00)` |
+| `InYear(value)` | 输入时区当年 `[1 月 1 日 00:00, 次年 1 月 1 日 00:00)` |
+| `Today(loc...)` | `loc` 中的今天，默认 UTC |
+| `LastDays(n, loc...)` | 包含今天在内的最近 `n` 个日历日，默认 UTC |
+
+`OnDate`、`InMonth`、`InYear` 使用输入 `time.Time` 自带的 `Location()`。`Today` 和 `LastDays` 可选传入时区，不传则使用 UTC。边界值保持在该时区，执行时由 Oro 统一归一为 UTC 参数。
+
+```go
+shanghai := time.FixedZone("CST", 8*60*60)
+day := time.Date(2026, 6, 30, 0, 0, 0, 0, shanghai)
+
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(day)).
+    Get(ctx)
+```
+
+高级封装或测试中可以直接使用边界函数：
+
+```go
+start, end := oro.DayBounds(day, shanghai)
+start, end = oro.MonthBounds(day, shanghai)
+start, end = oro.YearBounds(day, shanghai)
+```
 
 ## 分组
 

@@ -30,14 +30,15 @@ type rowStream struct {
 
 type rowScanner struct {
 	inner rowscan.Scanner
+	loc   *time.Location
 }
 
-func newRowScanner(rows *sql.Rows) (rowScanner, error) {
+func newRowScanner(rows *sql.Rows, loc *time.Location) (rowScanner, error) {
 	scanner, err := rowscan.New(rows)
 	if err != nil {
 		return rowScanner{}, &Error{Op: "scan", Kind: ErrScan, Cause: err}
 	}
-	return rowScanner{inner: scanner}, nil
+	return rowScanner{inner: scanner, loc: loc}, nil
 }
 
 func (scanner rowScanner) scan(rows *sql.Rows) (Map, error) {
@@ -45,11 +46,11 @@ func (scanner rowScanner) scan(rows *sql.Rows) (Map, error) {
 	if err != nil {
 		return nil, &Error{Op: "scan", Kind: ErrScan, Cause: err}
 	}
-	return row, nil
+	return normalizeRowTimes(row, scanner.loc), nil
 }
 
-func scanRows(rows *sql.Rows) ([]Map, error) {
-	scanner, err := newRowScanner(rows)
+func scanRows(rows *sql.Rows, loc *time.Location) ([]Map, error) {
+	scanner, err := newRowScanner(rows, loc)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +251,7 @@ func openRowStream(ctx context.Context, db *DB, conn *Connection, spec QuerySpec
 		_ = emitSQLEvent(ctx, db, spec, AfterSQL, compiled, operation, 0, time.Since(startedAt), err)
 		return nil, conn.Driver.TranslateError(err)
 	}
-	scanner, err := newRowScanner(rows)
+	scanner, err := newRowScanner(rows, db.runtime.Config.location())
 	if err != nil {
 		cancel()
 		_ = rows.Close()

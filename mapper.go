@@ -22,7 +22,7 @@ type reflectMapper struct {
 }
 
 func (mapper reflectMapper) MapModel(schema *ModelSchema, row Map, dest any) error {
-	if err := mapRowToStruct(row, dest, schema); err != nil {
+	if err := mapRowToStruct(row, dest, schema, runtimeLocation(mapper.rt)); err != nil {
 		return err
 	}
 	return nil
@@ -35,13 +35,13 @@ func (mapper reflectMapper) MapDTO(row Map, dest any) error {
 			return err
 		}
 		if schema, ok := mapper.rt.Registry.GetType(destType); ok {
-			return mapRowToStruct(row, dest, schema)
+			return mapRowToStruct(row, dest, schema, runtimeLocation(mapper.rt))
 		}
 	}
-	return mapRowToStruct(row, dest, nil)
+	return mapRowToStruct(row, dest, nil, runtimeLocation(mapper.rt))
 }
 
-func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
+func mapRowToStruct(row Map, dest any, schema *ModelSchema, loc *time.Location) error {
 	destValue := reflect.ValueOf(dest)
 	if !destValue.IsValid() || destValue.Kind() != reflect.Pointer || destValue.IsNil() {
 		return &Error{Op: "map", Kind: ErrInvalidArgument}
@@ -68,7 +68,7 @@ func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
 			if !fieldValue.IsValid() || !fieldValue.CanSet() {
 				continue
 			}
-			if err := assignValue(fieldValue, value); err != nil {
+			if err := assignValueInLocation(fieldValue, value, loc); err != nil {
 				return &Error{Op: "map", Kind: ErrScan, Field: field.Name, Cause: err}
 			}
 		}
@@ -90,7 +90,7 @@ func mapRowToStruct(row Map, dest any, schema *ModelSchema) error {
 		if !fieldValue.CanSet() {
 			continue
 		}
-		if err := assignValue(fieldValue, value); err != nil {
+		if err := assignValueInLocation(fieldValue, value, loc); err != nil {
 			return &Error{Op: "map", Kind: ErrScan, Field: structField.Name, Cause: err}
 		}
 	}
@@ -113,12 +113,16 @@ func structTypeOfDest(dest any) (reflect.Type, error) {
 }
 
 func assignValue(dest reflect.Value, value any) error {
+	return assignValueInLocation(dest, value, nil)
+}
+
+func assignValueInLocation(dest reflect.Value, value any, loc *time.Location) error {
 	if !dest.CanSet() {
 		return nil
 	}
 
 	if isNullStruct(dest.Type()) {
-		return assignNullValue(dest, value)
+		return assignNullValue(dest, value, loc)
 	}
 
 	if value == nil {
@@ -134,7 +138,7 @@ func assignValue(dest reflect.Value, value any) error {
 
 	if dest.Kind() == reflect.Pointer {
 		elemValue := reflect.New(dest.Type().Elem())
-		if err := assignValue(elemValue.Elem(), value); err != nil {
+		if err := assignValueInLocation(elemValue.Elem(), value, loc); err != nil {
 			return err
 		}
 		dest.Set(elemValue)
@@ -142,6 +146,10 @@ func assignValue(dest reflect.Value, value any) error {
 	}
 
 	valueReflect := reflect.ValueOf(value)
+	if valueReflect.IsValid() && dest.Type() == timeType && valueReflect.Type() == timeType {
+		dest.Set(reflect.ValueOf(timeInLocation(valueReflect.Interface().(time.Time), loc)))
+		return nil
+	}
 	if valueReflect.IsValid() && valueReflect.Type().AssignableTo(dest.Type()) {
 		dest.Set(valueReflect)
 		return nil
@@ -170,7 +178,7 @@ func assignValue(dest reflect.Value, value any) error {
 			if err != nil {
 				return err
 			}
-			setTimeValue(dest, timeValue)
+			setTimeValue(dest, timeInLocation(timeValue, loc))
 			return nil
 		}
 		intValue, err := toInt64(value)
@@ -231,7 +239,7 @@ func assignValue(dest reflect.Value, value any) error {
 			if err != nil {
 				return err
 			}
-			setTimeValue(dest, timeValue)
+			setTimeValue(dest, timeInLocation(timeValue, loc))
 			return nil
 		}
 		return assignJSONValue(dest, value)
@@ -274,7 +282,7 @@ func isNullStruct(destType reflect.Type) bool {
 	}
 }
 
-func assignNullValue(dest reflect.Value, value any) error {
+func assignNullValue(dest reflect.Value, value any, loc *time.Location) error {
 	validField := dest.FieldByName("Valid")
 	valueField := dest.FieldByName("Value")
 	if !validField.IsValid() || !valueField.IsValid() || !validField.CanSet() || !valueField.CanSet() {
@@ -285,7 +293,7 @@ func assignNullValue(dest reflect.Value, value any) error {
 		validField.SetBool(false)
 		return nil
 	}
-	if err := assignValue(valueField, value); err != nil {
+	if err := assignValueInLocation(valueField, value, loc); err != nil {
 		return err
 	}
 	validField.SetBool(true)

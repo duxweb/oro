@@ -12,6 +12,7 @@ type sqlRunner struct {
 }
 
 func (runner sqlRunner) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	args = normalizeTimeArgsUTC(args)
 	if runner.tx != nil {
 		return runner.tx.QueryContext(ctx, query, args...)
 	}
@@ -38,6 +39,7 @@ func (runner sqlRunner) QueryContext(ctx context.Context, query string, args ...
 }
 
 func (runner sqlRunner) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	args = normalizeTimeArgsUTC(args)
 	if runner.tx != nil {
 		return runner.tx.ExecContext(ctx, query, args...)
 	}

@@ -53,6 +53,7 @@ Value comparison methods:
 | `In(values...)` | `IN` |
 | `NotIn(values...)` | `NOT IN` |
 | `Between(start, end)` | `BETWEEN` |
+| `NotBetween(start, end)` | `NOT (BETWEEN)` |
 | `IsNull()` | `IS NULL` |
 | `IsNotNull()` | `IS NOT NULL` |
 
@@ -89,6 +90,62 @@ To build a custom pattern with `Like` while keeping user input literal, escape i
 
 ```go
 oro.Field("Name").Like("%" + oro.EscapeLike(userInput) + "%")  // manual escaping
+```
+
+
+## Time and date ranges
+
+Use `oro.Time(field)` when the condition is about a time column. Explicit boundary methods keep their SQL meaning, while calendar buckets are compiled as half-open ranges: `field >= start AND field < end`. This keeps indexes usable and works the same on SQLite, MySQL, and PostgreSQL.
+
+```go
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").InRange(start, end)).
+    Get(ctx)
+
+orders, err = db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(dayInUserLocation)).
+    Get(ctx)
+```
+
+Boundary methods:
+
+| Method | SQL meaning |
+| --- | --- |
+| `Between(start, end)` | closed `BETWEEN` |
+| `NotBetween(start, end)` | `NOT (BETWEEN)` |
+| `After(value)` | `>` |
+| `Before(value)` | `<` |
+| `From(value)` | `>=` |
+| `Until(value)` | `<` |
+| `InRange(start, end)` | half-open `[start, end)` |
+
+Calendar bucket methods:
+
+| Method | Range |
+| --- | --- |
+| `OnDate(day)` | local day `[00:00, next day 00:00)` |
+| `InMonth(value)` | local month `[1st 00:00, next month 1st 00:00)` |
+| `InYear(value)` | local year `[Jan 1 00:00, next Jan 1 00:00)` |
+| `Today(loc...)` | current day in `loc`, default UTC |
+| `LastDays(n, loc...)` | last `n` calendar days including today, default UTC |
+
+`OnDate`, `InMonth`, and `InYear` use the location on the input `time.Time`. `Today` and `LastDays` accept an optional location and default to UTC. Bounds stay in that location; Oro normalizes time arguments to UTC at execution.
+
+```go
+shanghai := time.FixedZone("CST", 8*60*60)
+day := time.Date(2026, 6, 30, 0, 0, 0, 0, shanghai)
+
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(day)).
+    Get(ctx)
+```
+
+For advanced composition or testing, use the exported bound helpers:
+
+```go
+start, end := oro.DayBounds(day, shanghai)
+start, end = oro.MonthBounds(day, shanghai)
+start, end = oro.YearBounds(day, shanghai)
 ```
 
 ## Groups

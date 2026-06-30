@@ -12,6 +12,7 @@ type Config struct {
     Default     string
     Connections map[string]ConnectionConfig
     TablePrefix string
+    Location    *time.Location
     Pool        PoolConfig
     Shards      map[string]ShardConfig
     Cache       CacheStore
@@ -25,10 +26,26 @@ type Config struct {
 
 关键规则：所有数据库驱动都放在 `Connections` 下。
 
+## 时间时区
+
+```go
+db, err := oro.Open(oro.Config{
+    Location: time.FixedZone("CST", 8*60*60),
+})
+```
+
+Oro 所有 `time.Time` 都以 UTC 写入数据库。包括自动维护的
+`CreatedAt` / `UpdatedAt` / 软删除时间、用户传入的时间字段，以及查询条件里的
+时间参数。
+
+读出数据时，Oro 会把 `time.Time` 转换到 `Config.Location`。如果不设置
+`Location`，默认使用 `time.UTC`。
+
 其他高级字段：
 
 | 字段 | 用途 |
 | --- | --- |
+| `Location` | 读出 `time.Time` 时转换到的时区，默认 `time.UTC` |
 | `Factory` | 替换内部组件工厂，适合测试或深度扩展 |
 | `SlowQueryThreshold` | 慢查询阈值 |
 | `LogArgs` | 是否在日志中输出 SQL 参数 |

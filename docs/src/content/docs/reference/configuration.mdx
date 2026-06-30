@@ -10,6 +10,7 @@ type Config struct {
     Default     string
     Connections map[string]ConnectionConfig
     TablePrefix string
+    Location    *time.Location
     Pool        PoolConfig
     Shards      map[string]ShardConfig
     Cache       CacheStore
@@ -22,6 +23,21 @@ type Config struct {
 ```
 
 The important rule: all database drivers live under `Connections`.
+
+## Time location
+
+```go
+db, err := oro.Open(oro.Config{
+    Location: time.FixedZone("CST", 8*60*60),
+})
+```
+
+Oro stores all `time.Time` values in UTC. This includes automatic
+`CreatedAt` / `UpdatedAt` / soft-delete timestamps, user-provided time fields,
+and time values used in query conditions.
+
+When rows are scanned back, Oro converts `time.Time` values to
+`Config.Location`. If `Location` is not set, it defaults to `time.UTC`.
 
 ## Table prefix
 

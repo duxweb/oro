@@ -27,6 +27,11 @@ schema/缓存/分片各子系统的行为，移除死代码与重复实现，并
 
 ### 新增
 
+- `oro.Time(field)` 时间范围条件，以及 `DayBounds`、`MonthBounds`、
+  `YearBounds` 和 `FieldExpr.NotBetween`。日期桶会编译为可走索引的半开
+  区间，而不是数据库日期函数。
+- `Config.Location`，用于控制读取 `time.Time` 时转换到的时区。Oro 仍统一以
+  UTC 存储时间；未配置时读取默认也是 UTC。
 - `oro.EscapeLike` 以及 `FieldExpr.Contains` / `StartsWith` / `EndsWith`，在
   SQLite、MySQL、PostgreSQL 上一致输出 `LIKE ? ESCAPE '\'`，使包含 `%` / `_`
   的用户输入按字面匹配。普通的 `Like` / `NotLike` 仍保留通配符语义。
@@ -37,6 +42,8 @@ schema/缓存/分片各子系统的行为，移除死代码与重复实现，并
 
 ### 修复
 
+- 时间处理现在在不同驱动和机器时区下保持一致：自动时间戳、用户传入的时间字段、
+  查询条件中的时间参数都会在执行前归一为 UTC，读出后再转换到 `Config.Location`。
 - 预加载 `.With(...)` 回调内的 `WhereHas` 不再报 "unknown field"；该路径现在会
   解析延迟的关系过滤条件。
 - `GroupBy` 下的 `Count()` / `Paginate` 返回分组数量而非首个分组的计数，模型查询

@@ -69,6 +69,23 @@ db.Use[Product]().Where(oro.Field("Code").StartsWith("VIP"))
 
 `oro.Field("Code").` 后面的完整方法表见 [Field 表达式完整方法](/zh-cn/reference/conditions/#field-表达式完整方法)。
 
+
+## 时间范围
+
+时间字段建议使用 `oro.Time(field)`。日期桶方法会编译为半开区间，因此不会用数据库日期函数包住字段，索引仍然可用。
+
+```go
+orders, err := db.Use[Order]().
+    Where(oro.Time("CreatedAt").OnDate(userDay)).
+    Get(ctx)
+
+orders, err = db.Use[Order]().
+    Where(oro.Time("CreatedAt").InRange(start, end)).
+    Get(ctx)
+```
+
+`Between` 是闭区间；`InRange`、`OnDate`、`InMonth`、`InYear`、`Today`、`LastDays` 都使用半开区间。
+
 ## 分组
 
 ```go

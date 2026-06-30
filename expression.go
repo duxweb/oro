@@ -71,6 +71,10 @@ func (field FieldExpr) Between(start any, end any) Condition {
 	return Condition{Field: field.Name, Op: "between", Value: []any{start, end}}
 }
 
+func (field FieldExpr) NotBetween(start any, end any) Condition {
+	return Not(field.Between(start, end))
+}
+
 func (field FieldExpr) IsNull() Condition {
 	return isNullCondition(field.Name)
 }

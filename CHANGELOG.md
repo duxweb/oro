@@ -31,6 +31,12 @@ consistently, removes dead and duplicated code, and adds the missing tests.
 
 ### Added
 
+- `oro.Time(field)` time range conditions plus `DayBounds`, `MonthBounds`,
+  `YearBounds`, and `FieldExpr.NotBetween`. Calendar buckets compile to indexed
+  half-open ranges instead of database date functions.
+- `Config.Location` controls the location used when scanning `time.Time`
+  values. Oro still stores all times in UTC and defaults reads to UTC when no
+  location is configured.
 - `oro.EscapeLike` plus `FieldExpr.Contains` / `StartsWith` / `EndsWith`, which
   emit `LIKE ? ESCAPE '\'` consistently across SQLite, MySQL, and PostgreSQL so
   user input containing `%` / `_` is matched literally. Plain `Like` / `NotLike`
@@ -42,6 +48,9 @@ consistently, removes dead and duplicated code, and adds the missing tests.
 
 ### Fixed
 
+- Time handling is now consistent across drivers and machine time zones:
+  automatic timestamps, user-provided time fields, and time query arguments are
+  normalized to UTC before execution, then scanned back in `Config.Location`.
 - `WhereHas` inside an eager-load `.With(...)` callback no longer fails with
   "unknown field"; the deferred relation filter is now resolved on that path.
 - `Count()` / `Paginate` with `GroupBy` returns the number of groups instead of

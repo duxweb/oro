@@ -614,7 +614,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if writeOptions.conflict == nil {
 		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
 	}
-	row, err := buildModelInsertMap(schema, model, writeOptions)
+	row, err := buildModelInsertMap(schema, model, writeOptions, query.db.runtime.Config.location())
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +684,7 @@ func (query *ModelQuery[T]) Delete(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	if field, ok := softDeleteField(schema); ok {
-		values := Map{field.Name: time.Now()}
+		values := Map{field.Name: time.Now().UTC()}
 		return query.deleteInTransaction(ctx, spec, schema, values, true)
 	}
 	return query.deleteInTransaction(ctx, spec, schema, nil, false)
@@ -852,7 +852,7 @@ func (query *ModelQuery[T]) createManyBatch(ctx context.Context, spec QuerySpec,
 			if model == nil {
 				return &Error{Op: "create", Kind: ErrInvalidArgument}
 			}
-			row, err := buildModelInsertMap(schema, model, writeOptions)
+			row, err := buildModelInsertMap(schema, model, writeOptions, txQuery.db.runtime.Config.location())
 			if err != nil {
 				return err
 			}
@@ -951,7 +951,7 @@ func (query *ModelQuery[T]) createModelsChunkExec(ctx context.Context, spec Quer
 		if primaryColumn != "" {
 			row[primaryColumn] = primaryValues[index]
 		}
-		if err := assignModelCreateValues(schema, model, row); err != nil {
+		if err := assignModelCreateValues(schema, model, row, query.db.runtime.Config.location()); err != nil {
 			return err
 		}
 	}
@@ -1255,7 +1255,7 @@ func (query *ModelQuery[T]) createWithSpecAndState(ctx context.Context, spec Que
 		return nil, err
 	}
 	writeOptions := applyWriteOptions(options)
-	row, err := buildModelInsertMap(schema, model, writeOptions)
+	row, err := buildModelInsertMap(schema, model, writeOptions, query.db.runtime.Config.location())
 	if err != nil {
 		return nil, err
 	}

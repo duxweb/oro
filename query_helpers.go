@@ -220,7 +220,7 @@ func aggregateDecimal(ctx context.Context, db *DB, spec QuerySpec, fn string, fi
 	if err != nil || row == nil || row["value"] == nil {
 		return Decimal("0"), err
 	}
-	value, err := scalarValue[Decimal](row["value"])
+	value, err := scalarValueInLocation[Decimal](row["value"], runtimeLocation(db.runtime))
 	if err != nil {
 		return Decimal("0"), err
 	}
@@ -239,7 +239,7 @@ func aggregateNull[T any](ctx context.Context, db *DB, spec QuerySpec, fn string
 	if err != nil || row == nil || row["value"] == nil {
 		return NullZero[T](), err
 	}
-	value, err := scalarValue[T](row["value"])
+	value, err := scalarValueInLocation[T](row["value"], runtimeLocation(db.runtime))
 	if err != nil {
 		return NullZero[T](), err
 	}
@@ -247,9 +247,13 @@ func aggregateNull[T any](ctx context.Context, db *DB, spec QuerySpec, fn string
 }
 
 func scalarValue[T any](value any) (T, error) {
+	return scalarValueInLocation[T](value, time.UTC)
+}
+
+func scalarValueInLocation[T any](value any, loc *time.Location) (T, error) {
 	var result T
 	dest := reflect.ValueOf(&result).Elem()
-	if err := assignValue(dest, value); err != nil {
+	if err := assignValueInLocation(dest, value, loc); err != nil {
 		return result, &Error{Op: "aggregate", Kind: ErrScan, Cause: err}
 	}
 	return result, nil
@@ -2246,7 +2250,7 @@ func convertModelConflict(schema *ModelSchema, conflict *ConflictSpec) (*Conflic
 func autoUpdateColumns(schema *ModelSchema, options writeOptions) Map {
 	omitted := optionSet(options.omit)
 	values := Map{}
-	now := time.Now()
+	now := time.Now().UTC()
 	for _, field := range schema.Fields {
 		if field.Virtual {
 			continue
@@ -2258,7 +2262,7 @@ func autoUpdateColumns(schema *ModelSchema, options writeOptions) Map {
 	return values
 }
 
-func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (Map, error) {
+func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions, loc ...*time.Location) (Map, error) {
 	modelValue := reflect.ValueOf(model)
 	if !modelValue.IsValid() || modelValue.Kind() != reflect.Pointer || modelValue.IsNil() {
 		return nil, &Error{Op: "create", Kind: ErrInvalidArgument}
@@ -2275,7 +2279,7 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 		fields = schema.Fields
 	}
 	row := make(Map, len(fields))
-	now := time.Now()
+	now := timeInLocation(time.Now().UTC(), optionalLocation(loc))
 
 	for _, field := range fields {
 		if len(allowed) > 0 && !allowed[field.Name] {
@@ -2318,7 +2322,7 @@ func buildModelInsertMap(schema *ModelSchema, model any, options writeOptions) (
 	return row, nil
 }
 
-func assignModelCreateValues(schema *ModelSchema, model any, row Map) error {
+func assignModelCreateValues(schema *ModelSchema, model any, row Map, loc ...*time.Location) error {
 	modelValue := reflect.ValueOf(model)
 	if !modelValue.IsValid() || modelValue.Kind() != reflect.Pointer || modelValue.IsNil() {
 		return &Error{Op: "create", Kind: ErrInvalidArgument}
@@ -2342,7 +2346,7 @@ func assignModelCreateValues(schema *ModelSchema, model any, row Map) error {
 		if !fieldValue.IsValid() || !fieldValue.CanSet() {
 			continue
 		}
-		if err := assignValue(fieldValue, value); err != nil {
+		if err := assignValueInLocation(fieldValue, value, optionalLocation(loc)); err != nil {
 			return &Error{Op: "create", Kind: ErrScan, Field: field.Name, Cause: err}
 		}
 	}

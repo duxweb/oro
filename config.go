@@ -7,6 +7,7 @@ type Config struct {
 
 	Connections map[string]ConnectionConfig
 	TablePrefix string
+	Location    *time.Location
 
 	Pool   PoolConfig
 	Batch  BatchConfig
@@ -85,6 +86,13 @@ func (config Config) defaultConnectionName() string {
 		return config.Default
 	}
 	return "default"
+}
+
+func (config Config) location() *time.Location {
+	if config.Location != nil {
+		return config.Location
+	}
+	return time.UTC
 }
 
 func (config Config) statementCacheSize() int {

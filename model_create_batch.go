@@ -56,7 +56,7 @@ func (query *ModelQuery[T]) createManyBatchFast(ctx context.Context, spec QueryS
 }
 
 func (query *ModelQuery[T]) createModelsChunkBatchFast(ctx context.Context, spec QuerySpec, schema *ModelSchema, conn *Connection, plan modelBatchInsertPlan, models []*T) (any, int64, error) {
-	insert, err := buildModelBatchInsert(plan, models)
+	insert, err := buildModelBatchInsert(plan, models, query.db.runtime.Config.location())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -84,7 +84,7 @@ func (query *ModelQuery[T]) createModelsChunkBatchFast(ctx context.Context, spec
 	if err != nil {
 		return nil, 0, translateQueryError(conn, err)
 	}
-	ids, err := assignModelBatchPrimaryValues(conn, schema, insert, models, result)
+	ids, err := assignModelBatchPrimaryValues(conn, schema, insert, models, result, query.db.runtime.Config.location())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -156,9 +156,9 @@ func prepareModelBatchInsert[T any](schema *ModelSchema, models []*T, conn *Conn
 	}, true, nil
 }
 
-func buildModelBatchInsert[T any](plan modelBatchInsertPlan, models []*T) (modelBatchInsert, error) {
+func buildModelBatchInsert[T any](plan modelBatchInsertPlan, models []*T, loc ...*time.Location) (modelBatchInsert, error) {
 	args := make([]any, 0, len(plan.fields)*len(models))
-	now := time.Now()
+	now := timeInLocation(time.Now().UTC(), optionalLocation(loc))
 	for _, model := range models {
 		structValue, err := modelStructValue(model)
 		if err != nil {
@@ -375,7 +375,7 @@ func modelBatchInsertSQLCacheKey(dialect string, table string, columns []string,
 	return builder.String()
 }
 
-func assignModelBatchPrimaryValues[T any](conn *Connection, schema *ModelSchema, insert modelBatchInsert, models []*T, result ExecResult) (any, error) {
+func assignModelBatchPrimaryValues[T any](conn *Connection, schema *ModelSchema, insert modelBatchInsert, models []*T, result ExecResult, loc *time.Location) (any, error) {
 	if insert.explicitPrimary {
 		return primaryValuesFromModels(schema, models)
 	}
@@ -389,7 +389,7 @@ func assignModelBatchPrimaryValues[T any](conn *Connection, schema *ModelSchema,
 	}
 	for index, model := range models {
 		id := startID + int64(index)
-		if err := assignModelPrimaryValue(schema, model, insert.primaryField, id); err != nil {
+		if err := assignModelPrimaryValue(schema, model, insert.primaryField, id, loc); err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
@@ -397,7 +397,7 @@ func assignModelBatchPrimaryValues[T any](conn *Connection, schema *ModelSchema,
 	return ids, nil
 }
 
-func assignModelPrimaryValue(schema *ModelSchema, model any, field FieldSchema, value any) error {
+func assignModelPrimaryValue(schema *ModelSchema, model any, field FieldSchema, value any, loc *time.Location) error {
 	structValue, err := modelStructValue(model)
 	if err != nil {
 		return err
@@ -409,7 +409,7 @@ func assignModelPrimaryValue(schema *ModelSchema, model any, field FieldSchema, 
 	if !fieldValue.IsValid() || !fieldValue.CanSet() {
 		return nil
 	}
-	if err := assignValue(fieldValue, value); err != nil {
+	if err := assignValueInLocation(fieldValue, value, loc); err != nil {
 		return &Error{Op: "create", Kind: ErrScan, Model: schema.Name, Field: field.Name, Cause: err}
 	}
 	return nil

@@ -115,6 +115,27 @@ func (integrationJSONProduct) Define(s *oro.SchemaBuilder) {
 	s.Field("Meta").JSON()
 }
 
+type integrationTimeModel struct {
+	oro.Model
+	softdelete.SoftDeleteFields
+	Code     string
+	Occurred time.Time
+	Optional oro.Null[time.Time]
+}
+
+func (integrationTimeModel) Define(s *oro.SchemaBuilder) {
+	s.Table("time_models")
+	s.Field("Code").String()
+	s.Field("Occurred").Timestamp()
+	s.Field("Optional").Timestamp().Nullable()
+}
+
+type integrationTimeDTO struct {
+	Code     string
+	Occurred time.Time
+	Optional oro.Null[time.Time]
+}
+
 type integrationArticle struct {
 	oro.Model
 	Title string
@@ -437,6 +458,344 @@ func openSQLiteTestDBWithDriver(t *testing.T, driver oro.Driver) (*oro.DB, conte
 	}
 
 	return db, ctx
+}
+
+func openSQLiteTimeTestDB(t *testing.T, loc *time.Location) (*oro.DB, context.Context) {
+	t.Helper()
+
+	ctx := context.Background()
+	db, err := oro.Open(oro.Config{
+		Location: loc,
+		Pool: oro.PoolConfig{
+			MaxOpenConns: 1,
+		},
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	_, err = db.Raw(`
+		create table time_models (
+			id integer primary key autoincrement,
+			code text not null unique,
+			occurred datetime,
+			optional datetime,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)
+	`).Exec(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Register(integrationTimeModel{}); err != nil {
+		t.Fatal(err)
+	}
+
+	return db, ctx
+}
+
+func TestSQLiteTimeValuesStoreUTCAndReadConfiguredLocation(t *testing.T) {
+	displayLocation := time.FixedZone("UTC+08", 8*60*60)
+	inputLocation := time.FixedZone("UTC-07", -7*60*60)
+	inputTime := time.Date(2026, 6, 30, 9, 15, 30, 123456789, inputLocation)
+	optionalTime := inputTime.Add(2 * time.Hour)
+	db, ctx := openSQLiteTimeTestDB(t, displayLocation)
+
+	created, err := db.Use[integrationTimeModel]().Create(ctx, &integrationTimeModel{
+		Code:     "T001",
+		Occurred: inputTime,
+		Optional: oro.NullOf(optionalTime),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CreatedAt.Location() != displayLocation || created.UpdatedAt.Location() != displayLocation {
+		t.Fatalf("expected created model timestamps in configured location, got %s %s", created.CreatedAt.Location(), created.UpdatedAt.Location())
+	}
+	if !created.Occurred.Equal(inputTime) || created.Occurred.Location() != displayLocation {
+		t.Fatalf("expected created Occurred to preserve instant in configured location, got %s (%s)", created.Occurred, created.Occurred.Location())
+	}
+	if !created.Optional.Valid || !created.Optional.Value.Equal(optionalTime) || created.Optional.Value.Location() != displayLocation {
+		t.Fatalf("expected optional time in configured location, got %#v", created.Optional)
+	}
+
+	stored, err := db.Raw("select occurred, optional, created_at, updated_at from time_models where id = ?", created.ID).First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]time.Time{
+		"occurred":   inputTime,
+		"optional":   optionalTime,
+		"created_at": created.CreatedAt,
+		"updated_at": created.UpdatedAt,
+	} {
+		got, ok := stored[key].(time.Time)
+		if !ok {
+			t.Fatalf("expected %s to scan as time.Time, got %T %#v", key, stored[key], stored[key])
+		}
+		if !got.Equal(want) || got.Location() != displayLocation {
+			t.Fatalf("expected %s instant in configured location, got %s (%s), want instant %s", key, got, got.Location(), want)
+		}
+	}
+
+	found, err := db.Use[integrationTimeModel]().
+		Where("Occurred", inputTime.In(time.FixedZone("UTC+02", 2*60*60))).
+		First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.ID != created.ID {
+		t.Fatalf("expected WHERE time argument to match UTC instant, got %#v", found)
+	}
+	if found.Occurred.Location() != displayLocation || !found.Occurred.Equal(inputTime) {
+		t.Fatalf("expected model read in configured location, got %s (%s)", found.Occurred, found.Occurred.Location())
+	}
+
+	dto, err := db.Table("time_models").
+		Where("id", created.ID).
+		MapTo[integrationTimeDTO]().
+		First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto == nil || dto.Occurred.Location() != displayLocation || !dto.Occurred.Equal(inputTime) {
+		t.Fatalf("expected MapTo time in configured location, got %#v", dto)
+	}
+
+	minTime, err := db.Use[integrationTimeModel]().Min[time.Time](ctx, "Occurred")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !minTime.Valid || minTime.Value.Location() != displayLocation || !minTime.Value.Equal(inputTime) {
+		t.Fatalf("expected model Min time in configured location, got %#v", minTime)
+	}
+	maxTime, err := db.Table("time_models").Max[time.Time](ctx, "occurred")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maxTime.Valid || maxTime.Value.Location() != displayLocation || !maxTime.Value.Equal(inputTime) {
+		t.Fatalf("expected table Max time in configured location, got %#v", maxTime)
+	}
+
+	stream, err := db.Raw("select occurred from time_models where id = ?", created.ID).Stream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if !stream.Next() {
+		t.Fatalf("expected stream row, err=%v", stream.Err())
+	}
+	streamTime, ok := stream.Value()["occurred"].(time.Time)
+	if !ok || streamTime.Location() != displayLocation || !streamTime.Equal(inputTime) {
+		t.Fatalf("expected stream time in configured location, got %T %#v", stream.Value()["occurred"], stream.Value()["occurred"])
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Use[integrationTimeModel]().Where("ID", created.ID).Delete(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := db.Use[integrationTimeModel]().WithDeleted().Find(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted == nil || !deleted.DeletedAt.Valid {
+		t.Fatalf("expected soft deleted row with deleted_at, got %#v", deleted)
+	}
+	if deleted.DeletedAt.Value.Location() != displayLocation {
+		t.Fatalf("expected DeletedAt in configured location, got %s", deleted.DeletedAt.Value.Location())
+	}
+
+	batchModels := []*integrationTimeModel{
+		{Code: "T001B1", Occurred: inputTime},
+		{Code: "T001B2", Occurred: inputTime.Add(time.Minute)},
+	}
+	if _, err := db.Use[integrationTimeModel]().CreateMany(ctx, batchModels); err != nil {
+		t.Fatal(err)
+	}
+	if batchModels[0].CreatedAt.Location() != displayLocation || batchModels[1].UpdatedAt.Location() != displayLocation {
+		t.Fatalf("expected batch timestamps in configured location, got %#v", batchModels)
+	}
+}
+
+func TestSQLiteTimeNullFieldStaysNull(t *testing.T) {
+	db, ctx := openSQLiteTimeTestDB(t, time.UTC)
+
+	created, err := db.Use[integrationTimeModel]().Create(ctx, &integrationTimeModel{
+		Code:     "T002",
+		Occurred: time.Date(2026, 6, 30, 12, 0, 0, 0, time.FixedZone("UTC+08", 8*60*60)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Optional.Valid {
+		t.Fatalf("expected create result optional time to stay null, got %#v", created.Optional)
+	}
+
+	found, err := db.Use[integrationTimeModel]().Find(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.Optional.Valid {
+		t.Fatalf("expected loaded optional time to stay null, got %#v", found)
+	}
+}
+
+func TestSQLiteTimeExprRangeQueries(t *testing.T) {
+	loc := time.FixedZone("UTC+08", 8*60*60)
+	db, ctx := openSQLiteTimeTestDB(t, loc)
+	day := time.Date(2026, 6, 30, 0, 0, 0, 0, loc)
+	start, end := oro.DayBounds(day, loc)
+
+	fixtures := []*integrationTimeModel{
+		{Code: "D_PREV", Occurred: start.Add(-time.Second)},
+		{Code: "D_START", Occurred: start},
+		{Code: "D_MID", Occurred: start.Add(12 * time.Hour)},
+		{Code: "D_END", Occurred: end},
+		{Code: "M_NEXT", Occurred: time.Date(2026, 7, 1, 12, 0, 0, 0, loc)},
+		{Code: "Y_NEXT", Occurred: time.Date(2027, 1, 1, 0, 0, 0, 0, loc)},
+	}
+	for _, model := range fixtures {
+		if _, err := db.Use[integrationTimeModel]().Create(ctx, model); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").OnDate(day)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_START"}) {
+		t.Fatalf("unexpected OnDate rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").Between(start, end)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_END", "D_MID", "D_START"}) {
+		t.Fatalf("unexpected Between rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").InRange(start, end)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_START"}) {
+		t.Fatalf("unexpected InRange rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").After(start)).
+		Where(oro.Time("Occurred").Before(end)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID"}) {
+		t.Fatalf("unexpected After/Before rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").From(start)).
+		Where(oro.Time("Occurred").Until(end)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_START"}) {
+		t.Fatalf("unexpected From/Until rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").NotBetween(start, end)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_PREV", "M_NEXT", "Y_NEXT"}) {
+		t.Fatalf("unexpected NotBetween rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").InMonth(day)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_PREV", "D_START"}) {
+		t.Fatalf("unexpected InMonth rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where(oro.Time("Occurred").InYear(day)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_END", "D_MID", "D_PREV", "D_START", "M_NEXT"}) {
+		t.Fatalf("unexpected InYear rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		WhereGroup(func(w *oro.WhereBuilder) {
+			w.Where(oro.Time("Occurred").OnDate(day)).
+				OrWhere("Code", "Y_NEXT")
+		}).
+		Where("Code", "!=", "D_END").
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_START", "Y_NEXT"}) {
+		t.Fatalf("unexpected grouped rows %#v", got)
+	}
+
+	rows, err = db.Use[integrationTimeModel]().
+		Where("Code", "D_PREV").
+		OrWhere(oro.Time("Occurred").OnDate(day)).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timeModelCodes(rows); !slices.Equal(got, []string{"D_MID", "D_PREV", "D_START"}) {
+		t.Fatalf("unexpected OrWhere rows %#v", got)
+	}
+}
+
+func timeModelCodes(models []*integrationTimeModel) []string {
+	codes := make([]string, 0, len(models))
+	for _, model := range models {
+		codes = append(codes, model.Code)
+	}
+	return codes
 }
 
 func TestSQLiteTableCreateGetAndRaw(t *testing.T) {

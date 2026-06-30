@@ -24,6 +24,7 @@ func (executor sqlExecutor) Query(ctx context.Context, exec ExecContext, compile
 		return nil, &Error{Op: "query", Kind: ErrInvalidArgument}
 	}
 
+	compiled.Args = normalizeTimeArgsUTC(compiled.Args)
 	startedAt := time.Now()
 	rows, err := querier.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
@@ -32,7 +33,7 @@ func (executor sqlExecutor) Query(ctx context.Context, exec ExecContext, compile
 	}
 	defer rows.Close()
 
-	maps, err := scanRows(rows)
+	maps, err := scanRows(rows, runtimeLocation(executor.rt))
 	if err != nil {
 		executor.log(ctx, "query", compiled, 0, startedAt, err)
 		return nil, err
@@ -52,6 +53,7 @@ func (executor sqlExecutor) Exec(ctx context.Context, exec ExecContext, compiled
 		return ExecResult{}, &Error{Op: "exec", Kind: ErrInvalidArgument}
 	}
 
+	compiled.Args = normalizeTimeArgsUTC(compiled.Args)
 	startedAt := time.Now()
 	result, err := execer.ExecContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
