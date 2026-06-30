@@ -10,6 +10,9 @@ on:
         required: true
         type: string
 
+env:
+  GOTOOLCHAIN: auto
+
 permissions:
   contents: write
 
@@ -21,10 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Setup Go bootstrap
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27rc1'
+          go-version: '1.26.x'
           check-latest: true
           cache-dependency-path: go.sum
 
@@ -44,7 +47,10 @@ jobs:
         run: .github/scripts/check-go.sh
 
       - name: Run race tests
-        run: go test -race ./...
+        run: |
+          go version
+          case "$(go env GOVERSION)" in go1.27*) ;; *) echo "Go 1.27 is required, got $(go env GOVERSION)" >&2; exit 1;; esac
+          go test -race ./...
 
       - name: Build docs
         run: |

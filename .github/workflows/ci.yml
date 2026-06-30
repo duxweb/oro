@@ -8,6 +8,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  GOTOOLCHAIN: auto
+
 permissions:
   contents: read
 
@@ -23,10 +26,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Setup Go bootstrap
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27rc1'
+          go-version: '1.26.x'
           check-latest: true
           cache-dependency-path: go.sum
 
@@ -40,15 +43,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Setup Go bootstrap
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27rc1'
+          go-version: '1.26.x'
           check-latest: true
           cache-dependency-path: go.sum
 
       - name: Run race tests
         run: |
+          go version
+          case "$(go env GOVERSION)" in go1.27*) ;; *) echo "Go 1.27 is required, got $(go env GOVERSION)" >&2; exit 1;; esac
           go mod download
           go test -race ./...
 
