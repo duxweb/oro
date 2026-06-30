@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-30
+
 This is a hardening pass over the pre-1.0 preview: it closes correctness and
 security gaps found in review, makes the schema/cache/shard subsystems behave
 consistently, removes dead and duplicated code, and adds the missing tests.
