@@ -21,6 +21,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27rc1'
+          check-latest: true
+          cache-dependency-path: go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.31.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      - name: Run Go checks
+        run: .github/scripts/check-go.sh
+
+      - name: Run race tests
+        run: go test -race ./...
+
+      - name: Build docs
+        run: |
+          pnpm --dir docs install --frozen-lockfile
+          pnpm --dir docs build
+
       - name: Resolve tag
         id: tag
         shell: bash
