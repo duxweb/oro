@@ -1,4 +1,34 @@
 {
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Oro",
+  "description": "A generic-first ORM for Go with explicit schemas, typed queries, relations, migrations, and extensible drivers.",
+  "branch": "main",
+  "folders": [
+    "docs/src/content/docs",
+    "examples"
+  ],
+  "excludeFolders": [
+    "docs/node_modules",
+    "docs/dist",
+    "benchmarks",
+    ".github"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "CHANGELOG.zh-CN.md"
+  ],
+  "rules": [
+    "Use db.Use[T]() for model queries and Go field names.",
+    "Use db.Table(name) for table queries and database column names.",
+    "Define schemas with Define instead of struct tags.",
+    "Use oro.Map for explicit writes so zero values are not guessed.",
+    "Use oro.Field, oro.Time, and oro.JSON for composable typed conditions.",
+    "Times are stored in UTC and read back in Config.Location.",
+    "Do not import SQL drivers in Oro; applications choose and import concrete database drivers."
+  ],
+  "previousVersions": [
+    "v0.1.0"
+  ],
   "url": "https://context7.com/duxweb/oro",
   "public_key": "pk_mDanCAri3VFtJwx29YyFC"
 }
