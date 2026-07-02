@@ -52,6 +52,7 @@ Use `db.TableName("products")` when raw SQL needs the physical table name after 
 | `Update(ctx, Map)` | affected row count |
 | `Delete(ctx)` | affected row count |
 | `Upsert(ctx, value)` | inserted or updated row |
+| `FirstOrCreate(ctx, value, fields...)` | row plus `created` flag |
 | `Count(ctx)` | `int64` |
 | `Exists(ctx)` | `bool` |
 | `Sum` / `Avg` | `oro.Decimal` |

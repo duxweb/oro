@@ -9,6 +9,12 @@
 
 ## [未发布]
 
+## [0.1.1] - 2026-07-02
+
+### 新增
+
+- 新增模型、裸表和 typed table 查询的 `FirstOrCreate`，基于 `INSERT ... ON CONFLICT DO NOTHING` 加回读实现并发安全的 get-or-create。
+
 ### 变更
 
 - **破坏性变更：** `UpsertMany` 现在生成多行 upsert 语句，并在输入过大时按参数上限

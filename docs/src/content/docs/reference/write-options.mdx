@@ -72,6 +72,22 @@ All maps in one `UpsertMany` call must have the same keys. `UpdateMap` keeps con
 
 MySQL and MariaDB report affected rows differently from SQLite/PostgreSQL: an updated conflicting row can count as `2`. Treat the return value as the database driver's affected-row count, not a portable processed-row count.
 
+## FirstOrCreate
+
+```go
+product, created, err := db.Use[Product]().FirstOrCreate(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+}, "Code")
+
+row, created, err := db.Table("products").FirstOrCreate(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+}, "code")
+```
+
+`FirstOrCreate` returns the row matching the conflict fields or creates it. It uses the field values from the model or map as the lookup key, so the lookup key and inserted values cannot drift apart. The fields or columns must be backed by a unique constraint for concurrency safety. Existing query conditions are preserved for both lookup reads.
+
 ## CheckVersion
 
 ```go

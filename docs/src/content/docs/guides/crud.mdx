@@ -104,6 +104,28 @@ oro.ConflictBy("Code").UpdateAll()
 oro.ConflictBy("Code").UpdateMap(oro.Map{"UpdatedAt": oro.Raw("CURRENT_TIMESTAMP")})
 ```
 
+## First or create
+
+```go
+product, created, err := db.Use[Product]().FirstOrCreate(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+}, "Code")
+```
+
+`FirstOrCreate` first looks up by the provided conflict fields. If no row exists, it inserts with `DO NOTHING` on conflict, then reads the row back. The conflict fields must map to a unique constraint for concurrent calls to converge to one row. `created` is true only when this call inserted the row.
+
+Model queries use Go field names; table queries use database columns:
+
+```go
+row, created, err := db.Table("products").FirstOrCreate(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+}, "code")
+```
+
+If a soft-deleted row still owns the unique key, the visible lookup can miss it while the insert is ignored by the unique constraint; Oro returns `ErrScan` for that placeholder case. Existing query conditions are also preserved for both lookup reads, so call `FirstOrCreate` on a base query unless the extra filters are intentional.
+
 ## Batch writes
 
 ```go

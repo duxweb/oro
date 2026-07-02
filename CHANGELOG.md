@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-02
+
+### Added
+
+- `FirstOrCreate` for model, table, and typed table queries provides a concurrency-safe get-or-create helper built on `INSERT ... ON CONFLICT DO NOTHING` plus a read-back.
+
 ### Changed
 
 - **Breaking:** `UpsertMany` now emits multi-row upsert statements, splits large

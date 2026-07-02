@@ -99,6 +99,22 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 
 MySQL/MariaDB 的 `RowsAffected` 语义与 SQLite/PostgreSQL 不完全一致：冲突更新的行可能计为 `2`。因此返回值表示底层驱动报告的影响行数，不是跨方言稳定的“处理行数”。
 
+## FirstOrCreate
+
+```go
+product, created, err := db.Use[Product]().FirstOrCreate(ctx, &Product{
+    Code:  "P001",
+    Price: 100,
+}, "Code")
+
+row, created, err := db.Table("products").FirstOrCreate(ctx, oro.Map{
+    "code":  "P001",
+    "price": 100,
+}, "code")
+```
+
+`FirstOrCreate` 返回匹配冲突字段的行；不存在时创建。它直接使用模型或 Map 中冲突字段的值作为查询键，避免查询键和插入值不一致。冲突字段或列必须由唯一约束兜底，才能保证并发安全。已有查询条件会保留到两次回读中。
+
 ## 乐观锁
 
 字段定义：

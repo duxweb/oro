@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -425,12 +427,18 @@ func openSQLiteTestDB(t *testing.T) (*oro.DB, context.Context) {
 func openSQLiteTestDBWithDriver(t *testing.T, driver oro.Driver) (*oro.DB, context.Context) {
 	t.Helper()
 
-	ctx := context.Background()
-	db, err := oro.Open(oro.Config{
+	return openSQLiteTestDBWithConfig(t, oro.Config{
 		Connections: map[string]oro.ConnectionConfig{
 			"default": {Driver: driver},
 		},
 	})
+}
+
+func openSQLiteTestDBWithConfig(t *testing.T, config oro.Config) (*oro.DB, context.Context) {
+	t.Helper()
+
+	ctx := context.Background()
+	db, err := oro.Open(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1836,6 +1844,160 @@ func TestSQLiteTableAndModelUpsert(t *testing.T) {
 	}
 	if product.ID == 0 || product.Code != "U002" || product.Price != 40 {
 		t.Fatalf("unexpected model upsert update %#v", product)
+	}
+}
+
+func TestSQLiteFirstOrCreateModelTableAndTyped(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	model, created, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{
+		Code:  "F001",
+		Price: 10,
+	}, "Code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || model.ID == 0 || model.Code != "F001" || model.Price != 10 || model.CreatedAt.IsZero() || model.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected model create result model=%#v created=%v", model, created)
+	}
+
+	found, created, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{
+		Code:  "F001",
+		Price: 99,
+	}, "Code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || found.ID != model.ID || found.Price != 10 {
+		t.Fatalf("unexpected existing model result model=%#v created=%v", found, created)
+	}
+
+	row, created, err := db.Table("products").FirstOrCreate(ctx, oro.Map{
+		"code":  "F002",
+		"price": 20,
+	}, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || row["code"] != "F002" || row["price"] != int64(20) {
+		t.Fatalf("unexpected table create row=%#v created=%v", row, created)
+	}
+
+	dto, created, err := db.Table("products").MapTo[integrationMappedDTO]().FirstOrCreate(ctx, oro.Map{
+		"code":  "F003",
+		"price": 30,
+	}, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || dto.Code != "F003" || dto.Price != 30 {
+		t.Fatalf("unexpected typed create dto=%#v created=%v", dto, created)
+	}
+}
+
+func TestSQLiteFirstOrCreateConcurrent(t *testing.T) {
+	db, ctx := openSQLiteTestDBWithConfig(t, oro.Config{
+		Pool: oro.PoolConfig{MaxOpenConns: 1},
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+	})
+	const goroutines = 16
+	var createdCount int64
+	ids := make(chan uint64, goroutines)
+	errs := make(chan error, goroutines)
+	var wait sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			product, created, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{
+				Code:  "F100",
+				Price: 100,
+			}, "Code")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if created {
+				atomic.AddInt64(&createdCount, 1)
+			}
+			ids <- product.ID
+		}()
+	}
+	wait.Wait()
+	close(errs)
+	close(ids)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var firstID uint64
+	for id := range ids {
+		if id == 0 {
+			t.Fatal("expected non-zero id")
+		}
+		if firstID == 0 {
+			firstID = id
+			continue
+		}
+		if id != firstID {
+			t.Fatalf("expected same id %d, got %d", firstID, id)
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("got created count %d, want 1", createdCount)
+	}
+	count, err := db.Use[integrationProduct]().Where("Code", "F100").Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("got row count %d, want 1", count)
+	}
+}
+
+func TestSQLiteFirstOrCreateValidationApplyAndSoftDelete(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	if _, _, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{Code: "V001"}); !errors.Is(err, oro.ErrInvalidArgument) {
+		t.Fatalf("expected invalid argument for empty conflict fields, got %v", err)
+	}
+	if _, _, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{Code: "V001"}, "Missing"); !errors.Is(err, oro.ErrUnknownField) {
+		t.Fatalf("expected unknown field, got %v", err)
+	}
+	if _, _, err := db.Table("products").FirstOrCreate(ctx, oro.Map{"code": "V001"}, "price"); !errors.Is(err, oro.ErrInvalidArgument) {
+		t.Fatalf("expected invalid argument for missing conflict column, got %v", err)
+	}
+
+	apply := oro.ApplyFunc(func(applyCtx *oro.ApplyContext) error {
+		if applyCtx.Mode == oro.ApplyInsert && applyCtx.Stage == oro.ApplyStageValues {
+			if product, ok := applyCtx.Model.(*integrationProduct); ok && product.Price == 0 {
+				product.Price = 77
+			}
+		}
+		return nil
+	})
+	applied, created, err := db.Use[integrationProduct]().
+		Apply(apply).
+		FirstOrCreate(ctx, &integrationProduct{Code: "V002"}, "Code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || applied.Price != 77 {
+		t.Fatalf("expected apply-created price 77, got %#v created=%v", applied, created)
+	}
+
+	soft, err := db.Use[integrationProduct]().Create(ctx, &integrationProduct{Code: "V003", Price: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Use[integrationProduct]().Where("ID", soft.ID).Delete(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.Use[integrationProduct]().FirstOrCreate(ctx, &integrationProduct{Code: "V003", Price: 4}, "Code"); !errors.Is(err, oro.ErrScan) {
+		t.Fatalf("expected ErrScan for soft-deleted unique placeholder, got %v", err)
 	}
 }
 

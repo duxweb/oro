@@ -52,6 +52,7 @@ db.Raw("select ...")   // 原生 SQL
 | `Update(ctx, Map)` | 影响行数 |
 | `Delete(ctx)` | 影响行数 |
 | `Upsert(ctx, value)` | 插入或更新后的行 |
+| `FirstOrCreate(ctx, value, fields...)` | 行和 `created` 标志 |
 | `Count(ctx)` | `int64` |
 | `Exists(ctx)` | `bool` |
 | `Sum` / `Avg` | `oro.Decimal` |

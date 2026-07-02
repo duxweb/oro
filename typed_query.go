@@ -343,6 +343,18 @@ func (query *TypedTableQuery[T]) Upsert(ctx context.Context, values Map, options
 	return mapDTO[T](query.query.db, row)
 }
 
+// FirstOrCreate returns the first matching row or creates it and maps it into T.
+// Existing query conditions are preserved for both lookup reads, so call it on a
+// base query unless extra filters are intentional.
+func (query *TypedTableQuery[T]) FirstOrCreate(ctx context.Context, values Map, conflictColumns ...string) (*T, bool, error) {
+	row, created, err := query.query.FirstOrCreate(ctx, values, conflictColumns...)
+	if err != nil || row == nil {
+		return nil, created, err
+	}
+	value, err := mapDTO[T](query.query.db, row)
+	return value, created, err
+}
+
 // CreateMany inserts rows in batches and returns generated primary IDs.
 func (query *TypedTableQuery[T]) CreateMany(ctx context.Context, values []Map, options ...WriteOption) (*CreateResult, error) {
 	return query.query.CreateMany(ctx, values, options...)

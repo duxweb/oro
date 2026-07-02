@@ -672,6 +672,28 @@ func runCRUDQueryWrite(t *testing.T, ctx context.Context, db *oro.DB) {
 		t.Fatalf("unexpected bulk upsert products %#v", upsertedProducts)
 	}
 
+	firstCreated, createdFlag, err := db.Use[Product]().FirstOrCreate(ctx, &Product{Code: "IT006", Price: 600}, "Code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !createdFlag || firstCreated == nil || firstCreated.ID == 0 || firstCreated.Code != "IT006" || firstCreated.Price != 600 {
+		t.Fatalf("unexpected first-or-create create result %#v created=%v", firstCreated, createdFlag)
+	}
+	firstExisting, createdFlag, err := db.Use[Product]().FirstOrCreate(ctx, &Product{Code: "IT006", Price: 999}, "Code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdFlag || firstExisting == nil || firstExisting.ID != firstCreated.ID || firstExisting.Price != 600 {
+		t.Fatalf("unexpected first-or-create existing result %#v created=%v", firstExisting, createdFlag)
+	}
+	tableFirst, createdFlag, err := db.Table("oro_integration_products").FirstOrCreate(ctx, oro.Map{"code": "IT007", "price": 700}, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !createdFlag || tableFirst["code"] != "IT007" || gotUint(tableFirst["price"]) != 700 {
+		t.Fatalf("unexpected table first-or-create result %#v created=%v", tableFirst, createdFlag)
+	}
+
 	stream, err := db.Use[Product]().OrderBy("ID").Stream(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -690,7 +712,7 @@ func runCRUDQueryWrite(t *testing.T, ctx context.Context, db *oro.DB) {
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if streamCount != 5 {
+	if streamCount != 7 {
 		t.Fatalf("unexpected stream count %d", streamCount)
 	}
 
@@ -701,7 +723,7 @@ func runCRUDQueryWrite(t *testing.T, ctx context.Context, db *oro.DB) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if chunkCount != 5 {
+	if chunkCount != 7 {
 		t.Fatalf("unexpected chunk count %d", chunkCount)
 	}
 

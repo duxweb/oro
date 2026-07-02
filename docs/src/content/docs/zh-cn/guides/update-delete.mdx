@@ -145,6 +145,19 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 
 批量 upsert 中，`Update` / `UpdateAll` 会使用每一行自己的插入值。需要整条语句共享的常量或表达式时，使用 `UpdateMap`。
 
+## 查询或创建
+
+```go
+product, created, err := db.Use[Product]().FirstOrCreate(ctx, &Product{
+    Code:  "P001",
+    Price: 120,
+}, "Code")
+```
+
+`FirstOrCreate` 是基于唯一键的 get-or-create 辅助方法：先读，缺失时用 `DO NOTHING` 插入，再回读该行。因此并发调用会返回同一行，而不是创建重复记录。模型查询使用 Go 字段名，裸表查询使用数据库列名。
+
+冲突字段或列必须对应唯一约束。如果唯一键被一条已软删除记录占用，可见读查不到它且插入会被跳过，此时返回 `ErrScan`。已有查询条件会保留到两次回读中，因此额外过滤条件也可能让回读查不到刚插入的行。
+
 ## 删除
 
 ```go

@@ -653,54 +653,163 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if query.allShards {
 		return nil, &Error{Op: "upsert", Kind: ErrShardRequired}
 	}
-	spec, schema, err := modelInsertSpec(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	if model == nil {
-		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument}
-	}
-	if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageValues, schema, &spec, nil, model, nil); err != nil {
-		return nil, err
-	}
 	writeOptions := applyWriteOptions(options)
-	if writeOptions.conflict == nil {
-		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
-	}
-	row, err := buildModelInsertMap(schema, model, writeOptions, query.db.runtime.Config.location())
+	prepared, err := query.prepareModelUpsert(ctx, model, writeOptions)
 	if err != nil {
 		return nil, err
 	}
-	writeDB := withSpecConnection(query.db, spec)
-	if err := validateShardWriteValuesForDB(ctx, writeDB, schema, query.shard, row); err != nil {
-		return nil, err
-	}
-	conflict, err := resolveModelConflict(schema, writeOptions.conflict, []Map{row})
-	if err != nil {
-		return nil, err
-	}
-	rows, err := upsertRows(ctx, writeDB, WriteSpec{
-		QuerySpec: spec,
-		Values:    []Map{row},
-		Primary:   primaryColumnsForSchema(schema),
-		Conflict:  *conflict,
+	rows, err := upsertRows(ctx, prepared.writeDB, WriteSpec{
+		QuerySpec: prepared.spec,
+		Values:    []Map{prepared.row},
+		Primary:   primaryColumnsForSchema(prepared.schema),
+		Conflict:  *prepared.conflict,
 	})
 	if err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, &Error{Op: "upsert", Kind: ErrScan, Model: schema.Name, Table: schema.Table}
+		return nil, &Error{Op: "upsert", Kind: ErrScan, Model: prepared.schema.Name, Table: prepared.schema.Table}
 	}
-	if err := query.db.runtime.Mapper.MapModel(schema, rows[0], model); err != nil {
+	if err := query.db.runtime.Mapper.MapModel(prepared.schema, rows[0], model); err != nil {
 		return nil, err
 	}
-	if err := applyModelAfterWrite(ctx, query, schema, &spec, row, model, 1); err != nil {
+	if err := applyModelAfterWrite(ctx, query, prepared.schema, &prepared.spec, prepared.row, model, 1); err != nil {
 		return nil, err
 	}
-	if err := query.afterApply(ctx, schema, model); err != nil {
+	if err := query.afterApply(ctx, prepared.schema, model); err != nil {
 		return nil, err
 	}
 	return model, nil
+}
+
+// FirstOrCreate returns the first row matching conflictFields or creates it.
+// Existing query conditions are preserved for both lookup reads, so call it on a
+// base query unless extra filters are intentional.
+func (query *ModelQuery[T]) FirstOrCreate(ctx context.Context, model *T, conflictFields ...string) (*T, bool, error) {
+	if query.allShards {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrShardRequired}
+	}
+	if len(conflictFields) == 0 {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrInvalidArgument}
+	}
+	if model == nil {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrInvalidArgument}
+	}
+	schema, err := schemaForModel[T](query.db)
+	if err != nil {
+		return nil, false, err
+	}
+	lookup, err := query.modelFirstOrCreateLookup(schema, model, conflictFields)
+	if err != nil {
+		return nil, false, err
+	}
+	found, err := lookup.First(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if found != nil {
+		return found, false, nil
+	}
+
+	options := writeOptions{
+		conflict: &ConflictSpec{
+			Columns:   append([]string(nil), conflictFields...),
+			DoNothing: true,
+		},
+	}
+	prepared, err := query.prepareModelUpsert(ctx, model, options)
+	if err != nil {
+		return nil, false, err
+	}
+	affected, err := upsertRowsAffected(ctx, prepared.writeDB, WriteSpec{
+		QuerySpec: prepared.spec,
+		Values:    []Map{prepared.row},
+		Primary:   primaryColumnsForSchema(prepared.schema),
+		Conflict:  *prepared.conflict,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	found, err = lookup.First(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if found == nil {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrScan, Model: prepared.schema.Name, Table: prepared.schema.Table}
+	}
+	if affected > 0 {
+		if err := applyModelAfterWrite(ctx, query, prepared.schema, &prepared.spec, prepared.row, found, affected); err != nil {
+			return nil, false, err
+		}
+	}
+	return found, affected > 0, nil
+}
+
+type preparedModelUpsert struct {
+	spec     QuerySpec
+	schema   *ModelSchema
+	row      Map
+	conflict *ConflictSpec
+	writeDB  *DB
+}
+
+func (query *ModelQuery[T]) prepareModelUpsert(ctx context.Context, model *T, options writeOptions) (preparedModelUpsert, error) {
+	spec, schema, err := modelInsertSpec(ctx, query)
+	if err != nil {
+		return preparedModelUpsert{}, err
+	}
+	if model == nil {
+		return preparedModelUpsert{}, &Error{Op: "upsert", Kind: ErrInvalidArgument}
+	}
+	if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageValues, schema, &spec, nil, model, nil); err != nil {
+		return preparedModelUpsert{}, err
+	}
+	if options.conflict == nil {
+		return preparedModelUpsert{}, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
+	}
+	row, err := buildModelInsertMap(schema, model, options, query.db.runtime.Config.location())
+	if err != nil {
+		return preparedModelUpsert{}, err
+	}
+	writeDB := withSpecConnection(query.db, spec)
+	if err := validateShardWriteValuesForDB(ctx, writeDB, schema, query.shard, row); err != nil {
+		return preparedModelUpsert{}, err
+	}
+	conflict, err := resolveModelConflict(schema, options.conflict, []Map{row})
+	if err != nil {
+		return preparedModelUpsert{}, err
+	}
+	return preparedModelUpsert{spec: spec, schema: schema, row: row, conflict: conflict, writeDB: writeDB}, nil
+}
+
+func (query *ModelQuery[T]) modelFirstOrCreateLookup(schema *ModelSchema, model *T, fields []string) (*ModelQuery[T], error) {
+	structValue, err := modelStructValue(model)
+	if err != nil {
+		return nil, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table, Cause: err}
+	}
+	lookup := query
+	for _, fieldName := range fields {
+		field, ok := schema.FieldByGo[fieldName]
+		if !ok {
+			return nil, &Error{Op: "first_or_create", Kind: ErrUnknownField, Model: schema.Name, Field: fieldName}
+		}
+		if field.Virtual {
+			return nil, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Model: schema.Name, Field: fieldName}
+		}
+		fieldValue, ok := fieldByIndexReadSafe(structValue, field.Index)
+		if !ok || !fieldValue.IsValid() || !fieldValue.CanInterface() {
+			return nil, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Model: schema.Name, Field: fieldName}
+		}
+		value, err := valueForWrite(fieldValue)
+		if err != nil {
+			return nil, &Error{Op: "first_or_create", Kind: ErrScan, Model: schema.Name, Field: fieldName, Cause: err}
+		}
+		if value == nil {
+			return nil, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Model: schema.Name, Field: fieldName}
+		}
+		lookup = lookup.Where(fieldName, value)
+	}
+	return lookup, nil
 }
 
 // Update updates matching rows with explicit Map values.

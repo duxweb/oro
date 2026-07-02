@@ -589,6 +589,57 @@ func (query *TableQuery) Upsert(ctx context.Context, values Map, options ...Writ
 	return rows[0], nil
 }
 
+// FirstOrCreate returns the first row matching conflictColumns or creates it.
+// Existing query conditions are preserved for both lookup reads, so call it on a
+// base query unless extra filters are intentional.
+func (query *TableQuery) FirstOrCreate(ctx context.Context, values Map, conflictColumns ...string) (Map, bool, error) {
+	if query.allShards {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
+	}
+	if len(values) == 0 || len(conflictColumns) == 0 {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Table: query.spec.Table}
+	}
+	lookup := query
+	for _, column := range conflictColumns {
+		value, ok := values[column]
+		if !ok || value == nil {
+			return nil, false, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Table: query.spec.Table, Field: column}
+		}
+		lookup = lookup.Where(column, value)
+	}
+	found, err := lookup.First(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if found != nil {
+		return found, false, nil
+	}
+
+	spec, err := tableShardSpec(ctx, query)
+	if err != nil {
+		return nil, false, err
+	}
+	affected, err := upsertRowsAffected(ctx, query.db, WriteSpec{
+		QuerySpec: spec,
+		Values:    []Map{values},
+		Conflict: ConflictSpec{
+			Columns:   append([]string(nil), conflictColumns...),
+			DoNothing: true,
+		},
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	found, err = lookup.First(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if found == nil {
+		return nil, false, &Error{Op: "first_or_create", Kind: ErrScan, Table: query.spec.Table}
+	}
+	return found, affected > 0, nil
+}
+
 // CreateMany inserts rows in batches and returns generated primary IDs.
 func (query *TableQuery) CreateMany(ctx context.Context, values []Map, options ...WriteOption) (*CreateResult, error) {
 	if query.allShards {

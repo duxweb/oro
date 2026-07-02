@@ -156,4 +156,5 @@ rows, err := db.From(oro.Query(paidOrders).As("po")).Get(ctx)
 | `Paginate(size)` | paginator |
 | `Create` / `CreateMany` / `CreateManyResult` | writes |
 | `Upsert` / `UpsertMany` | conflict writes |
+| `FirstOrCreate` | get-or-create by unique conflict fields |
 | `Update` / `Delete` | mutation |
