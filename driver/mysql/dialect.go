@@ -498,20 +498,7 @@ func (d dialect) compileUpsert(stmt oro.InsertAST) (oro.CompiledSQL, error) {
 }
 
 func (d dialect) compileConflictUpdate(conflict oro.ConflictSpec, row oro.Map) (string, []any, error) {
-	updateValues := conflict.UpdateMap
-	if len(updateValues) == 0 {
-		updateValues = oro.Map{}
-		fields := conflict.Update
-		if conflict.UpdateAll {
-			fields = sortedKeys(row)
-		}
-		for _, column := range fields {
-			if value, ok := row[column]; ok {
-				updateValues[column] = value
-			}
-		}
-	}
-	if conflict.DoNothing || len(updateValues) == 0 {
+	if conflict.DoNothing {
 		if len(conflict.Columns) == 0 {
 			return "", nil, &oro.Error{Op: "mysql.upsert", Kind: oro.ErrInvalidArgument}
 		}
@@ -519,15 +506,38 @@ func (d dialect) compileConflictUpdate(conflict oro.ConflictSpec, row oro.Map) (
 		return " on duplicate key update " + d.QuoteIdent(column) + " = " + d.QuoteIdent(column), nil, nil
 	}
 
-	columnNames := sortedKeys(updateValues)
-	sets := make([]string, 0, len(columnNames))
-	args := make([]any, 0, len(columnNames))
-	for _, column := range columnNames {
-		setSQL, setArgs := d.compileSet(column, updateValues[column])
-		sets = append(sets, setSQL)
-		args = append(args, setArgs...)
+	if len(conflict.UpdateMap) > 0 {
+		columnNames := sortedKeys(conflict.UpdateMap)
+		sets := make([]string, 0, len(columnNames))
+		args := make([]any, 0, len(columnNames))
+		for _, column := range columnNames {
+			setSQL, setArgs := d.compileSet(column, conflict.UpdateMap[column])
+			sets = append(sets, setSQL)
+			args = append(args, setArgs...)
+		}
+		return " on duplicate key update " + strings.Join(sets, ", "), args, nil
 	}
-	return " on duplicate key update " + strings.Join(sets, ", "), args, nil
+
+	fields := conflictUpdateColumns(conflict.Update, row)
+	if conflict.UpdateAll {
+		fields = conflictUpdateAllColumns(row, conflict.Columns)
+	}
+	if len(fields) == 0 {
+		if len(conflict.Columns) == 0 {
+			return "", nil, &oro.Error{Op: "mysql.upsert", Kind: oro.ErrInvalidArgument}
+		}
+		column := conflict.Columns[0]
+		return " on duplicate key update " + d.QuoteIdent(column) + " = " + d.QuoteIdent(column), nil, nil
+	}
+
+	columnNames := append([]string(nil), fields...)
+	sort.Strings(columnNames)
+	sets := make([]string, 0, len(columnNames))
+	for _, column := range columnNames {
+		quoted := d.QuoteIdent(column)
+		sets = append(sets, quoted+" = VALUES("+quoted+")")
+	}
+	return " on duplicate key update " + strings.Join(sets, ", "), nil, nil
 }
 
 func (d dialect) compileUpdate(stmt oro.UpdateAST) (oro.CompiledSQL, error) {
@@ -976,4 +986,34 @@ func sortedKeys(row oro.Map) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func conflictUpdateAllColumns(row oro.Map, conflictColumns []string) []string {
+	if len(row) == 0 {
+		return nil
+	}
+	conflictSet := map[string]bool{}
+	for _, column := range conflictColumns {
+		conflictSet[column] = true
+	}
+	columns := make([]string, 0, len(row))
+	for _, column := range sortedKeys(row) {
+		if !conflictSet[column] {
+			columns = append(columns, column)
+		}
+	}
+	return columns
+}
+
+func conflictUpdateColumns(columns []string, row oro.Map) []string {
+	if len(columns) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		if _, ok := row[column]; ok {
+			out = append(out, column)
+		}
+	}
+	return out
 }

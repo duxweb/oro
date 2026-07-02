@@ -68,7 +68,7 @@ views, err := db.Table("products").
     Get(ctx)
 ```
 
-`Table(...).MapTo[T]()` 支持 `First`、`Get`、`Stream`、`Chunk`、`Each`、`Paginate`、`Create`、`CreateManyResult` 和 `UpsertMany`。聚合统计仍然调用底层 `Table` 查询的 `Count`、`Exists`、`Sum`、`Avg`、`Min`、`Max`。
+`Table(...).MapTo[T]()` 支持 `First`、`Get`、`Stream`、`Chunk`、`Each`、`Paginate`、`Create` 和 `CreateManyResult`。`UpsertMany` 返回影响行数，不会映射 DTO 值。聚合统计仍然调用底层 `Table` 查询的 `Count`、`Exists`、`Sum`、`Avg`、`Min`、`Max`。
 
 `Raw(...).MapTo[T]()` 支持 `First`、`Get` 和 `Stream`；Raw 的执行型 SQL 使用 `Raw(...).Exec(ctx)`。
 

@@ -50,7 +50,7 @@ views, err := db.Table("products").
 
 Mapping uses field names and snake_case conversion. It does not require `db` tags.
 
-`Table(...).MapTo[T]()` supports `First`, `Get`, `Stream`, `Chunk`, `Each`, `Paginate`, `Create`, `CreateManyResult`, and `UpsertMany`.
+`Table(...).MapTo[T]()` supports `First`, `Get`, `Stream`, `Chunk`, `Each`, `Paginate`, `Create`, and `CreateManyResult`. `UpsertMany` returns affected rows, so it does not map DTO values.
 
 ## Raw queries
 

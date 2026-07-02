@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -131,6 +132,18 @@ func mapsHaveSameKeys(values []Map) bool {
 		}
 	}
 	return true
+}
+
+func requireSameMapKeys(values []Map, op string, table string) error {
+	for _, value := range values {
+		if len(value) == 0 {
+			return &Error{Op: op, Kind: ErrInvalidArgument, Table: table}
+		}
+	}
+	if !mapsHaveSameKeys(values) {
+		return &Error{Op: op, Kind: ErrInvalidArgument, Table: table}
+	}
+	return nil
 }
 
 // CheckVersion enables optimistic-lock checking with the expected version value.
@@ -1226,6 +1239,51 @@ func upsertRowsWithoutReturning(ctx context.Context, db *DB, conn *Connection, s
 	return []Map{row}, nil
 }
 
+func upsertRowsAffected(ctx context.Context, db *DB, spec WriteSpec) (int64, error) {
+	if len(spec.Values) == 0 {
+		return 0, nil
+	}
+	if spec.Operation == "" {
+		spec.Operation = "upsert"
+	}
+	if err := applyWriteExtensions(ctx, db, &spec); err != nil {
+		return 0, err
+	}
+	if err := applyConnectionExtensions(ctx, db, &spec.QuerySpec); err != nil {
+		return 0, err
+	}
+	conn, err := connectionForQuery(db, spec.Connection)
+	if err != nil {
+		return 0, err
+	}
+	tableNames(db).ApplyWrite(&spec)
+	if !conn.Dialect.Capabilities().Upsert {
+		return 0, &Error{Op: "upsert", Kind: ErrUnsupported, Table: spec.Table}
+	}
+	spec.Returning = false
+
+	compiled, err := compileUpsertSQL(db, conn, spec)
+	if err != nil {
+		return 0, err
+	}
+	result, err := execCompiled(ctx, db, execForQueryRuntime(db, conn), spec.QuerySpec, compiled, "upsert")
+	if err != nil {
+		return 0, translateQueryError(conn, err)
+	}
+	return result.RowsAffected, nil
+}
+
+func runTableWrite(ctx context.Context, db *DB, spec QuerySpec, fn func(*DB) error) error {
+	writeDB := withSpecConnection(db, spec)
+	if writeDB == nil || writeDB.runtime == nil {
+		return &Error{Op: "write", Kind: ErrInvalidArgument}
+	}
+	if writeDB.session.tx != nil || !writeDB.runtime.Config.SkipDefaultTransaction {
+		return writeDB.Transaction(ctx, fn)
+	}
+	return fn(writeDB)
+}
+
 func upsertLookupConditions(spec WriteSpec, primaryColumns []string, result ExecResult) ([]Condition, error) {
 	if len(spec.Values) == 0 {
 		return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Table: spec.Table}
@@ -2269,6 +2327,47 @@ func convertModelConflict(schema *ModelSchema, conflict *ConflictSpec) (*Conflic
 		converted.UpdateMap = nil
 	}
 	return converted, nil
+}
+
+func resolveModelConflict(schema *ModelSchema, conflict *ConflictSpec, values []Map) (*ConflictSpec, error) {
+	converted, err := convertModelConflict(schema, conflict)
+	if err != nil || converted == nil {
+		return converted, err
+	}
+	if converted.UpdateAll {
+		converted.Update = modelUpdateAllColumns(schema, converted.Columns, values)
+		converted.UpdateAll = false
+	}
+	return converted, nil
+}
+
+func modelUpdateAllColumns(schema *ModelSchema, conflictColumns []string, values []Map) []string {
+	if schema == nil || len(values) == 0 {
+		return nil
+	}
+	available := map[string]bool{}
+	for column := range values[0] {
+		available[column] = true
+	}
+	excluded := map[string]bool{}
+	for _, column := range conflictColumns {
+		excluded[column] = true
+	}
+	for _, column := range schema.PrimaryColumns {
+		excluded[column] = true
+	}
+	columns := make([]string, 0, len(values[0]))
+	for _, field := range schema.InsertFields {
+		if field.Ignore || field.Virtual || field.AutoCreate {
+			continue
+		}
+		if !available[field.Column] || excluded[field.Column] {
+			continue
+		}
+		columns = append(columns, field.Column)
+	}
+	sort.Strings(columns)
+	return columns
 }
 
 func autoUpdateColumns(schema *ModelSchema, options writeOptions) Map {

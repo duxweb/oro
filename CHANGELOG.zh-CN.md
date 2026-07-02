@@ -9,6 +9,17 @@
 
 ## [未发布]
 
+### 变更
+
+- **破坏性变更：** `UpsertMany` 现在生成多行 upsert 语句，并在输入过大时按参数上限
+  分块；返回值从回填后的行/模型改为 `RowsAffected`。
+
+### 修复
+
+- Upsert 的冲突更新现在引用插入伪行（SQLite/PostgreSQL 为 `excluded.col`，
+  MySQL/MariaDB 为 `VALUES(col)`），多行 upsert 会用每一行自己的插入值更新对应冲突
+  行，不再复用第一行的值。
+
 ## [0.1.0] - 2026-06-30
 
 本次为 pre-1.0 预览版的一轮加固：修复 review 中发现的正确性与安全问题，统一

@@ -453,11 +453,11 @@ func TestCompileUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `insert into "products" ("code", "price") values (?, ?) on conflict ("code") do update set "price" = ? returning *`
+	want := `insert into "products" ("code", "price") values (?, ?) on conflict ("code") do update set "price" = excluded."price" returning *`
 	if sql.SQL != want {
 		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
 	}
-	if len(sql.Args) != 3 || sql.Args[0] != "A001" || sql.Args[1] != 100 || sql.Args[2] != 100 {
+	if len(sql.Args) != 2 || sql.Args[0] != "A001" || sql.Args[1] != 100 {
 		t.Fatalf("got args %#v", sql.Args)
 	}
 }

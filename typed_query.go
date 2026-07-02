@@ -357,13 +357,9 @@ func (query *TypedTableQuery[T]) CreateManyResult(ctx context.Context, values []
 	return mapDTOs[T](query.query.db, rows)
 }
 
-// UpsertMany upserts rows and returns mapped DTO values.
-func (query *TypedTableQuery[T]) UpsertMany(ctx context.Context, values []Map, options ...WriteOption) ([]*T, error) {
-	rows, err := query.query.UpsertMany(ctx, values, options...)
-	if err != nil {
-		return nil, err
-	}
-	return mapDTOs[T](query.query.db, rows)
+// UpsertMany upserts rows in multi-row batches and returns affected rows.
+func (query *TypedTableQuery[T]) UpsertMany(ctx context.Context, values []Map, options ...WriteOption) (int64, error) {
+	return query.query.UpsertMany(ctx, values, options...)
 }
 
 // First returns the first raw row mapped into T or nil when no row is found.

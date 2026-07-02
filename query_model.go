@@ -675,7 +675,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 	if err := validateShardWriteValuesForDB(ctx, writeDB, schema, query.shard, row); err != nil {
 		return nil, err
 	}
-	conflict, err := convertModelConflict(schema, writeOptions.conflict)
+	conflict, err := resolveModelConflict(schema, writeOptions.conflict, []Map{row})
 	if err != nil {
 		return nil, err
 	}
@@ -1116,24 +1116,89 @@ func (query *ModelQuery[T]) canBatchCreate(models []*T) bool {
 	return true
 }
 
-// UpsertMany upserts models one by one with the configured conflict option.
-func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options ...WriteOption) ([]*T, error) {
-	if len(models) == 0 {
-		return []*T{}, nil
+// UpsertMany upserts models in multi-row batches and returns affected rows.
+func (query *ModelQuery[T]) UpsertMany(ctx context.Context, models []*T, options ...WriteOption) (int64, error) {
+	if query.allShards {
+		return 0, &Error{Op: "upsert", Kind: ErrShardRequired}
 	}
+	if len(models) == 0 {
+		return 0, nil
+	}
+	if query.hasApplies() {
+		schema, err := schemaForModel[T](query.db)
+		if err != nil {
+			return 0, err
+		}
+		return 0, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
+	}
+	spec, schema, err := modelInsertSpec(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	writeOptions := applyWriteOptions(options)
+	if writeOptions.conflict == nil {
+		return 0, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
+	}
+	rows, err := buildModelUpsertRows(ctx, query, spec, schema, models, writeOptions)
+	if err != nil {
+		return 0, err
+	}
+	if err := requireSameMapKeys(rows, "upsert", schema.Table); err != nil {
+		return 0, err
+	}
+	writeDB := withSpecConnection(query.db, spec)
+	for _, row := range rows {
+		if err := validateShardWriteValuesForDB(ctx, writeDB, schema, query.shard, row); err != nil {
+			return 0, err
+		}
+	}
+	conflict, err := resolveModelConflict(schema, writeOptions.conflict, rows)
+	if err != nil {
+		return 0, err
+	}
+	batchSize := createBatchSize(query.db.runtime.Config, writeOptions)
+	var affected int64
+	err = query.runModelWrite(ctx, spec, func(txQuery *ModelQuery[T]) error {
+		txDB := txQuery.db
+		for _, chunk := range chunkMapsForCreate(rows, batchSize) {
+			result, err := upsertRowsAffected(ctx, txDB, WriteSpec{
+				QuerySpec: spec,
+				Values:    chunk,
+				Primary:   primaryColumnsForSchema(schema),
+				Conflict:  *conflict,
+			})
+			if err != nil {
+				return err
+			}
+			affected += result
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := applyModelAfterWrite(ctx, query, schema, &spec, nil, models, affected); err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
 
-	upsertedModels := make([]*T, 0, len(models))
+func buildModelUpsertRows[T any](ctx context.Context, query *ModelQuery[T], spec QuerySpec, schema *ModelSchema, models []*T, options writeOptions) ([]Map, error) {
+	rows := make([]Map, 0, len(models))
 	for _, model := range models {
 		if model == nil {
-			return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument}
+			return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table}
 		}
-		upserted, err := query.Upsert(ctx, model, options...)
+		if err := applyModelApplies(ctx, query, ApplyInsert, ApplyStageValues, schema, &spec, nil, model, nil); err != nil {
+			return nil, err
+		}
+		row, err := buildModelInsertMap(schema, model, options, query.db.runtime.Config.location())
 		if err != nil {
 			return nil, err
 		}
-		upsertedModels = append(upsertedModels, upserted)
+		rows = append(rows, row)
 	}
-	return upsertedModels, nil
+	return rows, nil
 }
 
 // Find returns a model by primary key.

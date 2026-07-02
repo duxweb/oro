@@ -480,32 +480,33 @@ func (d dialect) compileConflictUpdate(conflict oro.ConflictSpec, row oro.Map) (
 		return " do nothing", nil, nil
 	}
 
-	updateValues := conflict.UpdateMap
-	if len(updateValues) == 0 {
-		updateValues = oro.Map{}
-		fields := conflict.Update
-		if conflict.UpdateAll {
-			fields = sortedKeys(row)
+	if len(conflict.UpdateMap) > 0 {
+		columnNames := sortedKeys(conflict.UpdateMap)
+		sets := make([]string, 0, len(columnNames))
+		args := make([]any, 0, len(columnNames))
+		for _, column := range columnNames {
+			setSQL, setArgs := d.compileSet(column, conflict.UpdateMap[column])
+			sets = append(sets, setSQL)
+			args = append(args, setArgs...)
 		}
-		for _, column := range fields {
-			if value, ok := row[column]; ok {
-				updateValues[column] = value
-			}
-		}
+		return " do update set " + strings.Join(sets, ", "), args, nil
 	}
-	if len(updateValues) == 0 {
+
+	fields := conflictUpdateColumns(conflict.Update, row)
+	if conflict.UpdateAll {
+		fields = conflictUpdateAllColumns(row, conflict.Columns)
+	}
+	if len(fields) == 0 {
 		return "", nil, &oro.Error{Op: "sqlite.upsert", Kind: oro.ErrInvalidArgument}
 	}
 
-	columnNames := sortedKeys(updateValues)
+	columnNames := append([]string(nil), fields...)
+	sort.Strings(columnNames)
 	sets := make([]string, 0, len(columnNames))
-	args := make([]any, 0, len(columnNames))
 	for _, column := range columnNames {
-		setSQL, setArgs := d.compileSet(column, updateValues[column])
-		sets = append(sets, setSQL)
-		args = append(args, setArgs...)
+		sets = append(sets, d.QuoteIdent(column)+" = excluded."+d.QuoteIdent(column))
 	}
-	return " do update set " + strings.Join(sets, ", "), args, nil
+	return " do update set " + strings.Join(sets, ", "), nil, nil
 }
 
 func (d dialect) compileUpdate(stmt oro.UpdateAST) (oro.CompiledSQL, error) {
@@ -919,4 +920,34 @@ func sortedKeys(row oro.Map) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func conflictUpdateAllColumns(row oro.Map, conflictColumns []string) []string {
+	if len(row) == 0 {
+		return nil
+	}
+	conflictSet := map[string]bool{}
+	for _, column := range conflictColumns {
+		conflictSet[column] = true
+	}
+	columns := make([]string, 0, len(row))
+	for _, column := range sortedKeys(row) {
+		if !conflictSet[column] {
+			columns = append(columns, column)
+		}
+	}
+	return columns
+}
+
+func conflictUpdateColumns(columns []string, row oro.Map) []string {
+	if len(columns) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		if _, ok := row[column]; ok {
+			out = append(out, column)
+		}
+	}
+	return out
 }

@@ -647,6 +647,31 @@ func runCRUDQueryWrite(t *testing.T, ctx context.Context, db *oro.DB) {
 		t.Fatalf("unexpected upsert %#v", upserted)
 	}
 
+	affected, err := db.Use[Product]().UpsertMany(ctx, []*Product{
+		{Code: "IT001", Price: 181},
+		{Code: "IT002", Price: 222},
+		{Code: "IT003", Price: 333},
+	}, oro.ConflictBy("Code").Update("Price"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected == 0 {
+		t.Fatal("expected affected rows for bulk upsert")
+	}
+	upsertedProducts, err := db.Use[Product]().
+		Where(oro.Field("Code").In("IT001", "IT002", "IT003")).
+		OrderBy("Code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upsertedProducts) != 3 ||
+		upsertedProducts[0].Price != 181 ||
+		upsertedProducts[1].Price != 222 ||
+		upsertedProducts[2].Price != 333 {
+		t.Fatalf("unexpected bulk upsert products %#v", upsertedProducts)
+	}
+
 	stream, err := db.Use[Product]().OrderBy("ID").Stream(ctx)
 	if err != nil {
 		t.Fatal(err)

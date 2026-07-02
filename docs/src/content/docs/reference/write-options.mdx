@@ -48,6 +48,30 @@ saved, err := db.Use[Product]().Upsert(ctx, product,
 
 `ConflictBy` defines the unique key used for upsert. Model queries use Go field names; table queries use database columns.
 
+Available strategies:
+
+| Method | Behavior |
+| --- | --- |
+| `ConflictBy(fields...).DoNothing()` | ignore conflicting rows |
+| `ConflictBy(fields...).Update(fields...)` | update the listed fields from the inserted pseudo-row |
+| `ConflictBy(fields...).UpdateAll()` | update all writable inserted fields except primary keys, conflict keys, and model `AutoCreate` fields |
+| `ConflictBy(fields...).UpdateMap(values)` | update with explicit constants or expressions shared by the whole statement |
+
+## UpsertMany
+
+```go
+affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+}, oro.ConflictBy("code").UpdateAll())
+```
+
+`UpsertMany` emits multi-row upsert statements, split into parameter-safe batches when needed, and returns `RowsAffected`. On conflict, `Update` and `UpdateAll` use each row's own inserted value (`excluded.col` on SQLite/PostgreSQL, `VALUES(col)` on MySQL/MariaDB); they do not reuse the first row's value.
+
+All maps in one `UpsertMany` call must have the same keys. `UpdateMap` keeps constant/expression semantics for the whole statement, which is useful for values like `oro.Increment(1)`.
+
+MySQL and MariaDB report affected rows differently from SQLite/PostgreSQL: an updated conflicting row can count as `2`. Treat the return value as the database driver's affected-row count, not a portable processed-row count.
+
 ## CheckVersion
 
 ```go

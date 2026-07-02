@@ -103,6 +103,17 @@ row, err := db.Table("products").Upsert(ctx, oro.Map{
 
 `ConflictBy` uses Go field names for models and database column names for table queries.
 
+Bulk upsert returns affected rows:
+
+```go
+affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+    {"code": "P001", "price": 120},
+    {"code": "P002", "price": 180},
+}, oro.ConflictBy("code").UpdateAll())
+```
+
+For bulk upsert, `Update` / `UpdateAll` use each row's own inserted values. Use `UpdateMap` when the conflict update should be a shared constant or expression for the whole statement.
+
 ## Delete
 
 ```go

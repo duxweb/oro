@@ -78,19 +78,26 @@ product, err := db.Use[Product]().Upsert(ctx, &Product{
 | 方法 | 用途 |
 | --- | --- |
 | `ConflictBy(fields...).DoNothing()` | 冲突时不处理 |
-| `ConflictBy(fields...).Update(fields...)` | 冲突时更新指定字段 |
-| `ConflictBy(fields...).UpdateAll()` | 冲突时更新所有可写字段 |
-| `ConflictBy(fields...).UpdateMap(values)` | 冲突时使用指定 Map 更新 |
+| `ConflictBy(fields...).Update(fields...)` | 冲突时用插入伪行更新指定字段 |
+| `ConflictBy(fields...).UpdateAll()` | 冲突时更新所有可写入的插入字段，但排除主键、冲突键和模型 `AutoCreate` 字段 |
+| `ConflictBy(fields...).UpdateMap(values)` | 冲突时使用指定 Map 更新，值是整条语句共享的常量或表达式 |
 
 模型查询使用 Go 字段名，裸表查询使用数据库列名。
 
 ## UpsertMany
 
 ```go
-created, err := db.Use[Product]().UpsertMany(ctx, products, oro.ConflictBy("Code").Update("Price"))
+affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+    {"code": "P001", "price": 100},
+    {"code": "P002", "price": 200},
+}, oro.ConflictBy("code").UpdateAll())
 ```
 
-`UpsertMany` 逐条执行语义更稳定，适合业务写入。大量导入优先评估 `CreateMany` 加数据库原生批量方案。
+`UpsertMany` 会生成多行 upsert 语句，并在参数数量过大时自动分块，返回数据库的 `RowsAffected`。冲突时，`Update` 和 `UpdateAll` 会引用每一行自己的插入值（SQLite/PostgreSQL 为 `excluded.col`，MySQL/MariaDB 为 `VALUES(col)`），不会用第一行的值覆盖所有冲突行。
+
+同一次 `UpsertMany` 中所有 `Map` 必须拥有相同键集合，否则会返回参数错误，避免静默写入 `NULL` 或覆盖错误字段。`UpdateMap` 保持常量/表达式语义，适合 `oro.Increment(1)` 这类整条语句共享的更新。
+
+MySQL/MariaDB 的 `RowsAffected` 语义与 SQLite/PostgreSQL 不完全一致：冲突更新的行可能计为 `2`。因此返回值表示底层驱动报告的影响行数，不是跨方言稳定的“处理行数”。
 
 ## 乐观锁
 

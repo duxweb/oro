@@ -685,24 +685,42 @@ func (query *TableQuery) CreateManyResult(ctx context.Context, values []Map, opt
 	return rows, nil
 }
 
-// UpsertMany upserts rows one by one with the configured conflict option.
-func (query *TableQuery) UpsertMany(ctx context.Context, values []Map, options ...WriteOption) ([]Map, error) {
+// UpsertMany upserts rows in multi-row batches and returns affected rows.
+func (query *TableQuery) UpsertMany(ctx context.Context, values []Map, options ...WriteOption) (int64, error) {
+	if query.allShards {
+		return 0, &Error{Op: "upsert", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
+	}
 	if len(values) == 0 {
-		return []Map{}, nil
+		return 0, nil
 	}
-
-	rows := make([]Map, 0, len(values))
-	for _, value := range values {
-		if len(value) == 0 {
-			return nil, &Error{Op: "upsert", Kind: ErrInvalidArgument, Table: query.spec.Table}
-		}
-		upserted, err := query.Upsert(ctx, value, options...)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, upserted)
+	if err := requireSameMapKeys(values, "upsert", query.spec.Table); err != nil {
+		return 0, err
 	}
-	return rows, nil
+	spec, err := tableShardSpec(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	writeOptions := applyWriteOptions(options)
+	if writeOptions.conflict == nil {
+		return 0, &Error{Op: "upsert", Kind: ErrInvalidArgument, Table: query.spec.Table}
+	}
+	batchSize := createBatchSize(query.db.runtime.Config, writeOptions)
+	var affected int64
+	err = runTableWrite(ctx, query.db, spec, func(writeDB *DB) error {
+		for _, chunk := range chunkMapsForCreate(values, batchSize) {
+			result, err := upsertRowsAffected(ctx, writeDB, WriteSpec{
+				QuerySpec: spec,
+				Values:    chunk,
+				Conflict:  *writeOptions.conflict,
+			})
+			if err != nil {
+				return err
+			}
+			affected += result
+		}
+		return nil
+	})
+	return affected, err
 }
 
 // Update updates matching rows with explicit Map values.

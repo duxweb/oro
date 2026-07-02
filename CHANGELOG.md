@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `UpsertMany` now emits multi-row upsert statements, splits large
+  inputs into parameter-safe batches, and returns `RowsAffected` instead of
+  hydrated rows/models.
+
+### Fixed
+
+- Upsert conflict updates now reference the inserted pseudo-row
+  (`excluded.col` on SQLite/PostgreSQL, `VALUES(col)` on MySQL/MariaDB), so
+  multi-row upserts update each conflicting row with its own inserted values
+  instead of reusing the first row's values.
+
 ## [0.1.0] - 2026-06-30
 
 This is a hardening pass over the pre-1.0 preview: it closes correctness and

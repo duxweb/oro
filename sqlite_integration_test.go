@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -1835,6 +1836,198 @@ func TestSQLiteTableAndModelUpsert(t *testing.T) {
 	}
 	if product.ID == 0 || product.Code != "U002" || product.Price != 40 {
 		t.Fatalf("unexpected model upsert update %#v", product)
+	}
+}
+
+func TestSQLiteTableUpsertManyUsesEachInsertedRow(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+
+	_, err := db.Table("products").CreateMany(ctx, []oro.Map{
+		{"code": "B001", "price": 1},
+		{"code": "B002", "price": 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+		{"code": "B001", "price": 100},
+		{"code": "B002", "price": 200},
+		{"code": "B003", "price": 300},
+	}, oro.ConflictBy("code").Update("price"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 3 {
+		t.Fatalf("got affected %d, want 3", affected)
+	}
+
+	rows, err := db.Table("products").Select("code", "price").OrderBy("code").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrices := map[string]int64{"B001": 100, "B002": 200, "B003": 300}
+	for _, row := range rows {
+		code, _ := row["code"].(string)
+		if want, ok := wantPrices[code]; ok && row["price"] != want {
+			t.Fatalf("row %s price=%#v want %d rows=%#v", code, row["price"], want, rows)
+		}
+	}
+}
+
+func TestSQLiteTableUpsertManyEmitsMultiRowSQL(t *testing.T) {
+	ctx := context.Background()
+	var upsertSQL []string
+	db, err := oro.Open(oro.Config{
+		Connections: map[string]oro.ConnectionConfig{
+			"default": {Driver: sqlite.Open(":memory:")},
+		},
+		LogLevel: oro.LogLevelDebug,
+		Logger: oro.LoggerFunc(func(ctx context.Context, event oro.LogEvent) {
+			if strings.Contains(event.SQL, " on conflict ") {
+				upsertSQL = append(upsertSQL, event.SQL)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_, err = db.Raw(`
+		create table products (
+			id integer primary key autoincrement,
+			code text not null unique,
+			price integer not null
+		)
+	`).Exec(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+		{"code": "Q001", "price": 1},
+		{"code": "Q002", "price": 2},
+	}, oro.ConflictBy("code").Update("price"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("got affected %d, want 2", affected)
+	}
+	if len(upsertSQL) != 1 {
+		t.Fatalf("got %d upsert statements, want 1: %#v", len(upsertSQL), upsertSQL)
+	}
+	if !strings.Contains(upsertSQL[0], "values (?, ?), (?, ?)") {
+		t.Fatalf("expected multi-row upsert SQL, got %q", upsertSQL[0])
+	}
+}
+
+func TestSQLiteModelUpsertManyUpdateAllSkipsCreatedAt(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+	oldCreated := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	oldUpdated := time.Date(2024, 1, 2, 4, 4, 5, 0, time.UTC)
+	newCreated := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	newUpdated := time.Date(2025, 1, 2, 4, 4, 5, 0, time.UTC)
+
+	created, err := db.Use[integrationProduct]().Create(ctx, &integrationProduct{
+		Model: oro.Model{CreatedAt: oldCreated, UpdatedAt: oldUpdated},
+		Code:  "M001",
+		Price: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Use[integrationProduct]().UpsertMany(ctx, []*integrationProduct{{
+		Model: oro.Model{CreatedAt: newCreated, UpdatedAt: newUpdated},
+		Code:  "M001",
+		Price: 99,
+	}, {
+		Model: oro.Model{CreatedAt: newCreated, UpdatedAt: newUpdated},
+		Code:  "M002",
+		Price: 88,
+	}}, oro.ConflictBy("Code").UpdateAll())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("got affected %d, want 2", affected)
+	}
+
+	found, err := db.Use[integrationProduct]().Where("Code", "M001").First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.ID != created.ID || found.Code != "M001" || found.Price != 99 {
+		t.Fatalf("unexpected updated model %#v", found)
+	}
+	if !found.CreatedAt.Equal(oldCreated) {
+		t.Fatalf("created_at changed: got %s want %s", found.CreatedAt, oldCreated)
+	}
+	if !found.UpdatedAt.Equal(newUpdated) {
+		t.Fatalf("updated_at not refreshed: got %s want %s", found.UpdatedAt, newUpdated)
+	}
+}
+
+func TestSQLiteTableUpsertManyUpdateMapAndDoNothing(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+	_, err := db.Table("products").CreateMany(ctx, []oro.Map{
+		{"code": "E001", "price": 10},
+		{"code": "E002", "price": 20},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+		{"code": "E001", "price": 100},
+		{"code": "E002", "price": 200},
+	}, oro.ConflictBy("code").UpdateMap(oro.Map{"price": oro.Increment(1)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("got affected %d, want 2", affected)
+	}
+	rows, err := db.Table("products").Select("code", "price").Where(oro.Field("code").In("E001", "E002")).OrderBy("code").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0]["price"] != int64(11) || rows[1]["price"] != int64(21) {
+		t.Fatalf("unexpected increment rows %#v", rows)
+	}
+
+	affected, err = db.Table("products").UpsertMany(ctx, []oro.Map{
+		{"code": "E001", "price": 999},
+		{"code": "E003", "price": 30},
+	}, oro.ConflictBy("code").DoNothing())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 1 {
+		t.Fatalf("got do-nothing affected %d, want 1", affected)
+	}
+	rows, err = db.Table("products").Select("code", "price").Where(oro.Field("code").In("E001", "E003")).OrderBy("code").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0]["price"] != int64(11) || rows[1]["price"] != int64(30) {
+		t.Fatalf("unexpected do-nothing rows %#v", rows)
+	}
+}
+
+func TestSQLiteTableUpsertManyRejectsMixedKeys(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+	_, err := db.Table("products").UpsertMany(ctx, []oro.Map{
+		{"code": "S001", "price": 1},
+		{"code": "S002"},
+	}, oro.ConflictBy("code").UpdateAll())
+	if err == nil {
+		t.Fatal("expected mixed-key upsert error")
 	}
 }
 
