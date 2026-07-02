@@ -520,7 +520,7 @@ func (d dialect) compileConflictUpdate(conflict oro.ConflictSpec, row oro.Map) (
 
 	fields := conflictUpdateColumns(conflict.Update, row)
 	if conflict.UpdateAll {
-		fields = conflictUpdateAllColumns(row, conflict.Columns)
+		fields = conflictUpdateAllColumns(row, conflict.Columns, conflict.UpdateExcept)
 	}
 	if len(fields) == 0 {
 		if len(conflict.Columns) == 0 {
@@ -988,12 +988,15 @@ func sortedKeys(row oro.Map) []string {
 	return keys
 }
 
-func conflictUpdateAllColumns(row oro.Map, conflictColumns []string) []string {
+func conflictUpdateAllColumns(row oro.Map, conflictColumns []string, exceptColumns []string) []string {
 	if len(row) == 0 {
 		return nil
 	}
 	conflictSet := map[string]bool{}
 	for _, column := range conflictColumns {
+		conflictSet[column] = true
+	}
+	for _, column := range exceptColumns {
 		conflictSet[column] = true
 	}
 	columns := make([]string, 0, len(row))

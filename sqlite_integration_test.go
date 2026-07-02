@@ -2182,6 +2182,91 @@ func TestSQLiteTableUpsertManyUpdateMapAndDoNothing(t *testing.T) {
 	}
 }
 
+func TestSQLiteTableUpsertManyUpdateAllExcept(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+	oldCreated := time.Date(2024, 3, 1, 1, 2, 3, 0, time.UTC)
+	newCreated := time.Date(2025, 3, 1, 1, 2, 3, 0, time.UTC)
+	if _, err := db.Table("products").Create(ctx, oro.Map{
+		"code":       "X001",
+		"price":      10,
+		"created_at": oldCreated,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{{
+		"code":       "X001",
+		"price":      99,
+		"created_at": newCreated,
+	}, {
+		"code":       "X002",
+		"price":      88,
+		"created_at": newCreated,
+	}}, oro.ConflictBy("code").UpdateAllExcept("created_at"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("got affected %d, want 2", affected)
+	}
+	rows, err := db.Table("products").Select("code", "price", "created_at").
+		Where(oro.Field("code").In("X001", "X002")).
+		OrderBy("code").
+		Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0]["price"] != int64(99) || rows[1]["price"] != int64(88) {
+		t.Fatalf("unexpected prices %#v", rows)
+	}
+	if !rows[0]["created_at"].(time.Time).Equal(oldCreated) {
+		t.Fatalf("created_at changed for conflict row: %#v", rows[0])
+	}
+	if !rows[1]["created_at"].(time.Time).Equal(newCreated) {
+		t.Fatalf("created_at missing for inserted row: %#v", rows[1])
+	}
+}
+
+func TestSQLiteModelUpsertManyUpdateAllExcept(t *testing.T) {
+	db, ctx := openSQLiteTestDB(t)
+	oldUpdated := time.Date(2024, 4, 1, 1, 2, 3, 0, time.UTC)
+	newUpdated := time.Date(2025, 4, 1, 1, 2, 3, 0, time.UTC)
+	created, err := db.Use[integrationProduct]().Create(ctx, &integrationProduct{
+		Model: oro.Model{UpdatedAt: oldUpdated},
+		Code:  "Y001",
+		Price: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	affected, err := db.Use[integrationProduct]().UpsertMany(ctx, []*integrationProduct{{
+		Model: oro.Model{UpdatedAt: newUpdated},
+		Code:  "Y001",
+		Price: 99,
+	}, {
+		Model: oro.Model{UpdatedAt: newUpdated},
+		Code:  "Y002",
+		Price: 88,
+	}}, oro.ConflictBy("Code").UpdateAllExcept("UpdatedAt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("got affected %d, want 2", affected)
+	}
+	found, err := db.Use[integrationProduct]().Where("Code", "Y001").First(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.ID != created.ID || found.Price != 99 {
+		t.Fatalf("unexpected updated model %#v", found)
+	}
+	if !found.UpdatedAt.Equal(oldUpdated) {
+		t.Fatalf("updated_at changed despite UpdateAllExcept: got %s want %s", found.UpdatedAt, oldUpdated)
+	}
+}
+
 func TestSQLiteTableUpsertManyRejectsMixedKeys(t *testing.T) {
 	db, ctx := openSQLiteTestDB(t)
 	_, err := db.Table("products").UpsertMany(ctx, []oro.Map{

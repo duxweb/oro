@@ -143,7 +143,7 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 }, oro.ConflictBy("code").UpdateAll())
 ```
 
-批量 upsert 中，`Update` / `UpdateAll` 会使用每一行自己的插入值。需要整条语句共享的常量或表达式时，使用 `UpdateMap`。
+批量 upsert 中，`Update` / `UpdateAll` 会使用每一行自己的插入值。需要整条语句共享的常量或表达式时，使用 `UpdateMap`。裸表查询没有 schema 魔法，如果某列要在新行插入、但冲突时不覆盖，使用 `UpdateAllExcept("created_at")`。
 
 ## 查询或创建
 

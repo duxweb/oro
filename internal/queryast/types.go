@@ -150,11 +150,12 @@ type OrderExpr struct {
 }
 
 type ConflictSpec struct {
-	Columns   []string
-	DoNothing bool
-	UpdateAll bool
-	Update    []string
-	UpdateMap internaltypes.Map
+	Columns      []string
+	DoNothing    bool
+	UpdateAll    bool
+	UpdateExcept []string
+	Update       []string
+	UpdateMap    internaltypes.Map
 }
 
 type LockMode int

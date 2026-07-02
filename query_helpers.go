@@ -197,6 +197,17 @@ func (builder ConflictBuilder) UpdateAll() WriteOption {
 	})
 }
 
+// UpdateAllExcept updates all writeable fields except the listed fields when a conflict occurs.
+func (builder ConflictBuilder) UpdateAllExcept(fields ...string) WriteOption {
+	return writeOptionFunc(func(options *writeOptions) {
+		options.conflict = &ConflictSpec{
+			Columns:      append([]string(nil), builder.fields...),
+			UpdateAll:    true,
+			UpdateExcept: append([]string(nil), fields...),
+		}
+	})
+}
+
 // UpdateMap updates explicit field values when a conflict occurs.
 func (builder ConflictBuilder) UpdateMap(values Map) WriteOption {
 	return writeOptionFunc(func(options *writeOptions) {
@@ -2313,6 +2324,16 @@ func convertModelConflict(schema *ModelSchema, conflict *ConflictSpec) (*Conflic
 		}
 		converted.Update = append(converted.Update, field.Column)
 	}
+	for _, fieldName := range conflict.UpdateExcept {
+		field, ok := schema.FieldByGo[fieldName]
+		if !ok {
+			return nil, &Error{Op: "conflict", Kind: ErrUnknownField, Model: schema.Name, Field: fieldName}
+		}
+		if field.Virtual {
+			return nil, &Error{Op: "conflict", Kind: ErrInvalidArgument, Model: schema.Name, Field: fieldName}
+		}
+		converted.UpdateExcept = append(converted.UpdateExcept, field.Column)
+	}
 	for fieldName, value := range conflict.UpdateMap {
 		field, ok := schema.FieldByGo[fieldName]
 		if !ok {
@@ -2335,13 +2356,13 @@ func resolveModelConflict(schema *ModelSchema, conflict *ConflictSpec, values []
 		return converted, err
 	}
 	if converted.UpdateAll {
-		converted.Update = modelUpdateAllColumns(schema, converted.Columns, values)
+		converted.Update = modelUpdateAllColumns(schema, converted.Columns, converted.UpdateExcept, values)
 		converted.UpdateAll = false
 	}
 	return converted, nil
 }
 
-func modelUpdateAllColumns(schema *ModelSchema, conflictColumns []string, values []Map) []string {
+func modelUpdateAllColumns(schema *ModelSchema, conflictColumns []string, exceptColumns []string, values []Map) []string {
 	if schema == nil || len(values) == 0 {
 		return nil
 	}
@@ -2351,6 +2372,9 @@ func modelUpdateAllColumns(schema *ModelSchema, conflictColumns []string, values
 	}
 	excluded := map[string]bool{}
 	for _, column := range conflictColumns {
+		excluded[column] = true
+	}
+	for _, column := range exceptColumns {
 		excluded[column] = true
 	}
 	for _, column := range schema.PrimaryColumns {

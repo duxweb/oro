@@ -80,6 +80,7 @@ product, err := db.Use[Product]().Upsert(ctx, &Product{
 | `ConflictBy(fields...).DoNothing()` | 冲突时不处理 |
 | `ConflictBy(fields...).Update(fields...)` | 冲突时用插入伪行更新指定字段 |
 | `ConflictBy(fields...).UpdateAll()` | 冲突时更新所有可写入的插入字段，但排除主键、冲突键和模型 `AutoCreate` 字段 |
+| `ConflictBy(fields...).UpdateAllExcept(fields...)` | 冲突时更新所有可写入的插入字段，并额外排除指定字段 |
 | `ConflictBy(fields...).UpdateMap(values)` | 冲突时使用指定 Map 更新，值是整条语句共享的常量或表达式 |
 
 模型查询使用 Go 字段名，裸表查询使用数据库列名。
@@ -94,6 +95,8 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 ```
 
 `UpsertMany` 会生成多行 upsert 语句，并在参数数量过大时自动分块，返回数据库的 `RowsAffected`。冲突时，`Update` 和 `UpdateAll` 会引用每一行自己的插入值（SQLite/PostgreSQL 为 `excluded.col`，MySQL/MariaDB 为 `VALUES(col)`），不会用第一行的值覆盖所有冲突行。
+
+裸表查询没有 schema：`UpdateAll` 会更新行内所有非冲突插入列。如果某个列需要在新行插入，但冲突时不覆盖，使用 `UpdateAllExcept("created_at")` 或其他显式排除列表。模型查询会自动跳过 `AutoCreate` 字段，也同样支持 `UpdateAllExcept`。
 
 同一次 `UpsertMany` 中所有 `Map` 必须拥有相同键集合，否则会返回参数错误，避免静默写入 `NULL` 或覆盖错误字段。`UpdateMap` 保持常量/表达式语义，适合 `oro.Increment(1)` 这类整条语句共享的更新。
 

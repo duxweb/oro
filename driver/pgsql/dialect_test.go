@@ -490,6 +490,52 @@ func TestCompileUpsert(t *testing.T) {
 	}
 }
 
+func TestCompileUpsertUpdateAllExcept(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.InsertAST{
+		Table: "products",
+		Values: []oro.Map{{
+			"code":       "A001",
+			"created_at": "old",
+			"price":      100,
+		}},
+		Conflict: oro.ConflictSpec{
+			Columns:      []string{"code"},
+			UpdateAll:    true,
+			UpdateExcept: []string{"created_at"},
+		},
+		Returning: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `insert into "products" ("code", "created_at", "price") values ($1, $2, $3) on conflict ("code") do update set "price" = excluded."price" returning *`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+}
+
+func TestCompileUpsertUpdateAllExceptNoop(t *testing.T) {
+	sql, err := (dialect{}).Compile(oro.InsertAST{
+		Table: "products",
+		Values: []oro.Map{{
+			"code":       "A001",
+			"created_at": "old",
+		}},
+		Conflict: oro.ConflictSpec{
+			Columns:      []string{"code"},
+			UpdateAll:    true,
+			UpdateExcept: []string{"created_at"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `insert into "products" ("code", "created_at") values ($1, $2) on conflict ("code") do update set "code" = "code"`
+	if sql.SQL != want {
+		t.Fatalf("got SQL %q, want %q", sql.SQL, want)
+	}
+}
+
 func TestCompileUpsertExpressions(t *testing.T) {
 	sql, err := (dialect{}).Compile(oro.InsertAST{
 		Table: "products",

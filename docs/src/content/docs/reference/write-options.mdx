@@ -55,6 +55,7 @@ Available strategies:
 | `ConflictBy(fields...).DoNothing()` | ignore conflicting rows |
 | `ConflictBy(fields...).Update(fields...)` | update the listed fields from the inserted pseudo-row |
 | `ConflictBy(fields...).UpdateAll()` | update all writable inserted fields except primary keys, conflict keys, and model `AutoCreate` fields |
+| `ConflictBy(fields...).UpdateAllExcept(fields...)` | update all writable inserted fields except explicit extra fields |
 | `ConflictBy(fields...).UpdateMap(values)` | update with explicit constants or expressions shared by the whole statement |
 
 ## UpsertMany
@@ -67,6 +68,8 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 ```
 
 `UpsertMany` emits multi-row upsert statements, split into parameter-safe batches when needed, and returns `RowsAffected`. On conflict, `Update` and `UpdateAll` use each row's own inserted value (`excluded.col` on SQLite/PostgreSQL, `VALUES(col)` on MySQL/MariaDB); they do not reuse the first row's value.
+
+Table queries are schema-free: `UpdateAll` updates every inserted non-conflict column present in the row. Use `UpdateAllExcept("created_at")` or another explicit list when a table column should be inserted for new rows but not overwritten on conflicts. Model queries already skip `AutoCreate` fields and also honor `UpdateAllExcept`.
 
 All maps in one `UpsertMany` call must have the same keys. `UpdateMap` keeps constant/expression semantics for the whole statement, which is useful for values like `oro.Increment(1)`.
 

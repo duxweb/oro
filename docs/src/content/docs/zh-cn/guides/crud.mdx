@@ -101,6 +101,7 @@ saved, err := db.Use[Product]().Upsert(ctx, product,
 oro.ConflictBy("Code").DoNothing()
 oro.ConflictBy("Code").Update("Price")
 oro.ConflictBy("Code").UpdateAll()
+oro.ConflictBy("Code").UpdateAllExcept("UpdatedAt")
 oro.ConflictBy("Code").UpdateMap(oro.Map{"UpdatedAt": oro.Raw("CURRENT_TIMESTAMP")})
 ```
 

@@ -112,7 +112,7 @@ affected, err := db.Table("products").UpsertMany(ctx, []oro.Map{
 }, oro.ConflictBy("code").UpdateAll())
 ```
 
-For bulk upsert, `Update` / `UpdateAll` use each row's own inserted values. Use `UpdateMap` when the conflict update should be a shared constant or expression for the whole statement.
+For bulk upsert, `Update` / `UpdateAll` use each row's own inserted values. Use `UpdateMap` when the conflict update should be a shared constant or expression for the whole statement. Table queries have no schema magic, so use `UpdateAllExcept("created_at")` when a column should be inserted but not overwritten on conflicts.
 
 ## First or create
 
