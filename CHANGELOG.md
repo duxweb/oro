@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-23
+
 ### Changed
 
 - Require stable Go 1.27.3 in the main and benchmark modules, CI, and release builds; update English and Chinese setup instructions.
@@ -16,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `FirstOrCreate` now uses uncached primary reads for model, table, and typed table queries, preventing stale cache entries or replica lag from returning `ErrScan` after a successful insert.
-
 
 ## [0.1.2] - 2026-07-02
 
