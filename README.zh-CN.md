@@ -23,7 +23,7 @@
   <a href="https://github.com/duxweb/oro/actions/workflows/pages.yml"><img alt="Docs" src="https://github.com/duxweb/oro/actions/workflows/pages.yml/badge.svg"></a>
   <a href="https://pkg.go.dev/github.com/duxweb/oro"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/duxweb/oro.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.27+-00ADD8.svg">
+  <img alt="Go" src="https://img.shields.io/badge/go-1.27.3+-00ADD8.svg">
 </p>
 
 ---
@@ -54,7 +54,7 @@ db.Raw("select ...")   // 原生 SQL
 
 Oro 目前是 **pre-1.0 / public preview candidate**。核心 ORM、结构同步、SQLite/MySQL/PostgreSQL 适配器、关联加载、事务、分页、表前缀、Hooks/Events、缓存、租户、分片、示例、性能基准和文档站点都已实现。
 
-项目目标是 **Go 1.27+**，因为公开 API 设计依赖方法级泛型。当前模块可能暂时使用 Go 1.27 RC 版本，直到所有环境都可用稳定版工具链。
+项目要求 **Go 1.27.3+**，因为公开 API 使用方法级泛型。开发、CI 和发布均使用 Go 1.27.3 正式版工具链。
 
 ## 安装
 

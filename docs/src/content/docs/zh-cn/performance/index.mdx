@@ -24,6 +24,8 @@ description: Oro 与主流 Go ORM/SQL ORM 在 SQLite、MySQL、PostgreSQL 下的
 
 MySQL 和 PostgreSQL 均使用本地 `duxorm` 数据库。网络数据库结果会受到数据库配置、连接池、后台负载和缓存状态影响，应按相对趋势阅读。
 
+以下数据保留当时 Go 1.27rc1 的测试环境，未重新测量。当前复跑命令已改用 Go 1.27.3 正式版。
+
 ## 对比库版本
 
 Benchmark 位于独立 Go module：`benchmarks/ormbench`。
@@ -56,7 +58,7 @@ Benchmark 位于独立 Go module：`benchmarks/ormbench`。
 SQLite 使用 `mattn/go-sqlite3`：
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -65,7 +67,7 @@ ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
 MySQL：
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=mysql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -74,7 +76,7 @@ ORO_BENCH_DRIVER=mysql \
 PostgreSQL：
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=pgsql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0

@@ -1,6 +1,6 @@
 module github.com/duxweb/oro/benchmarks/ormbench
 
-go 1.27rc1
+go 1.27.3
 
 require (
 	github.com/duxweb/oro v0.0.0

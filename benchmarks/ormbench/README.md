@@ -38,7 +38,7 @@ Oro root module and adapter packages do not import concrete SQL driver implement
 SQLite fair-driver run:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -47,7 +47,7 @@ ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
 MySQL:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=mysql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -56,7 +56,7 @@ ORO_BENCH_DRIVER=mysql \
 PostgreSQL:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=pgsql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -134,3 +134,5 @@ The tables report the median from 10 runs.
 - SQLite driver choice has a large impact; published SQLite results use `mattn/go-sqlite3` for every library.
 - MySQL and PostgreSQL runs use the local `duxorm` database by default and reset `products` / `oro_schema` for each sub-benchmark.
 - Oro and GORM both run with skipped default write transactions for fair high-throughput comparison.
+
+The recorded results above were measured with Go 1.27rc1. Rerun commands now use stable Go 1.27.3; the historical numbers have not been remeasured.

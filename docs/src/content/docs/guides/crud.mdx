@@ -125,7 +125,7 @@ row, created, err := db.Table("products").FirstOrCreate(ctx, oro.Map{
 }, "code")
 ```
 
-If a soft-deleted row still owns the unique key, the visible lookup can miss it while the insert is ignored by the unique constraint; Oro returns `ErrScan` for that placeholder case. Existing query conditions are also preserved for both lookup reads, so call `FirstOrCreate` on a base query unless the extra filters are intentional.
+If a soft-deleted row still owns the unique key, the visible lookup can miss it while the insert is ignored by the unique constraint; Oro returns `ErrScan` for that placeholder case. Both lookup reads use the primary connection and bypass result caching to avoid stale cache entries and replica lag. Existing query conditions are also preserved for both lookup reads, so call `FirstOrCreate` on a base query unless the extra filters are intentional.
 
 ## Batch writes
 

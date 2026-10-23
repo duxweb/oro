@@ -1,9 +1,8 @@
 # Repository guide for AI agents
 
 Oro is a generic-first ORM for Go (module `github.com/duxweb/oro`). No code
-generation. Requires **Go 1.27+** (the API uses generic methods, e.g.
-`db.Use[T]()`), so go.mod pins `go 1.27rc1` until the stable toolchain is broadly
-available.
+generation. Requires **Go 1.27.3+** (the API uses generic methods, e.g.
+`db.Use[T]()`); go.mod, CI, and release builds use the stable Go 1.27.3 toolchain.
 
 ## Build / test / format (run before proposing changes)
 

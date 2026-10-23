@@ -123,7 +123,7 @@ product, created, err := db.Use[Product]().FirstOrCreate(ctx, &Product{
 }, "Code")
 ```
 
-`FirstOrCreate` is the get-or-create helper for unique keys. It performs an initial read, inserts with `DO NOTHING` only when missing, then reads the row back, so concurrent callers return the same row instead of creating duplicates. Use Go field names for models and database columns for table queries.
+`FirstOrCreate` is the get-or-create helper for unique keys. It performs an initial read, inserts with `DO NOTHING` only when missing, then reads the row back, so concurrent callers return the same row instead of creating duplicates. Use Go field names for models and database columns for table queries. Both lookup reads use the primary connection and bypass query result caching.
 
 The conflict fields or columns must correspond to a unique constraint. A soft-deleted placeholder that still owns the unique key returns `ErrScan` because the visible read cannot see it and the insert is skipped. Existing query conditions are preserved for both lookup reads, so extra filters can also make the read-back miss the inserted row.
 

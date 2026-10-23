@@ -685,6 +685,7 @@ func (query *ModelQuery[T]) Upsert(ctx context.Context, model *T, options ...Wri
 // FirstOrCreate returns the first row matching conflictFields or creates it.
 // Existing query conditions are preserved for both lookup reads, so call it on a
 // base query unless extra filters are intentional.
+// Both reads use the primary connection and bypass query result caching.
 func (query *ModelQuery[T]) FirstOrCreate(ctx context.Context, model *T, conflictFields ...string) (*T, bool, error) {
 	if query.allShards {
 		return nil, false, &Error{Op: "first_or_create", Kind: ErrShardRequired}
@@ -787,7 +788,8 @@ func (query *ModelQuery[T]) modelFirstOrCreateLookup(schema *ModelSchema, model 
 	if err != nil {
 		return nil, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Model: schema.Name, Table: schema.Table, Cause: err}
 	}
-	lookup := query
+	lookup := query.UsePrimary()
+	lookup.spec.Cache = CacheSpec{}
 	for _, fieldName := range fields {
 		field, ok := schema.FieldByGo[fieldName]
 		if !ok {

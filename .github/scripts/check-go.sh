@@ -2,13 +2,6 @@
 set -euo pipefail
 
 go version
-case "$(go env GOVERSION)" in
-  go1.27*) ;;
-  *)
-    echo "Go 1.27 is required, got $(go env GOVERSION)" >&2
-    exit 1
-    ;;
-esac
 
 go mod download
 

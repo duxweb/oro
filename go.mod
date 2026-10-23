@@ -1,6 +1,6 @@
 module github.com/duxweb/oro
 
-go 1.27rc1
+go 1.27.3
 
 require (
 	github.com/go-sql-driver/mysql v1.10.0

@@ -592,6 +592,7 @@ func (query *TableQuery) Upsert(ctx context.Context, values Map, options ...Writ
 // FirstOrCreate returns the first row matching conflictColumns or creates it.
 // Existing query conditions are preserved for both lookup reads, so call it on a
 // base query unless extra filters are intentional.
+// Both reads use the primary connection and bypass query result caching.
 func (query *TableQuery) FirstOrCreate(ctx context.Context, values Map, conflictColumns ...string) (Map, bool, error) {
 	if query.allShards {
 		return nil, false, &Error{Op: "first_or_create", Kind: ErrShardRequired, Table: query.spec.Table, Field: query.spec.ShardGroup}
@@ -599,7 +600,8 @@ func (query *TableQuery) FirstOrCreate(ctx context.Context, values Map, conflict
 	if len(values) == 0 || len(conflictColumns) == 0 {
 		return nil, false, &Error{Op: "first_or_create", Kind: ErrInvalidArgument, Table: query.spec.Table}
 	}
-	lookup := query
+	lookup := query.UsePrimary()
+	lookup.spec.Cache = CacheSpec{}
 	for _, column := range conflictColumns {
 		value, ok := values[column]
 		if !ok || value == nil {

@@ -23,7 +23,7 @@
   <a href="https://github.com/duxweb/oro/actions/workflows/pages.yml"><img alt="Docs" src="https://github.com/duxweb/oro/actions/workflows/pages.yml/badge.svg"></a>
   <a href="https://pkg.go.dev/github.com/duxweb/oro"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/duxweb/oro.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.27+-00ADD8.svg">
+  <img alt="Go" src="https://img.shields.io/badge/go-1.27.3+-00ADD8.svg">
 </p>
 
 ---
@@ -54,7 +54,7 @@ db.Raw("select ...")   // raw SQL
 
 Oro is a **pre-1.0 public preview candidate**. The core ORM, schema sync, SQLite/MySQL/PostgreSQL adapters, relation loading, transactions, pagination, table prefix handling, hooks/events, cache, tenancy, sharding, examples, benchmarks, and documentation site are implemented.
 
-The project targets **Go 1.27+** because the API is designed around method-level generics. The current module may use a Go 1.27 release-candidate version until the stable toolchain is available in all environments.
+The project requires **Go 1.27.3+** because the API uses method-level generics. Development, CI, and release builds use the stable Go 1.27.3 toolchain.
 
 ## Install
 

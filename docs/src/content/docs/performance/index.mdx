@@ -24,6 +24,8 @@ The main tables report the **median** from 10 consecutive `go test -bench` runs,
 
 MySQL and PostgreSQL use the local `duxorm` database. Networked database results are affected by database configuration, connection pooling, background load, and cache state.
 
+The results below were measured with Go 1.27rc1 and retain that original environment. Current rerun commands use stable Go 1.27.3; the recorded numbers have not been remeasured.
+
 ## Versions
 
 The benchmark lives in the standalone Go module `benchmarks/ormbench`.
@@ -56,7 +58,7 @@ The benchmark lives in the standalone Go module `benchmarks/ormbench`.
 SQLite with `mattn/go-sqlite3`:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -65,7 +67,7 @@ ORO_BENCH_DRIVER=sqlite ORO_BENCH_SQLITE_DRIVER=mattn \
 MySQL:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=mysql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
@@ -74,7 +76,7 @@ ORO_BENCH_DRIVER=mysql \
 PostgreSQL:
 
 ```bash
-source ~/.gvm/scripts/gvm && gvm use go1.27rc1
+source ~/.gvm/scripts/gvm && gvm use go1.27.3
 cd benchmarks/ormbench
 ORO_BENCH_DRIVER=pgsql \
   go test -bench=. -benchmem -run '^$' -benchtime=1s -count=10 -timeout=0
